@@ -1,0 +1,37 @@
+{
+  "name": "moco-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Moco \u2014 per-minute paid social calling backend (SPRS INFOTECH)",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "worker:tick": "node src/workers/tick.worker.js",
+    "worker:payout": "node src/workers/payout.worker.js",
+    "worker:notification": "node src/workers/notification.worker.js",
+    "migrate": "node src/db/migrate.js up",
+    "migrate:down": "node src/db/migrate.js down",
+    "seed": "node src/db/seed.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js"
+  },
+  "dependencies": {
+    "agora-token": "^2.0.5",
+    "bullmq": "^5.34.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "ioredis": "^5.4.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1",
+    "pino": "^9.6.0",
+    "socket.io": "^4.8.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "pino-pretty": "^13.0.0"
+  }
+}

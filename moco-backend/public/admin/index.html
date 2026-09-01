@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moco Admin</title>
+  <!-- Inline so the console makes no extra request and cannot 404. -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%237c4dff'/%3E%3Ctext x='16' y='23' font-family='sans-serif' font-size='19' font-weight='bold' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+
+<!-- Login. Reuses the ordinary OTP flow; the admin allow-list is enforced
+     server-side, so signing in here grants nothing extra by itself. -->
+<div id="login" class="login-wrap">
+  <div class="login-card">
+    <div class="brand">
+      <div class="brand-mark">M</div>
+      <div class="brand-name">Moco Admin</div>
+    </div>
+    <p class="login-sub">Sign in with an admin phone number.</p>
+
+    <div id="login-error" class="error-msg" hidden></div>
+
+    <form id="phone-form">
+      <label for="phone">Phone number</label>
+      <input id="phone" type="tel" placeholder="+919876543210" autocomplete="tel" required>
+      <button class="btn-primary" type="submit">Send code</button>
+    </form>
+
+    <form id="code-form" hidden>
+      <label for="code">Verification code</label>
+      <input id="code" inputmode="numeric" maxlength="8" placeholder="000000" required>
+      <button class="btn-primary" type="submit">Verify</button>
+      <button class="btn-ghost" type="button" id="back-btn" style="width:100%;margin-top:8px">Use a different number</button>
+    </form>
+
+    <p class="hint" id="login-hint"></p>
+  </div>
+</div>
+
+<!-- Console -->
+<div id="app" class="shell" hidden>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">M</div>
+      <div class="brand-name">Moco Admin</div>
+    </div>
+
+    <nav>
+      <button class="nav-item active" data-view="overview">Overview</button>
+      <button class="nav-item" data-view="kyc">
+        KYC <span class="nav-count" id="count-kyc" data-count="0"></span>
+      </button>
+      <button class="nav-item" data-view="payouts">
+        Payouts <span class="nav-count" id="count-payouts" data-count="0"></span>
+      </button>
+      <button class="nav-item" data-view="reports">
+        Reports <span class="nav-count" id="count-reports" data-count="0"></span>
+      </button>
+      <button class="nav-item" data-view="reconcile">Reconcile</button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <strong id="admin-phone"></strong>
+      <button class="btn-ghost btn-sm" id="logout-btn" style="margin-top:8px;width:100%">Sign out</button>
+    </div>
+  </aside>
+
+  <main>
+    <!-- Overview -->
+    <section id="view-overview">
+      <div class="view-head">
+        <div>
+          <h1>Overview</h1>
+          <p class="view-sub">Live platform state and today's totals.</p>
+        </div>
+        <button class="btn-ghost btn-sm" data-refresh="overview">Refresh</button>
+      </div>
+      <div class="stat-grid" id="stat-grid"></div>
+    </section>
+
+    <!-- KYC -->
+    <section id="view-kyc" hidden>
+      <div class="view-head">
+        <div>
+          <h1>KYC queue</h1>
+          <p class="view-sub">A listener cannot go online or appear in discovery until approved.</p>
+        </div>
+        <button class="btn-ghost btn-sm" data-refresh="kyc">Refresh</button>
+      </div>
+      <div class="table-wrap" id="kyc-table"></div>
+    </section>
+
+    <!-- Payouts -->
+    <section id="view-payouts" hidden>
+      <div class="view-head">
+        <div>
+          <h1>Withdrawals</h1>
+          <p class="view-sub">Approving queues the payout worker, which debits earnings and pays out.</p>
+        </div>
+        <button class="btn-ghost btn-sm" data-refresh="payouts">Refresh</button>
+      </div>
+      <div class="table-wrap" id="payouts-table"></div>
+    </section>
+
+    <!-- Reports -->
+    <section id="view-reports" hidden>
+      <div class="view-head">
+        <div>
+          <h1>Reports</h1>
+          <p class="view-sub">Most-reported users first. Suspending takes effect immediately.</p>
+        </div>
+        <button class="btn-ghost btn-sm" data-refresh="reports">Refresh</button>
+      </div>
+      <div class="table-wrap" id="reports-table"></div>
+    </section>
+
+    <!-- Reconcile -->
+    <section id="view-reconcile" hidden>
+      <div class="view-head">
+        <div>
+          <h1>Reconciliation</h1>
+          <p class="view-sub">Every wallet balance must equal the sum of its ledger. Anything listed here means coins moved without a ledger row.</p>
+        </div>
+        <button class="btn-ghost btn-sm" data-refresh="reconcile">Refresh</button>
+      </div>
+      <div id="reconcile-body"></div>
+    </section>
+  </main>
+</div>
+
+<script src="admin.js"></script>
+</body>
+</html>

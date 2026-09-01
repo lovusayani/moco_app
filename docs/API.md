@@ -179,6 +179,10 @@ a listener cannot stack requests beyond what they have earned.
 Gated by an allow-list of phone numbers in `ADMIN_PHONES`, not a database role,
 so a compromised user row cannot escalate.
 
+A web console for these endpoints is served at `/admin` (see the backend
+README). It is static HTML/CSS/JS with no build step; every request it makes is
+authenticated and re-checked against the allow-list server-side.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/admin/kyc` | Pending KYC queue |

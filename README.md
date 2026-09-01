@@ -11,6 +11,7 @@ live in a single Flutter codebase.
 | Path | Contents | Status |
 | --- | --- | --- |
 | [`moco-backend/`](moco-backend/) | Node.js API, billing engine, workers | Built |
+| [`moco-backend/public/admin/`](moco-backend/public/admin/) | Admin console, served at `/admin` | Built |
 | [`docs/API.md`](docs/API.md) | Full API and WebSocket contract | Built |
 | `moco-app/` | Flutter client (GetX) | Not started |
 
@@ -51,9 +52,12 @@ npm start
 ## Status
 
 **Backend — built and tested.** Auth, users, wallet, discovery, call lifecycle,
-billing engine, chat, payouts, safety and admin. 54 tests run against real
+billing engine, chat, payouts, safety and admin. 58 tests run against real
 Postgres and Redis, covering concurrent billing, replayed payments and
 overdraft prevention.
+
+**Admin console — built.** KYC approvals, withdrawals, reports, live stats and
+the wallet-vs-ledger reconciliation check, served by the API at `/admin`.
 
 **Design (Claude Design).** Batch 1 (onboarding & discovery) complete. Batches
 2–4 — calling & wallet, listener mode & chat, safety & system states — still to

@@ -33,6 +33,26 @@ npm run worker:tick           # billing worker, in a second terminal
 Sign in without an SMS gateway: `SMS_PROVIDER=log` prints the OTP to the log,
 and outside production any account accepts `OTP_FIXED_CODE` (default `123456`).
 
+## Admin console
+
+A dependency-free web console is served by the API itself at
+**`http://localhost:3000/admin`** — no build step and no second deployment.
+
+Grant yourself access by putting your phone number in `ADMIN_PHONES`, then sign
+in with the ordinary OTP flow:
+
+```bash
+ADMIN_PHONES=+919876543210 npm start
+```
+
+It covers the KYC queue, withdrawal approvals, the report queue, live platform
+stats, and the wallet-vs-ledger reconciliation check. Serving the page grants
+nothing on its own — every request it makes is re-checked server-side against
+the allow-list, so a non-admin who loads it simply gets refused.
+
+In production nginx serves `/admin` through the same proxy; restrict it by IP
+in `nginx/moco.conf` if you want it off the public internet entirely.
+
 ### Tests
 
 ```bash
@@ -113,6 +133,8 @@ src/
 ├── integrations/agora, sms, fcm, payment.gateway
 ├── middleware/  auth, error, rateLimit, validate
 └── utils/       constants.js (single source of truth), logger, errors
+
+public/admin/    the admin console (plain HTML/CSS/JS, no build step)
 ```
 
 Workers run as separate PM2 processes so a slow job never blocks an API

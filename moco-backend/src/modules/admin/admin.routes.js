@@ -182,6 +182,7 @@ router.get(
           WHERE created_at >= date_trunc('day', now())) AS platform_revenue_today,
         (SELECT COALESCE(SUM(delta), 0)::bigint FROM coin_ledger
           WHERE reason = 'topup' AND created_at >= date_trunc('day', now())) AS coins_purchased_today,
+        (SELECT count(*)::int FROM listener_profiles WHERE kyc_status = 'pending') AS pending_kyc,
         (SELECT count(*)::int FROM payouts WHERE status = 'requested') AS pending_payouts,
         (SELECT count(*)::int FROM reports WHERE status IN ('open', 'reviewing')) AS open_reports
     `);

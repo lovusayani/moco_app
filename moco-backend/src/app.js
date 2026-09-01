@@ -1,5 +1,6 @@
 'use strict';
 
+const path = require('path');
 const express = require('express');
 const helmet = require('helmet');
 const env = require('./config/env');
@@ -37,6 +38,14 @@ function createApp() {
 
   app.use(express.json({ limit: '1mb' }));
 
+  /**
+   * The admin console is plain static files served from the API's own origin,
+   * so it needs no CORS setup, no build step and no second deployment. Every
+   * request it makes is still authenticated and re-checked against the admin
+   * allow-list server-side; serving the page grants nothing on its own.
+   */
+  app.use('/admin', express.static(path.join(__dirname, '..', 'public', 'admin')));
+
   app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
 
   /** Client bootstrap: rates, packs and enabled languages in one call. */
@@ -50,6 +59,9 @@ function createApp() {
       freeTrialSeconds: FREE_TRIAL_SECONDS,
       languages: ['en', 'hi', 'te'],
       minAppVersion: process.env.MIN_APP_VERSION || '1.0.0',
+      // Surfaced so local tooling can show the fixed code. env.otp.fixedCode is
+      // null in production, so this never leaks a real OTP.
+      devOtp: env.otp.fixedCode,
     });
   });
 

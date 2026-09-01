@@ -320,6 +320,59 @@ test('the wallet reports affordable minutes for both call types', async () => {
   assert.equal(result.body.videoMinutes, 3);
 });
 
+test('the admin console is served as static files', async () => {
+  const page = await fetch(`${baseUrl}/admin/`);
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get('content-type'), /text\/html/);
+
+  const html = await page.text();
+  assert.match(html, /Moco Admin/);
+
+  // Its assets must resolve too, or the page loads blank.
+  for (const asset of ['admin.css', 'admin.js']) {
+    const response = await fetch(`${baseUrl}/admin/${asset}`);
+    assert.equal(response.status, 200, `${asset} must be served`);
+  }
+});
+
+test('the console is a static page, not a way around admin auth', async () => {
+  // Serving the HTML grants nothing: the API behind it still refuses.
+  assert.equal((await call('GET', '/api/admin/stats')).status, 401);
+  assert.equal((await call('GET', '/api/admin/kyc')).status, 401);
+});
+
+test('config exposes the dev OTP outside production and never in it', async () => {
+  const env = require('../src/config/env');
+  const result = await call('GET', '/api/config');
+  assert.equal(result.body.devOtp, env.otp.fixedCode);
+  // env.otp.fixedCode is hardcoded to null when NODE_ENV=production, so the
+  // real code can never be published through this endpoint.
+  assert.equal(env.isProduction, false);
+});
+
+test('admin stats include the pending KYC count the console badges', async () => {
+  await resetDb();
+  const admin = await createUser({ balance: 0 });
+  await db.query('UPDATE users SET phone = $2 WHERE id = $1', [admin.id, '+919000000778']);
+  process.env.ADMIN_PHONES = '+919000000778';
+  const token = signToken({ ...admin, phone: '+919000000778' });
+
+  const before = await call('GET', '/api/admin/stats', { token });
+  assert.equal(before.status, 200);
+  assert.equal(before.body.pending_kyc, 0);
+
+  const listener = await createUser({ listener: true });
+  await db.query('UPDATE listener_profiles SET kyc_status = $2 WHERE user_id = $1', [
+    listener.id,
+    KYC_STATUS.PENDING,
+  ]);
+
+  const after = await call('GET', '/api/admin/stats', { token });
+  assert.equal(after.body.pending_kyc, 1);
+
+  delete process.env.ADMIN_PHONES;
+});
+
 test('the admin reconciliation check reports a balanced ledger', async () => {
   await resetDb();
   const admin = await createUser({ balance: 100 });

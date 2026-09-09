@@ -1,0 +1,637 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../core/config/env.dart';
+import '../../core/errors/api_exception.dart';
+import '../../core/providers.dart';
+import '../../core/theme/moco_colors.dart';
+import '../../core/theme/moco_spacing.dart';
+import '../../core/widgets/moco_avatar.dart';
+import '../../core/widgets/moco_background.dart';
+import '../../core/widgets/moco_states.dart';
+import '../../core/widgets/moco_surfaces.dart';
+import '../../shared/models/listener.dart';
+import 'listener_profile_controller.dart';
+
+/// Content tabs.
+///
+/// The backend has no posts/photos/voice endpoints at all, so each tab renders
+/// an honest empty state rather than invented content. The tab structure exists
+/// so the screen matches the approved design and a later phase can fill it in.
+enum ProfileTab { shots, posts, photos, voice }
+
+class ListenerProfileScreen extends ConsumerStatefulWidget {
+  const ListenerProfileScreen({super.key, required this.listenerId});
+
+  final int? listenerId;
+
+  @override
+  ConsumerState<ListenerProfileScreen> createState() =>
+      _ListenerProfileScreenState();
+}
+
+class _ListenerProfileScreenState extends ConsumerState<ListenerProfileScreen> {
+  final _scrollController = ScrollController();
+  ProfileTab _tab = ProfileTab.shots;
+  bool _compactHeader = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    final shouldCompact = _scrollController.offset > 220;
+    if (shouldCompact != _compactHeader) {
+      setState(() => _compactHeader = shouldCompact);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final id = widget.listenerId;
+
+    if (id == null) {
+      return const Scaffold(
+        body: MocoErrorState(
+          title: 'Listener not found',
+          message: 'That profile link looks invalid.',
+          icon: Icons.person_off_rounded,
+        ),
+      );
+    }
+
+    final profile = ref.watch(listenerProfileProvider(id));
+
+    return Scaffold(
+      body: MocoBackground(
+        ambience: MocoAmbience.rich,
+        child: profile.when(
+          loading: () => const _ProfileSkeleton(),
+          error: (error, _) {
+            final mapped = ApiErrorMapper.from(error);
+            return SafeArea(
+              child: MocoErrorState(
+                key: const Key('listener_profile_error'),
+                message: mapped.message,
+                onRetry: () => ref.invalidate(listenerProfileProvider(id)),
+              ),
+            );
+          },
+          data: (listener) => _ProfileBody(
+            listener: listener,
+            scrollController: _scrollController,
+            compactHeader: _compactHeader,
+            tab: _tab,
+            onTabChanged: (t) => setState(() => _tab = t),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileBody extends ConsumerWidget {
+  const _ProfileBody({
+    required this.listener,
+    required this.scrollController,
+    required this.compactHeader,
+    required this.tab,
+    required this.onTabChanged,
+  });
+
+  final ListenerDetail listener;
+  final ScrollController scrollController;
+  final bool compactHeader;
+  final ProfileTab tab;
+  final ValueChanged<ProfileTab> onTabChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(authControllerProvider).user;
+    final similar = ref.watch(similarListenersProvider(listener));
+
+    return Stack(
+      children: [
+        ListView(
+          controller: scrollController,
+          padding: EdgeInsets.zero,
+          children: [
+            _Hero(listener: listener),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: MocoSpacing.screenPadding,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: MocoSpacing.lg),
+                  _ActionRow(listenerId: listener.id),
+                  const SizedBox(height: MocoSpacing.xl),
+                  if ((listener.bio ?? '').trim().isNotEmpty) ...[
+                    const MocoSectionHeader(title: 'About'),
+                    const SizedBox(height: MocoSpacing.sm),
+                    Text(
+                      listener.bio!.trim(),
+                      style: const TextStyle(
+                        color: MocoColors.textSecondary,
+                        fontSize: 14.5,
+                        height: 1.55,
+                      ),
+                    ),
+                    const SizedBox(height: MocoSpacing.xl),
+                  ],
+                  if (listener.languages.isNotEmpty) ...[
+                    const MocoSectionHeader(title: 'Speaks'),
+                    const SizedBox(height: MocoSpacing.sm),
+                    Wrap(
+                      spacing: MocoSpacing.sm,
+                      runSpacing: MocoSpacing.sm,
+                      children: listener.languages
+                          .map((l) => MocoChip(label: _languageLabel(l)))
+                          .toList(),
+                    ),
+                    const SizedBox(height: MocoSpacing.xl),
+                  ],
+                  _ProfileTabs(current: tab, onChanged: onTabChanged),
+                  const SizedBox(height: MocoSpacing.lg),
+                  // Honest empty content: no backend exists for these tabs.
+                  SizedBox(
+                    height: 180,
+                    child: MocoEmptyState(
+                      key: Key('profile_tab_${tab.name}'),
+                      icon: Icons.photo_library_outlined,
+                      title: 'Nothing here yet',
+                      message: '${_tabLabel(tab)} arrive in a later phase.',
+                    ),
+                  ),
+                  const SizedBox(height: MocoSpacing.xl),
+                  const MocoSectionHeader(title: 'Similar listeners'),
+                  const SizedBox(height: MocoSpacing.md),
+                  SizedBox(
+                    height: 104,
+                    child: similar.when(
+                      loading: () => const Row(
+                        children: [
+                          MocoSkeleton(width: 68, height: 68, radius: 34),
+                          SizedBox(width: MocoSpacing.md),
+                          MocoSkeleton(width: 68, height: 68, radius: 34),
+                          SizedBox(width: MocoSpacing.md),
+                          MocoSkeleton(width: 68, height: 68, radius: 34),
+                        ],
+                      ),
+                      error: (_, __) => const SizedBox.shrink(),
+                      data: (items) => items.isEmpty
+                          ? const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'No similar listeners online right now.',
+                                style: TextStyle(
+                                  color: MocoColors.textMuted,
+                                  fontSize: 13.5,
+                                ),
+                              ),
+                            )
+                          : ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: items.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: MocoSpacing.md),
+                              itemBuilder: (context, i) {
+                                final item = items[i];
+                                return GestureDetector(
+                                  onTap: () =>
+                                      context.replace('/listener/${item.id}'),
+                                  child: Column(
+                                    children: [
+                                      MocoAvatar(
+                                        name: item.name,
+                                        imageUrl: item.avatarUrl,
+                                        size: 64,
+                                        ring: item.isAvailable,
+                                      ),
+                                      const SizedBox(height: 6),
+                                      SizedBox(
+                                        width: 68,
+                                        child: Text(
+                                          item.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                            color: MocoColors.textSecondary,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ),
+                  const SizedBox(height: 140),
+                ],
+              ),
+            ),
+          ],
+        ),
+
+        // Compact header, revealed on scroll.
+        AnimatedOpacity(
+          opacity: compactHeader ? 1 : 0,
+          duration: MocoDuration.tab,
+          child: IgnorePointer(
+            ignoring: !compactHeader,
+            child: _CompactHeader(listener: listener),
+          ),
+        ),
+
+        // Back control stays available at any scroll position.
+        Positioned(
+          top: MediaQuery.of(context).padding.top + MocoSpacing.sm,
+          left: MocoSpacing.md,
+          child: MocoIconButton(
+            key: const Key('listener_profile_back'),
+            icon: Icons.arrow_back_rounded,
+            onPressed: () => context.pop(),
+          ),
+        ),
+
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: _CallBar(
+            listener: listener,
+            freeCall: user?.freeTrialAvailable ?? false,
+          ),
+        ),
+      ],
+    );
+  }
+
+  static String _languageLabel(String code) => switch (code) {
+    'hi' => 'हिंदी',
+    'te' => 'తెలుగు',
+    'en' => 'English',
+    _ => code,
+  };
+
+  static String _tabLabel(ProfileTab tab) => switch (tab) {
+    ProfileTab.shots => 'Shots',
+    ProfileTab.posts => 'Posts',
+    ProfileTab.photos => 'Photos',
+    ProfileTab.voice => 'Voice notes',
+  };
+}
+
+class _Hero extends StatelessWidget {
+  const _Hero({required this.listener});
+
+  final ListenerDetail listener;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        top: MediaQuery.of(context).padding.top + 64,
+        left: MocoSpacing.screenPadding,
+        right: MocoSpacing.screenPadding,
+      ),
+      child: Column(
+        children: [
+          MocoAvatar(
+            name: listener.name,
+            imageUrl: listener.avatarUrl,
+            size: 128,
+            ring: listener.isAvailable,
+          ),
+          const SizedBox(height: MocoSpacing.lg),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(
+                  listener.name,
+                  key: const Key('profile_hero_name'),
+                  style: const TextStyle(
+                    color: MocoColors.textPrimary,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const MocoVerifiedBadge(size: 20),
+            ],
+          ),
+          const SizedBox(height: MocoSpacing.sm),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              MocoOnlineDot(online: listener.isAvailable),
+              const SizedBox(width: 6),
+              Text(
+                listener.isBusy
+                    ? 'On another call'
+                    : listener.isOnline
+                    ? 'Available now'
+                    : 'Offline',
+                style: TextStyle(
+                  color: listener.isAvailable
+                      ? MocoColors.online
+                      : MocoColors.textMuted,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: MocoSpacing.lg),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _Stat(
+                value: listener.rating > 0
+                    ? listener.rating.toStringAsFixed(1)
+                    : '—',
+                label: listener.ratingCount == 1
+                    ? '1 rating'
+                    : '${listener.ratingCount} ratings',
+              ),
+              Container(
+                width: 1,
+                height: 30,
+                color: MocoColors.borderSubtle,
+                margin: const EdgeInsets.symmetric(horizontal: MocoSpacing.xl),
+              ),
+              _Stat(value: '${listener.totalCalls}', label: 'calls taken'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Stat extends StatelessWidget {
+  const _Stat({required this.value, required this.label});
+
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            color: MocoColors.textPrimary,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        Text(
+          label,
+          style: const TextStyle(color: MocoColors.textMuted, fontSize: 12),
+        ),
+      ],
+    );
+  }
+}
+
+class _CompactHeader extends StatelessWidget {
+  const _CompactHeader({required this.listener});
+
+  final ListenerDetail listener;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(
+        top: MediaQuery.of(context).padding.top + MocoSpacing.sm,
+        bottom: MocoSpacing.md,
+        left: 72,
+        right: MocoSpacing.lg,
+      ),
+      decoration: BoxDecoration(
+        color: MocoColors.backgroundPrimary.withValues(alpha: 0.92),
+        border: const Border(
+          bottom: BorderSide(color: MocoColors.borderSubtle),
+        ),
+      ),
+      child: Row(
+        children: [
+          MocoAvatar(
+            name: listener.name,
+            imageUrl: listener.avatarUrl,
+            size: 32,
+          ),
+          const SizedBox(width: MocoSpacing.md),
+          Expanded(
+            child: Text(
+              listener.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: MocoColors.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          MocoOnlineDot(online: listener.isAvailable),
+        ],
+      ),
+    );
+  }
+}
+
+/// Favourite / Follow / Chat.
+///
+/// The backend exposes NO favourite or follow endpoint, so those stay disabled
+/// rather than storing a like locally and pretending it synced. Chat has real
+/// endpoints but no UI until Phase 3.
+class _ActionRow extends StatelessWidget {
+  const _ActionRow({required this.listenerId});
+
+  final int listenerId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        MocoIconButton(
+          icon: Icons.favorite_border_rounded,
+          tooltip: 'Favourites arrive in a later phase',
+          onPressed: null,
+        ),
+        const SizedBox(width: MocoSpacing.lg),
+        MocoIconButton(
+          icon: Icons.person_add_alt_1_outlined,
+          tooltip: 'Following arrives in a later phase',
+          onPressed: null,
+        ),
+        const SizedBox(width: MocoSpacing.lg),
+        MocoIconButton(
+          icon: Icons.chat_bubble_outline_rounded,
+          tooltip: 'Chat arrives in Phase 3',
+          onPressed: null,
+        ),
+      ],
+    );
+  }
+}
+
+class _ProfileTabs extends StatelessWidget {
+  const _ProfileTabs({required this.current, required this.onChanged});
+
+  final ProfileTab current;
+  final ValueChanged<ProfileTab> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 40,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          for (final tab in ProfileTab.values) ...[
+            MocoChip(
+              key: Key('profile_tab_chip_${tab.name}'),
+              label: switch (tab) {
+                ProfileTab.shots => 'Shots',
+                ProfileTab.posts => 'Posts',
+                ProfileTab.photos => 'Photos',
+                ProfileTab.voice => 'Voice',
+              },
+              selected: current == tab,
+              onTap: () => onChanged(tab),
+            ),
+            const SizedBox(width: MocoSpacing.sm),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Call CTAs.
+///
+/// The UI and the backend-derived price are real; the calling stack is not
+/// built until Phase 2. Rather than fake a connection, the buttons are gated:
+/// outside production they explain when calling arrives, and in production they
+/// are simply disabled.
+class _CallBar extends StatelessWidget {
+  const _CallBar({required this.listener, required this.freeCall});
+
+  final ListenerDetail listener;
+  final bool freeCall;
+
+  void _notReady(BuildContext context, String type) {
+    if (!Env.showDevPlaceholders) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$type calling arrives in Phase 2.'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = Env.showDevPlaceholders && listener.isAvailable;
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        MocoSpacing.screenPadding,
+        MocoSpacing.md,
+        MocoSpacing.screenPadding,
+        MediaQuery.of(context).padding.bottom + MocoSpacing.md,
+      ),
+      decoration: BoxDecoration(
+        color: MocoColors.backgroundPrimary.withValues(alpha: 0.94),
+        border: const Border(top: BorderSide(color: MocoColors.borderSubtle)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (freeCall)
+            Padding(
+              padding: const EdgeInsets.only(bottom: MocoSpacing.sm),
+              child: Text(
+                'Your first minute is free',
+                style: TextStyle(
+                  color: MocoColors.coinAccent,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          Row(
+            children: [
+              Expanded(
+                child: MocoSecondaryButton(
+                  key: const Key('cta_audio_call'),
+                  label: 'Audio · ${listener.audioRate}/min',
+                  icon: Icons.call_rounded,
+                  onPressed: enabled ? () => _notReady(context, 'Audio') : null,
+                ),
+              ),
+              const SizedBox(width: MocoSpacing.md),
+              Expanded(
+                child: MocoPrimaryButton(
+                  key: const Key('cta_video_call'),
+                  label: 'Video · ${listener.videoRate}/min',
+                  icon: Icons.videocam_rounded,
+                  onPressed: enabled ? () => _notReady(context, 'Video') : null,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileSkeleton extends StatelessWidget {
+  const _ProfileSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(MocoSpacing.screenPadding),
+        child: Column(
+          children: [
+            const SizedBox(height: 56),
+            const MocoSkeleton(width: 128, height: 128, radius: 64),
+            const SizedBox(height: MocoSpacing.lg),
+            const MocoSkeleton(width: 150, height: 22),
+            const SizedBox(height: MocoSpacing.sm),
+            const MocoSkeleton(width: 100, height: 14),
+            const SizedBox(height: MocoSpacing.xxl),
+            const MocoSkeleton(height: 70, radius: MocoRadius.lg),
+            const SizedBox(height: MocoSpacing.lg),
+            const MocoSkeleton(height: 120, radius: MocoRadius.lg),
+          ],
+        ),
+      ),
+    );
+  }
+}

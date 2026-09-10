@@ -17,9 +17,27 @@ const logger = require('../utils/logger');
 
 const CHANNEL = 'moco:events';
 
+/**
+ * Broadcast room every connected client joins.
+ *
+ * Presence is the one event with no single recipient — anyone looking at
+ * discovery wants it — so it goes to a shared room rather than a user room.
+ */
+const DISCOVERY_ROOM = 'discovery';
+
 /** Publishes an event for delivery to a user, from any process. */
 async function publishToUser(userId, event, payload) {
   await redis.publish(CHANNEL, JSON.stringify({ userId: String(userId), event, payload }));
+}
+
+/**
+ * Publishes an event to every connected client, from any process.
+ *
+ * Uses the same Redis channel as user-targeted events, distinguished by
+ * `broadcast: true`, so workers keep exactly one publish path.
+ */
+async function publishBroadcast(event, payload) {
+  await redis.publish(CHANNEL, JSON.stringify({ broadcast: true, event, payload }));
 }
 
 /** Subscribes this process's socket server to the event channel. */
@@ -36,8 +54,12 @@ function startSubscriber() {
   subscriber.on('message', (channel, raw) => {
     if (channel !== CHANNEL) return;
     try {
-      const { userId, event, payload } = JSON.parse(raw);
-      socketServer.emitToUser(userId, event, payload);
+      const { userId, event, payload, broadcast } = JSON.parse(raw);
+      if (broadcast) {
+        socketServer.emitToRoom(DISCOVERY_ROOM, event, payload);
+      } else {
+        socketServer.emitToUser(userId, event, payload);
+      }
     } catch (err) {
       logger.error({ err, raw }, 'bad realtime event payload');
     }
@@ -54,9 +76,24 @@ const callAccepted = (userId, payload) => publishToUser(userId, WS_EVENTS.CALL_A
 const callEnded = (userId, payload) => publishToUser(userId, WS_EVENTS.CALL_ENDED, payload);
 const chatMessage = (userId, payload) => publishToUser(userId, WS_EVENTS.CHAT_MESSAGE, payload);
 
+/**
+ * A listener came online or went offline.
+ *
+ * Broadcast so open discovery grids update in place instead of waiting for the
+ * user to pull-to-refresh.
+ */
+const listenerPresence = ({ listenerId, isOnline, isBusy = false }) =>
+  publishBroadcast(WS_EVENTS.PRESENCE, {
+    listenerId: Number(listenerId),
+    isOnline,
+    isBusy,
+  });
+
 module.exports = {
   CHANNEL,
+  DISCOVERY_ROOM,
   publishToUser,
+  publishBroadcast,
   startSubscriber,
   tick,
   lowBalance,
@@ -65,4 +102,5 @@ module.exports = {
   callAccepted,
   callEnded,
   chatMessage,
+  listenerPresence,
 };

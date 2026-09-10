@@ -2,6 +2,7 @@
 
 const { Server } = require('socket.io');
 const { verifyToken } = require('../middleware/auth');
+const { query } = require('../config/db');
 const { redis } = require('../config/redis');
 const { REDIS } = require('../utils/constants');
 const logger = require('../utils/logger');
@@ -39,6 +40,9 @@ function init(httpServer) {
   io.on('connection', async (socket) => {
     const room = `user:${socket.userId}`;
     socket.join(room);
+    // Everyone joins the broadcast room so presence updates reach open
+    // discovery grids without a per-client subscription.
+    socket.join('discovery');
     await redis.setex(REDIS.presenceKey(socket.userId), REDIS.presenceTtlSeconds, '1');
     logger.debug({ userId: socket.userId }, 'socket connected');
 
@@ -53,6 +57,22 @@ function init(httpServer) {
 
     socket.on('disconnect', async () => {
       await redis.del(REDIS.presenceKey(socket.userId));
+
+      // A listener whose socket dropped is no longer callable. Discovery
+      // requires BOTH the profile flag and a live socket, so announce the
+      // change rather than leaving stale cards showing them as available.
+      try {
+        const { rows } = await query(
+          'SELECT 1 FROM listener_profiles WHERE user_id = $1 AND is_online',
+          [socket.userId],
+        );
+        if (rows[0]) {
+          await onListenerDisconnect(socket.userId);
+        }
+      } catch (err) {
+        logger.warn({ err, userId: socket.userId }, 'presence announce on disconnect failed');
+      }
+
       logger.debug({ userId: socket.userId }, 'socket disconnected');
     });
   });
@@ -78,6 +98,33 @@ function emitToUser(userId, event, payload) {
   return true;
 }
 
+/** Emits to a named room — used for broadcast events such as presence. */
+function emitToRoom(room, event, payload) {
+  if (!io) {
+    logger.debug({ event, room }, 'no socket server in this process');
+    return false;
+  }
+  io.to(room).emit(event, payload);
+  return true;
+}
+
+/**
+ * Called when a listener's socket drops.
+ *
+ * Assigned by server.js rather than imported, because call.events already
+ * requires this module and importing it back would be a cycle.
+ */
+let onListenerDisconnect = async () => {};
+const setListenerDisconnectHandler = (fn) => {
+  onListenerDisconnect = fn;
+};
+
 const getIo = () => io;
 
-module.exports = { init, emitToUser, getIo };
+module.exports = {
+  init,
+  emitToUser,
+  emitToRoom,
+  setListenerDisconnectHandler,
+  getIo,
+};

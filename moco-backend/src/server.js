@@ -19,6 +19,12 @@ const app = createApp();
 const server = http.createServer(app);
 
 socketServer.init(server);
+
+// A listener's socket dropping makes them uncallable; broadcast it so open
+// discovery grids stop showing them as available.
+socketServer.setListenerDisconnectHandler(async (listenerId) => {
+  await callEvents.listenerPresence({ listenerId, isOnline: false });
+});
 // This process holds the sockets, so it subscribes to the event channel the
 // workers publish tick/low-balance/forced-end events on.
 const subscriber = callEvents.startSubscriber();

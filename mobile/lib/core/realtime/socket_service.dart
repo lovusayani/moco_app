@@ -7,13 +7,14 @@ enum SocketStatus { disconnected, connecting, connected }
 
 /// Socket.IO connection to the Moco backend.
 ///
-/// Phase 1 establishes and supervises the connection but subscribes to no
-/// events yet. The backend declares `listener:presence` in its constants but
-/// never emits it (verified in src/realtime/), so discovery presence still
-/// comes from the HTTP response — there is no live presence stream to consume.
-/// The event surface that IS emitted (call:tick, call:low_balance,
-/// call:forced_end, call:incoming, call:ended, chat:message) belongs to later
-/// phases, and [on] is here so they can be wired without touching this class.
+/// Establishes and supervises the connection. The server emits
+/// `listener:presence` whenever a listener's online/busy state changes
+/// (src/realtime/presence.js via the `moco:events` Redis bridge), broadcast to
+/// every socket's `discovery` room, plus the call lifecycle events (`call:tick`,
+/// `call:low_balance`, `call:forced_end`, `call:incoming`, `call:accepted`,
+/// `call:ended`) delivered to a caller/listener's own `user:<id>` room, and
+/// `chat:message`. [on] lets a screen or controller subscribe to any of these
+/// without this class knowing about call/chat/discovery concerns itself.
 class SocketService {
   SocketService();
 
@@ -72,6 +73,13 @@ class SocketService {
     if (socket == null) return () {};
     socket.on(event, handler);
     return () => socket.off(event, handler);
+  }
+
+  /// Emits a client→server event, e.g. `heartbeat` with `{ callId }` during an
+  /// active call. A no-op while disconnected — the server-side sweeper is the
+  /// backstop for a call that never gets a heartbeat.
+  void emit(String event, [dynamic data]) {
+    _socket?.emit(event, data);
   }
 
   void disconnect() {

@@ -102,7 +102,7 @@ class ListenersApi {
   /// `GET /listeners/:id`
   Future<ListenerDetail> byId(int id) {
     return _client.request(
-      () => _client.dio.get<dynamic>('/listeners/\$id'),
+      () => _client.dio.get<dynamic>('/listeners/$id'),
       (data) => ListenerDetail.fromJson(Map<String, dynamic>.from(data as Map)),
     );
   }
@@ -118,8 +118,8 @@ class ListenersApi {
   }) {
     return _client.request(
       () => active
-          ? _client.dio.put<dynamic>('/listeners/\$listenerId/\$kind')
-          : _client.dio.delete<dynamic>('/listeners/\$listenerId/\$kind'),
+          ? _client.dio.put<dynamic>('/listeners/$listenerId/$kind')
+          : _client.dio.delete<dynamic>('/listeners/$listenerId/$kind'),
       (data) => RelationResult.fromJson(Map<String, dynamic>.from(data as Map)),
     );
   }

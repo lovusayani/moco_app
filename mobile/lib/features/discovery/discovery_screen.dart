@@ -116,8 +116,10 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                             color: MocoColors.textPrimary,
                             fontSize: 15,
                           ),
+                          textInputAction: TextInputAction.search,
+                          onSubmitted: controller.submitSearch,
                           decoration: const InputDecoration(
-                            hintText: 'Search loaded listeners',
+                            hintText: 'Search listeners',
                             prefixIcon: Icon(
                               Icons.search_rounded,
                               color: MocoColors.textMuted,
@@ -158,24 +160,33 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                 hasScrollBody: false,
                 child: MocoEmptyState(
                   key: const Key('discovery_empty'),
-                  title: 'No listeners found',
-                  message:
-                      state.filters.isActive || state.searchQuery.isNotEmpty
-                      ? 'Try clearing your filters or search.'
+                  title: state.isEmptyFromSearch
+                      ? 'No matches'
+                      : 'No listeners found',
+                  message: state.isEmptyFromSearch
+                      ? 'Nobody matches "${state.searchQuery}". Try a different name.'
+                      : state.filters.isActive
+                      ? 'Try clearing your filters.'
                       : 'Nobody is available right now. Pull down to refresh.',
                   action: state.filters.isActive
                       ? MocoSecondaryButton(
                           label: 'Clear filters',
                           expand: false,
-                          onPressed: () =>
-                              controller.setFilters(const DiscoveryFilters()),
+                          // Clearing filters must not silently drop the user's
+                          // search term or the call-type toggle.
+                          onPressed: () => controller.setFilters(
+                            DiscoveryFilters(
+                              query: state.filters.query,
+                              callType: state.filters.callType,
+                            ),
+                          ),
                         )
                       : null,
                 ),
               )
             else
               _ListenerGrid(
-                listeners: state.visibleListeners,
+                listeners: state.listeners,
                 showVideoRate: state.mode == CallMode.video,
                 firstCallFree: user?.freeTrialAvailable ?? false,
               ),

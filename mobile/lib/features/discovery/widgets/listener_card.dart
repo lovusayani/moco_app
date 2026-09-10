@@ -82,10 +82,12 @@ class ListenerCard extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 4),
-              // Everyone in discovery is KYC-approved, so the badge is accurate
-              // for every card the backend returns.
-              const MocoVerifiedBadge(size: 14),
+              // Server-published boolean rather than an assumption about which
+              // listeners discovery returns.
+              if (listener.verified) ...[
+                const SizedBox(width: 4),
+                const MocoVerifiedBadge(size: 14),
+              ],
             ],
           ),
           if (listener.languages.isNotEmpty)
@@ -102,25 +104,38 @@ class ListenerCard extends StatelessWidget {
               ),
             ),
           const SizedBox(height: MocoSpacing.sm),
+          // At 360px a card is ~130px wide, and the rating plus the rate pill
+          // together exceeded it. The rate must stay legible in full — it is
+          // the price — so the rating is what gives way.
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              if (listener.rating > 0) ...[
-                const Icon(
-                  Icons.star_rounded,
-                  size: 14,
-                  color: MocoColors.coinAccent,
-                ),
-                const SizedBox(width: 2),
-                Text(
-                  listener.rating.toStringAsFixed(1),
-                  style: const TextStyle(
-                    color: MocoColors.textSecondary,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
+              if (listener.rating > 0)
+                Flexible(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.star_rounded,
+                        size: 14,
+                        color: MocoColors.coinAccent,
+                      ),
+                      const SizedBox(width: 2),
+                      Flexible(
+                        child: Text(
+                          listener.rating.toStringAsFixed(1),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: MocoColors.textSecondary,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-              const Spacer(),
               _RatePill(rate: rate, isVideo: showVideoRate),
             ],
           ),

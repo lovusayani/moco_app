@@ -9,6 +9,49 @@ const { authenticate } = require('../../middleware/auth');
 const { notFound } = require('../../utils/errors');
 const { USER_ROLE, KYC_STATUS } = require('../../utils/constants');
 
+/**
+ * The canonical public shape of a user.
+ *
+ * GET and PATCH previously returned different shapes for the same resource —
+ * GET camelCase, PATCH the raw snake_case database row — which forced clients
+ * to parse a resource two ways. Both now go through here.
+ */
+function serializeUser(row) {
+  return {
+    id: row.id,
+    phone: row.phone,
+    displayName: row.display_name,
+    avatarUrl: row.avatar_url,
+    language: row.language,
+    gender: row.gender,
+    role: row.role,
+    coinBalance: row.coin_balance ?? 0,
+    freeTrialAvailable: !row.free_trial_used,
+    createdAt: row.created_at,
+    listener: row.kyc_status
+      ? {
+          isOnline: row.is_online,
+          kycStatus: row.kyc_status,
+          earningsBalance: row.earnings_balance,
+          rating: Number(row.rating),
+          totalCalls: row.total_calls,
+        }
+      : null,
+  };
+}
+
+/** Columns serializeUser needs, shared by every query that returns a user. */
+const USER_SELECT = `
+  u.id, u.phone, u.display_name, u.avatar_url, u.language, u.gender, u.role,
+  u.free_trial_used, u.created_at,
+  COALESCE(w.coin_balance, 0) AS coin_balance,
+  lp.is_online, lp.kyc_status, lp.earnings_balance, lp.rating, lp.total_calls`;
+
+const USER_JOINS = `
+  FROM users u
+  LEFT JOIN wallets w ON w.user_id = u.id
+  LEFT JOIN listener_profiles lp ON lp.user_id = u.id`;
+
 const router = express.Router();
 router.use(authenticate);
 
@@ -25,41 +68,14 @@ router.get(
   '/me',
   asyncHandler(async (req, res) => {
     const { rows } = await query(
-      `SELECT u.id, u.phone, u.display_name, u.avatar_url, u.language, u.gender, u.role,
-              u.free_trial_used, u.created_at,
-              COALESCE(w.coin_balance, 0) AS coin_balance,
-              lp.is_online, lp.kyc_status, lp.earnings_balance, lp.rating, lp.total_calls
-         FROM users u
-         LEFT JOIN wallets w ON w.user_id = u.id
-         LEFT JOIN listener_profiles lp ON lp.user_id = u.id
-        WHERE u.id = $1`,
+      `SELECT ${USER_SELECT} ${USER_JOINS} WHERE u.id = $1`,
       [req.user.id],
     );
 
     const row = rows[0];
     if (!row) throw notFound('User');
 
-    res.json({
-      id: row.id,
-      phone: row.phone,
-      displayName: row.display_name,
-      avatarUrl: row.avatar_url,
-      language: row.language,
-      gender: row.gender,
-      role: row.role,
-      coinBalance: row.coin_balance,
-      freeTrialAvailable: !row.free_trial_used,
-      createdAt: row.created_at,
-      listener: row.kyc_status
-        ? {
-            isOnline: row.is_online,
-            kycStatus: row.kyc_status,
-            earningsBalance: row.earnings_balance,
-            rating: Number(row.rating),
-            totalCalls: row.total_calls,
-          }
-        : null,
-    });
+    res.json(serializeUser(row));
   }),
 );
 
@@ -71,19 +87,24 @@ router.patch(
 
     // COALESCE leaves untouched fields alone, so a partial update cannot blank
     // out a field the client simply did not send.
-    const { rows } = await query(
+    await query(
       `UPDATE users
           SET display_name = COALESCE($2, display_name),
               avatar_url   = COALESCE($3, avatar_url),
               language     = COALESCE($4, language),
               gender       = COALESCE($5, gender),
               updated_at   = now()
-        WHERE id = $1
-        RETURNING id, display_name, avatar_url, language, gender, role`,
+        WHERE id = $1`,
       [req.user.id, displayName ?? null, avatarUrl ?? null, language ?? null, gender ?? null],
     );
 
-    res.json({ user: rows[0] });
+    // Re-read through the same projection as GET so the two cannot diverge.
+    const { rows } = await query(
+      `SELECT ${USER_SELECT} ${USER_JOINS} WHERE u.id = $1`,
+      [req.user.id],
+    );
+
+    res.json(serializeUser(rows[0]));
   }),
 );
 

@@ -320,6 +320,56 @@ test('the wallet reports affordable minutes for both call types', async () => {
   assert.equal(result.body.videoMinutes, 3);
 });
 
+test('PATCH and GET /users/me return the SAME canonical shape', async () => {
+  await resetDb();
+  const user = await createUser({ balance: 50 });
+  const token = signToken(user);
+
+  const patched = await call('PATCH', '/api/users/me', {
+    token,
+    body: { displayName: 'Rahul', language: 'hi' },
+  });
+  const fetched = await call('GET', '/api/users/me', { token });
+
+  assert.equal(patched.status, 200);
+
+  // The two used to disagree: PATCH returned raw snake_case columns wrapped in
+  // {user: ...}, GET returned camelCase at the top level. Same resource, two
+  // shapes. They are now byte-identical.
+  assert.deepEqual(patched.body, fetched.body);
+});
+
+test('PATCH /users/me returns camelCase, never raw database columns', async () => {
+  await resetDb();
+  const user = await createUser({ balance: 0 });
+
+  const result = await call('PATCH', '/api/users/me', {
+    token: signToken(user),
+    body: { displayName: 'Priya' },
+  });
+
+  assert.equal(result.body.displayName, 'Priya');
+  assert.equal(result.body.display_name, undefined);
+  assert.equal(result.body.avatar_url, undefined);
+  assert.equal(result.body.free_trial_used, undefined);
+  // It is also no longer wrapped in {user: ...}.
+  assert.equal(result.body.user, undefined);
+});
+
+test('PATCH /users/me carries wallet and listener state like GET does', async () => {
+  await resetDb();
+  const user = await createUser({ balance: 120, listener: true });
+
+  const result = await call('PATCH', '/api/users/me', {
+    token: signToken(user),
+    body: { displayName: 'Kavya' },
+  });
+
+  assert.equal(result.body.coinBalance, 120);
+  assert.equal(result.body.listener.kycStatus, 'approved');
+  assert.equal(typeof result.body.freeTrialAvailable, 'boolean');
+});
+
 test('the admin console is served as static files', async () => {
   const page = await fetch(`${baseUrl}/admin/`);
   assert.equal(page.status, 200);

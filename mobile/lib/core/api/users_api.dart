@@ -14,19 +14,18 @@ class UsersApi {
     );
   }
 
-  /// `PATCH /users/me`, then re-reads `GET /users/me`.
+  /// `PATCH /users/me`
   ///
-  /// The PATCH response returns raw snake_case database columns
-  /// (`display_name`) while GET returns camelCase (`displayName`) — see the API
-  /// gaps table in mobile/README.md. Rather than parse two shapes for one
-  /// resource, this re-reads the canonical endpoint. The extra request is
-  /// cheap and keeps a backend inconsistency from leaking into the models.
+  /// Returns the same canonical shape as GET, so the response is used directly.
+  /// This previously had to re-read GET because PATCH returned raw snake_case
+  /// columns; the backend now serialises both through one projection, which
+  /// removes a whole round trip from profile setup.
   Future<MocoUser> updateProfile({
     String? displayName,
     String? avatarUrl,
     String? language,
     String? gender,
-  }) async {
+  }) {
     final body = <String, dynamic>{
       if (displayName != null) 'displayName': displayName,
       if (avatarUrl != null) 'avatarUrl': avatarUrl,
@@ -34,12 +33,10 @@ class UsersApi {
       if (gender != null) 'gender': gender,
     };
 
-    await _client.request(
+    return _client.request(
       () => _client.dio.patch<dynamic>('/users/me', data: body),
-      (data) => data,
+      (data) => MocoUser.fromJson(Map<String, dynamic>.from(data as Map)),
     );
-
-    return me();
   }
 
   /// `POST /users/me/become-listener` → `{ role, kycStatus, kycRequired }`

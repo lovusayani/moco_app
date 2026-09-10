@@ -13,6 +13,9 @@ class ListenerSummary {
     this.gender,
     required this.audioRate,
     required this.videoRate,
+    this.acceptsAudio = true,
+    this.acceptsVideo = true,
+    this.verified = false,
     this.isOnline = false,
     this.isBusy = false,
     this.rating = 0,
@@ -29,6 +32,14 @@ class ListenerSummary {
   final String? gender;
   final int audioRate;
   final int videoRate;
+
+  /// Which call types this listener actually takes.
+  final bool acceptsAudio;
+  final bool acceptsVideo;
+
+  /// Published by the server as a plain boolean; KYC internals are not exposed.
+  final bool verified;
+
   final bool isOnline;
   final bool isBusy;
   final double rating;
@@ -44,6 +55,9 @@ class ListenerSummary {
       gender: json['gender'] as String?,
       audioRate: (json['audioRate'] as num?)?.toInt() ?? 0,
       videoRate: (json['videoRate'] as num?)?.toInt() ?? 0,
+      acceptsAudio: json['acceptsAudio'] as bool? ?? true,
+      acceptsVideo: json['acceptsVideo'] as bool? ?? true,
+      verified: json['verified'] as bool? ?? false,
       isOnline: json['isOnline'] as bool? ?? false,
       isBusy: json['isBusy'] as bool? ?? false,
       rating: (json['rating'] as num?)?.toDouble() ?? 0,
@@ -58,9 +72,26 @@ class ListenerSummary {
   /// Available to take a call right now.
   bool get isAvailable => isOnline && !isBusy;
 
-  /// Discovery only ever returns KYC-approved listeners, so anyone the client
-  /// can see here has passed verification. There is no per-listener flag.
-  bool get isVerified => true;
+  /// Applies a live presence update from the socket without refetching.
+  ListenerSummary withPresence({required bool isOnline, required bool isBusy}) {
+    return ListenerSummary(
+      id: id,
+      displayName: displayName,
+      avatarUrl: avatarUrl,
+      bio: bio,
+      languages: languages,
+      gender: gender,
+      audioRate: audioRate,
+      videoRate: videoRate,
+      acceptsAudio: acceptsAudio,
+      acceptsVideo: acceptsVideo,
+      verified: verified,
+      isOnline: isOnline,
+      isBusy: isBusy,
+      rating: rating,
+      totalCalls: totalCalls,
+    );
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -70,11 +101,23 @@ class ListenerSummary {
       other.isOnline == isOnline &&
       other.isBusy == isBusy &&
       other.audioRate == audioRate &&
-      other.videoRate == videoRate;
+      other.videoRate == videoRate &&
+      other.acceptsAudio == acceptsAudio &&
+      other.acceptsVideo == acceptsVideo &&
+      other.verified == verified;
 
   @override
-  int get hashCode =>
-      Object.hash(id, displayName, isOnline, isBusy, audioRate, videoRate);
+  int get hashCode => Object.hash(
+    id,
+    displayName,
+    isOnline,
+    isBusy,
+    audioRate,
+    videoRate,
+    acceptsAudio,
+    acceptsVideo,
+    verified,
+  );
 }
 
 /// A listener profile (`GET /api/listeners/:id`) — the summary plus rating count.
@@ -88,11 +131,17 @@ class ListenerDetail {
     this.gender,
     required this.audioRate,
     required this.videoRate,
+    this.acceptsAudio = true,
+    this.acceptsVideo = true,
+    this.verified = false,
     this.isOnline = false,
     this.isBusy = false,
     this.rating = 0,
     this.ratingCount = 0,
     this.totalCalls = 0,
+    this.isFavorited = false,
+    this.isFollowing = false,
+    this.followerCount = 0,
   });
 
   final int id;
@@ -103,11 +152,19 @@ class ListenerDetail {
   final String? gender;
   final int audioRate;
   final int videoRate;
+  final bool acceptsAudio;
+  final bool acceptsVideo;
+  final bool verified;
   final bool isOnline;
   final bool isBusy;
   final double rating;
   final int ratingCount;
   final int totalCalls;
+
+  /// The VIEWER's relation to this listener, as reported by the server.
+  final bool isFavorited;
+  final bool isFollowing;
+  final int followerCount;
 
   factory ListenerDetail.fromJson(Map<String, dynamic> json) {
     return ListenerDetail(
@@ -119,11 +176,17 @@ class ListenerDetail {
       gender: json['gender'] as String?,
       audioRate: (json['audioRate'] as num?)?.toInt() ?? 0,
       videoRate: (json['videoRate'] as num?)?.toInt() ?? 0,
+      acceptsAudio: json['acceptsAudio'] as bool? ?? true,
+      acceptsVideo: json['acceptsVideo'] as bool? ?? true,
+      verified: json['verified'] as bool? ?? false,
       isOnline: json['isOnline'] as bool? ?? false,
       isBusy: json['isBusy'] as bool? ?? false,
       rating: (json['rating'] as num?)?.toDouble() ?? 0,
       ratingCount: (json['ratingCount'] as num?)?.toInt() ?? 0,
       totalCalls: (json['totalCalls'] as num?)?.toInt() ?? 0,
+      isFavorited: json['isFavorited'] as bool? ?? false,
+      isFollowing: json['isFollowing'] as bool? ?? false,
+      followerCount: (json['followerCount'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -132,7 +195,6 @@ class ListenerDetail {
       : 'Listener';
 
   bool get isAvailable => isOnline && !isBusy;
-  bool get isVerified => true;
 
   ListenerDetail copyWith({
     String? displayName,
@@ -141,11 +203,17 @@ class ListenerDetail {
     List<String>? languages,
     int? audioRate,
     int? videoRate,
+    bool? acceptsAudio,
+    bool? acceptsVideo,
+    bool? verified,
     bool? isOnline,
     bool? isBusy,
     double? rating,
     int? ratingCount,
     int? totalCalls,
+    bool? isFavorited,
+    bool? isFollowing,
+    int? followerCount,
   }) {
     return ListenerDetail(
       id: id,
@@ -156,11 +224,17 @@ class ListenerDetail {
       gender: gender,
       audioRate: audioRate ?? this.audioRate,
       videoRate: videoRate ?? this.videoRate,
+      acceptsAudio: acceptsAudio ?? this.acceptsAudio,
+      acceptsVideo: acceptsVideo ?? this.acceptsVideo,
+      verified: verified ?? this.verified,
       isOnline: isOnline ?? this.isOnline,
       isBusy: isBusy ?? this.isBusy,
       rating: rating ?? this.rating,
       ratingCount: ratingCount ?? this.ratingCount,
       totalCalls: totalCalls ?? this.totalCalls,
+      isFavorited: isFavorited ?? this.isFavorited,
+      isFollowing: isFollowing ?? this.isFollowing,
+      followerCount: followerCount ?? this.followerCount,
     );
   }
 

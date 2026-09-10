@@ -11,13 +11,32 @@ The real journey, end to end, against the live backend:
 **Launch → Onboarding → OTP login → Profile setup → App shell → Discovery →
 Listener profile**
 
+## Phase 2 scope
+
+Real calling and wallet, built on the existing backend billing engine — the
+client never decides a rate, a balance, or when billing starts:
+
+**Listener profile → Audio/Video call → Outgoing → Incoming (other device) →
+Accept → Active call → server-driven billing/low-balance → End → Call summary**
+
+The server remains authoritative for balance, call status, billed
+minutes/ticks, listener earnings, call termination and rates; see
+[`lib/core/calling/`](lib/core/calling/) and
+[`lib/features/calling/`](lib/features/calling/).
+
 Everything else in the app is deliberately out of scope and marked as such.
 
 ## Prerequisites
 
-- Flutter **3.27+** (developed against 3.47.2, Dart 3.13)
+- Flutter **3.35+** (developed against 3.47.3, Dart 3.13 — `pubspec.yaml` pins
+  `sdk: ^3.13.0`; run `flutter upgrade` if `flutter pub get` complains about the
+  SDK version)
 - Android SDK / Android Studio for the emulator
 - The backend running locally — see [`../moco-backend/README.md`](../moco-backend/README.md)
+- For real calling: an Agora project (App ID + certificate) set on the
+  **backend** (`AGORA_APP_ID`/`AGORA_APP_CERTIFICATE` in `moco-backend/.env`).
+  Without it the backend still runs the full call lifecycle and billing, but
+  issues no real Agora token — see "Calling without Agora configured" below.
 
 ## Setup
 
@@ -82,7 +101,7 @@ flutter build apk --release \
 | `FLAVOR` | `development` | `development` · `staging` · `production` |
 | `API_BASE_URL` | `http://10.0.2.2:3000/api` | REST base, including `/api` |
 | `SOCKET_URL` | `http://10.0.2.2:3000` | Socket.IO origin (no `/api`) |
-| `AGORA_APP_ID` | empty | Not used until calling ships in Phase 2 |
+| `AGORA_APP_ID` | empty | Passed to the Agora engine's `RtcEngineContext`. The App ID is a public client identifier — only the certificate (server-side) is secret. |
 | `HTTP_LOGGING` | `true` | Method/path logging; forced off in production |
 
 `FLAVOR=production` is load-bearing, not cosmetic: it disables HTTP logging and
@@ -93,6 +112,45 @@ hides every development placeholder.
 The backend's dev OTP is fixed (`OTP_FIXED_CODE`, default `123456`), so no SMS
 gateway is needed. Codes are single-use and rate limited — 5 per phone per hour
 — exactly as in production. The client does not bypass either rule.
+
+### Two-device call testing
+
+Calling needs two accounts — a caller and a listener — so use two emulators (or
+one emulator plus one physical device) against the same backend.
+
+```bash
+# Device A — caller. A fresh phone number signs up as a plain user.
+flutter run -d <deviceA-id> \
+  --dart-define=FLAVOR=development \
+  --dart-define=API_BASE_URL=http://10.0.2.2:3000/api \
+  --dart-define=SOCKET_URL=http://10.0.2.2:3000
+
+# Device B — listener. Use a second phone number, opt into listener mode from
+# Profile setup, then toggle "online" (PATCH /api/listeners/status) once KYC
+# shows approved — the dev seed/admin console can approve it instantly.
+# A physical device on the same LAN uses your machine's IP instead of 10.0.2.2
+# (see the LAN example above) for both API_BASE_URL and SOCKET_URL.
+flutter run -d <deviceB-id> \
+  --dart-define=FLAVOR=development \
+  --dart-define=API_BASE_URL=http://192.168.1.10:3000/api \
+  --dart-define=SOCKET_URL=http://192.168.1.10:3000
+```
+
+Test flow: on Device A, open a listener's profile (Device B's account) from
+Discovery and tap Audio or Video. Device B should show the Incoming Call screen
+within a second or two (delivered over the socket B is already connected on);
+Accept moves both devices to the active call screen, where `call:tick` events
+update the caller's balance and the listener's running "earned" total live.
+Ending from either side ends both.
+
+### Calling without Agora configured
+
+If the backend has no `AGORA_APP_ID`/`AGORA_APP_CERTIFICATE`, the call
+lifecycle (initiate → ring → accept → billing ticks → end) still runs for
+real — only the media never connects. The active call screen shows "Media
+unavailable (dev mode)" instead of pretending a connection exists, which is
+enough to test the state machine, billing display and screens without a real
+Agora project.
 
 ## Tests
 
@@ -120,8 +178,9 @@ fixtures would happily keep passing.
 ```
 lib/
 ├── core/
-│   ├── api/         Dio client, auth/users/listeners/config endpoints
+│   ├── api/         Dio client, auth/users/listeners/config/calls endpoints
 │   ├── auth/        AuthController + AuthState (the session's single owner)
+│   ├── calling/      CallController (state machine), AgoraCallService
 │   ├── config/      env.dart — all --dart-define reading
 │   ├── errors/      ApiException + status → message mapping
 │   ├── realtime/    Socket.IO service
@@ -134,10 +193,11 @@ lib/
 │   ├── onboarding/  carousel + local completion
 │   ├── auth/        phone + OTP
 │   ├── profile_setup/
-│   ├── app_shell/   bottom nav, placeholder tabs
+│   ├── app_shell/   bottom nav, placeholder tabs, global incoming-call listener
 │   ├── discovery/   grid, filters, pagination
-│   └── listener_profile/
-├── shared/models/   freezed models mirroring docs/API.md
+│   ├── listener_profile/  real Audio/Video CTAs
+│   └── calling/     outgoing/incoming/active audio/active video/summary screens
+├── shared/models/   plain Dart models mirroring docs/API.md
 └── main.dart
 ```
 
@@ -194,23 +254,21 @@ scoped to KYC-approved listeners so it is fine at current volume; a `pg_trgm`
 GIN index on `(display_name, bio)` is the scale-up path, and the query carries a
 comment saying so.
 
-## Phase 2+ placeholders
+## Phase 2 status
 
-Tabs that exist so the bottom nav matches the design, each showing an explicit
-development placeholder rather than invented feature UI:
+Calling (audio + video) and its realtime billing display are implemented end
+to end against the real backend — see the scope line above. Not yet built:
 
-- **Wallet** — Phase 2
-- **Profile** — Phase 2
-- **Chats** — Phase 3 (backend endpoints exist; no UI yet)
-- **Feed** — later phase (no backend at all)
+- **Wallet screen / coin packs / top-up** — the CTAs and low-balance banner
+  reference it, but the screen itself is still a placeholder.
+- Chat, Feed, Posts/Shots/Voice, payouts, Google Play Billing — unchanged,
+  still out of scope.
 
 Listener profile content tabs (Shots/Posts/Photos/Voice) have no backend and
-show empty states; media upload is explicitly not part of Phase 1.1.
+show empty states; media upload is explicitly not part of this phase.
 
-Call CTAs on the listener profile are real UI showing the real backend rate, but
-the calling stack is not built. Outside production they surface "Calling arrives
-in Phase 2"; in production they are simply disabled. **No fake call connection
-is ever attempted.**
-
-The Socket.IO service connects after auth and tears down on sign-out, but
-subscribes to no events yet — see the presence row in the gaps table.
+The Socket.IO service connects after auth and tears down on sign-out. It now
+subscribes to the full call event surface (`call:incoming`, `call:accepted`,
+`call:tick`, `call:low_balance`, `call:forced_end`, `call:ended`,
+`listener:presence`) via `CallController`, which lives for the app's lifetime
+so an incoming call is caught regardless of which screen is open.

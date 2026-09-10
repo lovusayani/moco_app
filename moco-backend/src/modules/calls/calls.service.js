@@ -5,6 +5,7 @@ const billing = require('./billing.engine');
 const agora = require('../../integrations/agora');
 const callEvents = require('../../realtime/call.events');
 const presence = require('../../realtime/presence');
+const walletService = require('../wallet/wallet.service');
 const { scheduleTick } = require('../../workers/queues');
 const { notificationQueue } = require('../../workers/queues');
 const logger = require('../../utils/logger');
@@ -207,6 +208,10 @@ async function end({ callId, actorId, reason }) {
   const summary = await billing.endCall({ callId, reason: endReason, actorId });
   if (!summary) throw notFound('Call');
 
+  // The caller's balance after settlement, for the Call Ended Summary — read
+  // fresh rather than derived, since the wallet remains the only source of truth.
+  const callerBalance = await walletService.getBalance(summary.caller_id);
+
   const payload = {
     callId,
     reason: summary.end_reason,
@@ -215,6 +220,7 @@ async function end({ callId, actorId, reason }) {
     durationSeconds: summary.started_at
       ? Math.max(0, Math.round((new Date(summary.ended_at) - new Date(summary.started_at)) / 1000))
       : 0,
+    callerBalance,
   };
 
   if (!summary.alreadyEnded) {

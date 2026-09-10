@@ -9,7 +9,7 @@ const db = require('../src/config/db');
 const redisConfig = require('../src/config/redis');
 const { redis } = require('../src/config/redis');
 const queues = require('../src/workers/queues');
-const { resetDb, createUser } = require('./helpers');
+const { resetDb, createUser, createActiveCall, balanceOf } = require('./helpers');
 const { signToken } = require('../src/middleware/auth');
 const { KYC_STATUS } = require('../src/utils/constants');
 
@@ -268,6 +268,21 @@ test('a stranger cannot end someone else\'s call', async () => {
     body: {},
   });
   assert.equal(result.status, 403);
+});
+
+test('ending a call reports the caller\'s remaining balance', async () => {
+  await resetDb();
+  const caller = await createUser({ balance: 100 });
+  const listener = await createUser({ listener: true });
+  const activeCall = await createActiveCall({ caller, listener, type: 'audio' });
+
+  const result = await call('POST', `/api/calls/${activeCall.id}/end`, {
+    token: signToken(caller),
+    body: {},
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.callerBalance, await balanceOf(caller.id));
 });
 
 test('webhook signature verification rejects a forged signature', async () => {

@@ -152,7 +152,8 @@ Listener answers. **This starts the meter.** Minute 1 is billed immediately
 
 ### `POST /api/calls/:id/end`
 Either participant ends the call. Idempotent — the first end reason stands.
-Returns the summary for the call-ended screen.
+Returns the summary for the call-ended screen, including `callerBalance` — the
+caller's coin balance read fresh from the wallet after settlement.
 
 ### `GET /api/calls/:id`
 Call state, including live minute index, for restoring the UI after an app restart.
@@ -244,7 +245,7 @@ during a call to keep presence alive.
 | `call:tick` | both | `minuteIndex`, `coinsCharged`/`earned`, `balance`, `minutesRemaining` |
 | `call:low_balance` | caller | `balance`, `minutesRemaining`, `coinsPerMinute` |
 | `call:forced_end` | both | `reason: "insufficient_balance"`, `billedMinutes`, `coinsSpent` |
-| `call:ended` | both | `reason`, `billedMinutes`, `coinsSpent`, `durationSeconds` |
+| `call:ended` | both | `reason`, `billedMinutes`, `coinsSpent`, `durationSeconds`, `callerBalance` (listener payload also adds `earned`) |
 | `chat:message` | recipient | `conversationId`, `messageId`, `senderId`, `body` |
 
 `call:low_balance` fires at roughly one minute of runway and is **non-blocking** —

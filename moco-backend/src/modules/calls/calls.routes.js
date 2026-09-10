@@ -99,6 +99,7 @@ router.post(
       coinsSpent: summary.coins_spent,
       listenerEarned: summary.listener_earned,
       durationSeconds: summary.durationSeconds,
+      callerBalance: summary.callerBalance,
     });
   }),
 );

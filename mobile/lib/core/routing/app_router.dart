@@ -1,0 +1,135 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../features/app_shell/app_shell.dart';
+import '../../features/auth/login_screen.dart';
+import '../../features/discovery/discovery_screen.dart';
+import '../../features/listener_profile/listener_profile_screen.dart';
+import '../../features/onboarding/onboarding_screen.dart';
+import '../../features/profile_setup/profile_setup_screen.dart';
+import '../auth/auth_state.dart';
+import '../providers.dart';
+
+/// Route paths, named once so no screen builds a path from a string literal.
+class Routes {
+  const Routes._();
+
+  static const onboarding = '/onboarding';
+  static const login = '/login';
+  static const profileSetup = '/profile-setup';
+  static const app = '/app';
+  static const discovery = '/discovery';
+
+  /// Deep-link safe: the listener id is a path segment, so
+  /// `moco://listener/42` maps cleanly once deep links are enabled.
+  static const listener = '/listener/:id';
+  static String listenerPath(int id) => '/listener/$id';
+}
+
+final _rootNavigatorKey = GlobalKey<NavigatorState>();
+final _shellNavigatorKey = GlobalKey<NavigatorState>();
+
+final routerProvider = Provider<GoRouter>((ref) {
+  final auth = ref.watch(authActionsProvider);
+
+  return GoRouter(
+    navigatorKey: _rootNavigatorKey,
+    initialLocation: Routes.app,
+    // The controller is a Listenable, so every auth change re-evaluates
+    // redirects. This is what keeps routing and session state in lockstep.
+    refreshListenable: auth,
+    redirect: (context, state) => _redirect(auth.value, state),
+    routes: [
+      GoRoute(
+        path: Routes.onboarding,
+        builder: (context, state) => const OnboardingScreen(),
+      ),
+      GoRoute(
+        path: Routes.login,
+        builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: Routes.profileSetup,
+        builder: (context, state) => const ProfileSetupScreen(),
+      ),
+      GoRoute(
+        path: Routes.listener,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) {
+          final id = int.tryParse(state.pathParameters['id'] ?? '');
+          return ListenerProfileScreen(listenerId: id);
+        },
+      ),
+      // One shell for both roles. Listener capability is modelled as user state
+      // rather than a second navigation tree (Phase 1 decision).
+      ShellRoute(
+        navigatorKey: _shellNavigatorKey,
+        builder: (context, state, child) => AppShell(child: child),
+        routes: [
+          GoRoute(path: Routes.app, redirect: (_, __) => Routes.discovery),
+          GoRoute(
+            path: Routes.discovery,
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: DiscoveryScreen()),
+          ),
+          for (final tab in AppShellTab.values.where((t) => t.isPlaceholder))
+            GoRoute(
+              path: tab.path,
+              pageBuilder: (context, state) =>
+                  NoTransitionPage(child: PlaceholderTabScreen(tab: tab)),
+            ),
+        ],
+      ),
+    ],
+    errorBuilder: (context, state) => const _RouteNotFound(),
+  );
+});
+
+/// The single startup decision, evaluated on every navigation.
+///
+/// Order matters and mirrors the launch flow: onboarding, then authentication,
+/// then profile completeness. Returning null while initializing is what avoids
+/// redirect flicker — the app holds on the bootstrap screen instead of
+/// bouncing through login on its way to discovery.
+String? _redirect(AuthState auth, GoRouterState state) {
+  if (auth.isInitializing) return null;
+
+  final location = state.matchedLocation;
+  final atOnboarding = location == Routes.onboarding;
+  final atLogin = location == Routes.login;
+  final atProfileSetup = location == Routes.profileSetup;
+
+  if (!auth.onboardingComplete) {
+    return atOnboarding ? null : Routes.onboarding;
+  }
+
+  switch (auth.status) {
+    case AuthStatus.initializing:
+      return null;
+    case AuthStatus.unauthenticated:
+      return atLogin ? null : Routes.login;
+    case AuthStatus.awaitingProfile:
+      return atProfileSetup ? null : Routes.profileSetup;
+    case AuthStatus.authenticated:
+      // Bounce away from the pre-auth screens once signed in and complete.
+      if (atOnboarding || atLogin || atProfileSetup) return Routes.discovery;
+      return null;
+  }
+}
+
+class _RouteNotFound extends StatelessWidget {
+  const _RouteNotFound();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: TextButton(
+          onPressed: () => context.go(Routes.discovery),
+          child: const Text('Page not found — back to Discovery'),
+        ),
+      ),
+    );
+  }
+}

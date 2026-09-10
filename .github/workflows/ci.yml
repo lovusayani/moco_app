@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  # Only main on push. A PR branch would otherwise trigger BOTH this and the
+  # pull_request event for the same commit, running every check twice and
+  # doubling Actions minutes.
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: moco-backend
+
+    # The billing guarantees only exist in the database — atomic debits, the
+    # unique tick constraint, the Redis lock — so the suite runs against real
+    # Postgres and Redis rather than mocks.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: moco
+          POSTGRES_PASSWORD: moco
+          POSTGRES_DB: moco_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U moco"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: moco
+      PGPASSWORD: moco
+      PGDATABASE: moco_test
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      REDIS_DB: 1
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: moco-backend/package-lock.json
+      - run: npm ci
+      - name: Apply migrations
+        run: npm run migrate
+      - run: npm test
+
+  flutter:
+    name: Flutter client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # Models are hand-written Dart — no build_runner step. If codegen is
+      # reinstated (see mobile/README.md), add it back here before analyze:
+      #   - run: dart run build_runner build --delete-conflicting-outputs
+      - name: Check formatting
+        run: dart format --set-exit-if-changed lib test
+      - run: flutter analyze
+      - run: flutter test

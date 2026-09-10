@@ -1,0 +1,39 @@
+# Local development parity only — production runs Node under PM2 directly on the
+# droplet, with Postgres and Redis as host services (and later as DigitalOcean
+# managed add-ons). This file exists so a developer gets the right Postgres and
+# Redis versions without installing them by hand.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: moco
+      POSTGRES_PASSWORD: moco
+      POSTGRES_DB: moco
+    ports:
+      - '5432:5432'
+    volumes:
+      - moco_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U moco']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    # Billing state in Redis is rebuildable from Postgres, but appendonly makes
+    # a local restart less disruptive while developing.
+    command: redis-server --appendonly yes
+    ports:
+      - '6379:6379'
+    volumes:
+      - moco_redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  moco_pgdata:
+  moco_redisdata:

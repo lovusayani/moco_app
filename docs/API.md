@@ -55,6 +55,11 @@ Codes are single-use. The account and its wallet are created on first verify.
 | --- | --- | --- |
 | `GET` | `/api/users/me` | Profile, wallet balance, listener state |
 | `PATCH` | `/api/users/me` | Update name, avatar, language, gender |
+
+`GET` and `PATCH` return the **same canonical shape** — camelCase, at the top
+level, including wallet balance and listener state. (Before Phase 1.1, `PATCH`
+returned raw snake_case columns wrapped in `{ user: ... }`; clients that parsed
+that shape must be updated.)
 | `POST` | `/api/users/me/become-listener` | Opt into listener mode (creates an unverified profile) |
 | `POST` | `/api/users/me/fcm-token` | Register the device push token |
 | `DELETE` | `/api/users/me` | Account deletion (Play Store requirement) |
@@ -67,14 +72,38 @@ because the financial ledgers reference it and history must stay reconstructable
 ## Listeners
 
 ### `GET /api/listeners`
-Discovery grid. Query: `language`, `gender`, `online`, `limit`, `offset`.
+Discovery grid.
 
-Only KYC-approved, active, non-blocked listeners are returned. `isOnline`
-reflects both the listener's toggle *and* a live socket, so a listener whose app
-was killed is not shown as callable.
+| Query param | Values | Effect |
+| --- | --- | --- |
+| `language` | `en` `hi` `te` | Listener speaks it |
+| `gender` | `male` `female` `other` | |
+| `online` | `true` | Online only (omit for no preference) |
+| `q` | 1–60 chars | Server-side search over display name and bio, case-insensitive |
+| `callType` | `audio` `video` | Only listeners who accept that call type |
+| `limit` | 1–50, default 20 | |
+| `offset` | default 0 | |
+
+All filters compose. Only KYC-approved, active, non-blocked listeners are
+returned. `isOnline` reflects both the listener's toggle *and* a live socket, so
+a listener whose app was killed is not shown as callable.
+
+Each listener carries `verified` (a plain boolean — KYC internals are never
+exposed), plus `acceptsAudio` / `acceptsVideo` so a client can render capability
+without a second call.
 
 ### `GET /api/listeners/:id`
-Full listener profile.
+Full listener profile. Adds `ratingCount`, and the viewer's own relation state:
+`isFavorited`, `isFollowing`, `followerCount`.
+
+### `PUT /api/listeners/:id/:kind` · `DELETE /api/listeners/:id/:kind`
+`kind` is `favorite` or `follow`. Both are **idempotent**: repeating a PUT or a
+DELETE returns the same result rather than duplicating or erroring, so a client
+may retry safely after a dropped connection. Returns
+`{ listenerId, kind, active, followerCount }`.
+
+Only approved listeners can be followed. Following yourself is a 400
+(`self_relation`).
 
 ### `PATCH /api/listeners/status`
 `{ "isOnline": true }` — listener only. Refused with `kyc_required` until approved.
@@ -211,6 +240,7 @@ during a call to keep presence alive.
 | --- | --- | --- |
 | `call:incoming` | listener | `callId`, `callType`, `caller`, `agoraChannel`, `agoraToken` |
 | `call:accepted` | caller | `callId`, `startedAt`, `freeSeconds` |
+| `listener:presence` | all clients | `listenerId`, `isOnline`, `isBusy` — broadcast when a listener toggles availability or their socket drops |
 | `call:tick` | both | `minuteIndex`, `coinsCharged`/`earned`, `balance`, `minutesRemaining` |
 | `call:low_balance` | caller | `balance`, `minutesRemaining`, `coinsPerMinute` |
 | `call:forced_end` | both | `reason: "insufficient_balance"`, `billedMinutes`, `coinsSpent` |

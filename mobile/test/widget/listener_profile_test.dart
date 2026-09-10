@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moco/core/api/listeners_api.dart';
+import 'package:moco/core/widgets/moco_avatar.dart';
 import 'package:moco/core/errors/api_exception.dart';
 import 'package:moco/core/providers.dart';
 import 'package:moco/features/listener_profile/listener_profile_screen.dart';
@@ -14,6 +15,7 @@ class _MockListenersApi extends Mock implements ListenersApi {}
 
 const _detail = ListenerDetail(
   id: 7,
+  verified: true,
   displayName: 'Priya',
   bio: 'Here to listen, any time.',
   languages: ['hi', 'en'],
@@ -76,27 +78,176 @@ void main() {
     expect(find.textContaining('18/min'), findsOneWidget);
   });
 
-  testWidgets('favourite, follow and chat are disabled in Phase 1', (
+  testWidgets('favouriting calls the backend and flips the button', (
     tester,
   ) async {
+    when(() => api.byId(7)).thenAnswer((_) async => _detail);
+    when(
+      () => api.setRelation(
+        listenerId: any(named: 'listenerId'),
+        kind: any(named: 'kind'),
+        active: any(named: 'active'),
+      ),
+    ).thenAnswer(
+      (_) async => const RelationResult(
+        listenerId: 7,
+        kind: 'favorite',
+        active: true,
+        followerCount: 0,
+      ),
+    );
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('action_favorite')));
+    await tester.pumpAndSettle();
+
+    verify(() => api.setRelation(listenerId: 7, kind: 'favorite', active: true))
+        .called(1);
+    // Filled heart means the optimistic update stuck.
+    expect(find.byIcon(Icons.favorite_rounded), findsOneWidget);
+  });
+
+  testWidgets('following increments the visible follower count', (
+    tester,
+  ) async {
+    when(() => api.byId(7)).thenAnswer((_) async => _detail);
+    when(
+      () => api.setRelation(
+        listenerId: any(named: 'listenerId'),
+        kind: any(named: 'kind'),
+        active: any(named: 'active'),
+      ),
+    ).thenAnswer(
+      (_) async => const RelationResult(
+        listenerId: 7,
+        kind: 'follow',
+        active: true,
+        followerCount: 1,
+      ),
+    );
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+    expect(find.text('0'), findsWidgets);
+
+    await tester.tap(find.byKey(const Key('action_follow')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('1'), findsWidgets);
+    expect(find.text('follower'), findsOneWidget);
+  });
+
+  testWidgets('a failed favourite rolls back rather than sticking', (
+    tester,
+  ) async {
+    when(() => api.byId(7)).thenAnswer((_) async => _detail);
+    when(
+      () => api.setRelation(
+        listenerId: any(named: 'listenerId'),
+        kind: any(named: 'kind'),
+        active: any(named: 'active'),
+      ),
+    ).thenThrow(
+      const ApiException(
+        kind: ApiErrorKind.network,
+        message: "You're offline. Reconnect and try again.",
+      ),
+    );
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('action_favorite')));
+    await tester.pumpAndSettle();
+
+    // Back to the outline heart: nothing was persisted, so nothing may look
+    // persisted. A stuck optimistic update would show a favourite that the
+    // server never recorded.
+    expect(find.byIcon(Icons.favorite_border_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.favorite_rounded), findsNothing);
+    expect(find.textContaining("offline"), findsOneWidget);
+  });
+
+  testWidgets('a failed follow rolls the count back too', (tester) async {
+    when(() => api.byId(7)).thenAnswer((_) async => _detail);
+    when(
+      () => api.setRelation(
+        listenerId: any(named: 'listenerId'),
+        kind: any(named: 'kind'),
+        active: any(named: 'active'),
+      ),
+    ).thenThrow(
+      const ApiException(
+        kind: ApiErrorKind.server,
+        message: 'Moco is having trouble right now.',
+      ),
+    );
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('action_follow')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('followers'), findsOneWidget);
+    expect(find.text('1'), findsNothing);
+  });
+
+  testWidgets('an already-favourited listener renders as favourited', (
+    tester,
+  ) async {
+    when(() => api.byId(7))
+        .thenAnswer((_) async => _detail.copyWith(isFavorited: true));
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.favorite_rounded), findsOneWidget);
+  });
+
+  testWidgets('chat stays disabled until Phase 3', (tester) async {
     when(() => api.byId(7)).thenAnswer((_) async => _detail);
 
     await tester.pumpWidget(subject());
     await tester.pumpAndSettle();
 
-    // No backend endpoint exists, so these must not appear functional.
-    for (final icon in [
-      Icons.favorite_border_rounded,
-      Icons.person_add_alt_1_outlined,
-      Icons.chat_bubble_outline_rounded,
-    ]) {
-      final button = tester.widget<InkWell>(
-        find
-            .ancestor(of: find.byIcon(icon), matching: find.byType(InkWell))
-            .first,
-      );
-      expect(button.onTap, isNull, reason: '$icon must be disabled');
-    }
+    final chat = tester.widget<InkWell>(
+      find
+          .ancestor(
+            of: find.byIcon(Icons.chat_bubble_outline_rounded),
+            matching: find.byType(InkWell),
+          )
+          .first,
+    );
+    expect(chat.onTap, isNull);
+  });
+
+  testWidgets('only the call types a listener accepts are offered', (
+    tester,
+  ) async {
+    when(() => api.byId(7)).thenAnswer(
+      (_) async => _detail.copyWith(acceptsAudio: true, acceptsVideo: false),
+    );
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('cta_audio_call')), findsOneWidget);
+    // Offering a video call to someone who does not take them would fail at
+    // the point of calling.
+    expect(find.byKey(const Key('cta_video_call')), findsNothing);
+  });
+
+  testWidgets('an unverified listener shows no verified badge', (tester) async {
+    when(() => api.byId(7))
+        .thenAnswer((_) async => _detail.copyWith(verified: false));
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+
+    expect(find.byType(MocoVerifiedBadge), findsNothing);
   });
 
   testWidgets('an offline listener cannot be called', (tester) async {
@@ -150,13 +301,25 @@ void main() {
     await tester.pumpWidget(subject());
     await tester.pumpAndSettle();
 
-    // The screen nests a horizontal tab strip inside the vertical list, so
-    // scrollUntilVisible cannot pick a scrollable on its own.
+    // The screen nests a horizontal tab strip inside the vertical list, so the
+    // outer scrollable has to be named explicitly. ensureVisible alone can park
+    // the chip underneath the compact header, which then swallows the tap.
     final postsChip = find.byKey(const Key('profile_tab_chip_posts'));
-    await tester.ensureVisible(postsChip);
+    final scrollable = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(postsChip, 40, scrollable: scrollable);
     await tester.pumpAndSettle();
 
-    await tester.tap(postsChip);
+    // The sticky compact header legitimately absorbs taps in its own area, so
+    // nudge the chip clear of it before tapping rather than tapping through it.
+    final headerBottom = tester.getRect(find.byType(ListView).first).top + 140;
+    var centre = tester.getCenter(postsChip);
+    if (centre.dy < headerBottom) {
+      await tester.drag(scrollable, Offset(0, headerBottom - centre.dy + 20));
+      await tester.pumpAndSettle();
+      centre = tester.getCenter(postsChip);
+    }
+
+    await tester.tap(postsChip, warnIfMissed: true);
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('profile_tab_posts')), findsOneWidget);

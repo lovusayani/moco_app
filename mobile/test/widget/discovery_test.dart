@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:moco/features/discovery/discovery_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moco/core/api/listeners_api.dart';
@@ -119,7 +120,7 @@ void main() {
     expect(find.text('Try again'), findsOneWidget);
   });
 
-  testWidgets('the audio/video toggle switches the displayed rate', (
+  testWidgets('the audio/video toggle filters server-side, not just relabels', (
     tester,
   ) async {
     when(
@@ -141,6 +142,155 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('12/min'), findsOneWidget);
+
+    // The toggle must reach the API as a real capability filter — previously
+    // it only changed which rate was displayed.
+    final captured = verify(
+      () => api.discover(
+        filters: captureAny(named: 'filters'),
+        offset: any(named: 'offset'),
+      ),
+    ).captured;
+    expect(
+      captured.whereType<DiscoveryFilters>().any((f) => f.callType == 'video'),
+      isTrue,
+    );
+  });
+
+  testWidgets('search reaches the backend as a query parameter', (
+    tester,
+  ) async {
+    when(
+      () => api.discover(
+        filters: any(named: 'filters'),
+        offset: any(named: 'offset'),
+      ),
+    ).thenAnswer(
+      (_) async => DiscoveryPage(listeners: [_listener(1, 'Priya')]),
+    );
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('discovery_search_toggle')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('discovery_search_field')),
+      'Priya',
+    );
+    // Search is debounced, so nothing should fire immediately.
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpAndSettle(const Duration(milliseconds: 500));
+
+    final captured = verify(
+      () => api.discover(
+        filters: captureAny(named: 'filters'),
+        offset: any(named: 'offset'),
+      ),
+    ).captured;
+    expect(
+      captured.whereType<DiscoveryFilters>().any((f) => f.query == 'Priya'),
+      isTrue,
+      reason: 'search must be server-side, not a filter over the loaded page',
+    );
+  });
+
+  testWidgets('an empty search result says so, distinctly from no listeners', (
+    tester,
+  ) async {
+    when(
+      () => api.discover(
+        filters: any(named: 'filters'),
+        offset: any(named: 'offset'),
+      ),
+    ).thenAnswer((_) async => const DiscoveryPage());
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('discovery_search_toggle')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('discovery_search_field')),
+      'zzz',
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 500));
+
+    expect(find.text('No matches'), findsOneWidget);
+    // The query echoes in the message. Scoped to the empty state, since the
+    // search field also contains it.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('discovery_empty')),
+        matching: find.textContaining('zzz'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a live presence event updates a card without a refetch', (
+    tester,
+  ) async {
+    when(
+      () => api.discover(
+        filters: any(named: 'filters'),
+        offset: any(named: 'offset'),
+      ),
+    ).thenAnswer(
+      (_) async =>
+          DiscoveryPage(listeners: [_listener(1, 'Priya', online: true)]),
+    );
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+    expect(find.text('Online'), findsOneWidget);
+
+    // What the socket handler does when the server broadcasts a change.
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(DiscoveryScreen)),
+    );
+    container
+        .read(discoveryControllerProvider.notifier)
+        .applyPresence(listenerId: 1, isOnline: false, isBusy: false);
+    await tester.pumpAndSettle();
+
+    // The card reflects it with no additional discover() call — one for the
+    // initial load, and nothing more.
+    expect(find.text('Online'), findsNothing);
+    verify(
+      () => api.discover(
+        filters: any(named: 'filters'),
+        offset: any(named: 'offset'),
+      ),
+    ).called(1);
+  });
+
+  testWidgets('presence for a listener not on screen is ignored', (
+    tester,
+  ) async {
+    when(
+      () => api.discover(
+        filters: any(named: 'filters'),
+        offset: any(named: 'offset'),
+      ),
+    ).thenAnswer(
+      (_) async => DiscoveryPage(listeners: [_listener(1, 'Priya')]),
+    );
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(DiscoveryScreen)),
+    );
+    // A listener who does not match the active filters must not be injected.
+    container
+        .read(discoveryControllerProvider.notifier)
+        .applyPresence(listenerId: 999, isOnline: true, isBusy: false);
+    await tester.pumpAndSettle();
+
+    expect(container.read(discoveryControllerProvider).listeners.length, 1);
   });
 
   testWidgets('selecting a language filter re-queries the backend', (

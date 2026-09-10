@@ -39,6 +39,28 @@ Future<Map<String, dynamic>> post(
   return jsonDecode(body) as Map<String, dynamic>;
 }
 
+/// Generic request helper, for the verbs `get`/`post` above do not cover.
+Future<Map<String, dynamic>> send(
+  String method,
+  String path, {
+  String? token,
+  Map<String, dynamic>? data,
+}) async {
+  final client = HttpClient();
+  final request = await client.openUrl(method, Uri.parse('$base$path'));
+  if (token != null) request.headers.set('Authorization', 'Bearer $token');
+  if (data != null) {
+    request.headers.contentType = ContentType.json;
+    request.write(jsonEncode(data));
+  }
+  final response = await request.close();
+  final body = await response.transform(utf8.decoder).join();
+  client.close();
+  return body.isEmpty
+      ? <String, dynamic>{}
+      : jsonDecode(body) as Map<String, dynamic>;
+}
+
 void check(String label, bool ok, [String detail = '']) {
   print('${ok ? "PASS" : "FAIL"}  $label${detail.isEmpty ? '' : ' — $detail'}');
   if (!ok) exitCode = 1;
@@ -119,6 +141,91 @@ Future<void> main() async {
     'ratingCount is present only on the detail endpoint',
     detail.ratingCount >= 0,
     'ratingCount=${detail.ratingCount}',
+  );
+
+  // --- Phase 1.1: PATCH /users/me is now canonical
+  final patched = MocoUser.fromJson(
+    await send(
+      'PATCH',
+      '/users/me',
+      token: session.token,
+      data: {'displayName': 'Rahul', 'language': 'hi'},
+    ),
+  );
+  check('PATCH /users/me parses as MocoUser', patched.displayName == 'Rahul');
+  check('PATCH now completes the profile', patched.isProfileComplete);
+
+  final refetched = MocoUser.fromJson(
+    await get('/users/me', token: session.token),
+  );
+  check(
+    'PATCH and GET agree',
+    patched.displayName == refetched.displayName &&
+        patched.language == refetched.language &&
+        patched.coinBalance == refetched.coinBalance,
+  );
+
+  // --- Server-side search
+  final searched = DiscoveryPage.fromJson(
+    await get(
+      '/listeners?q=${Uri.encodeQueryComponent(first.name)}',
+      token: session.token,
+    ),
+  );
+  check(
+    'server-side search returns a match',
+    searched.listeners.isNotEmpty,
+    '${searched.listeners.length} for "${first.name}"',
+  );
+
+  final noMatch = DiscoveryPage.fromJson(
+    await get('/listeners?q=zzzznotfound', token: session.token),
+  );
+  check('a search miss is an empty page', noMatch.listeners.isEmpty);
+
+  // --- Capability filtering
+  final audioOnly = DiscoveryPage.fromJson(
+    await get('/listeners?callType=audio', token: session.token),
+  );
+  check(
+    'callType=audio returns only audio-capable listeners',
+    audioOnly.listeners.every((l) => l.acceptsAudio),
+    '${audioOnly.listeners.length} listeners',
+  );
+
+  // --- Verified is published, KYC is not
+  check(
+    'verified is a real published boolean',
+    first.verified,
+    'verified=${first.verified}',
+  );
+
+  // --- Relations: idempotent both ways
+  final favUrl = '/listeners/${first.id}/favorite';
+  final firstPut = await send('PUT', favUrl, token: session.token);
+  final secondPut = await send('PUT', favUrl, token: session.token);
+  check(
+    'favourite is idempotent',
+    firstPut['active'] == true && secondPut['active'] == true,
+  );
+
+  final withFav = ListenerDetail.fromJson(
+    await get('/listeners/${first.id}', token: session.token),
+  );
+  check('the profile reports the favourite', withFav.isFavorited);
+
+  await send('DELETE', favUrl, token: session.token);
+  final cleared = ListenerDetail.fromJson(
+    await get('/listeners/${first.id}', token: session.token),
+  );
+  check('removing a favourite persists', !cleared.isFavorited);
+
+  final followUrl = '/listeners/${first.id}/follow';
+  final followed = await send('PUT', followUrl, token: session.token);
+  check(
+    'follow returns a follower count',
+    (followed['followerCount'] as num) >= 1,
+    'count=${followed['followerCount']}',
   );
 
   print(exitCode == 0 ? '\nAll contract checks passed.' : '\nContract drift.');

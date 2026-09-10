@@ -163,22 +163,36 @@ authentication, then profile completeness. While the stored session is being
 verified the app holds on a neutral loading surface rather than flashing through
 login on its way to Discovery.
 
-## API gaps found during Phase 1
+## API gaps — status after Phase 1.1
 
-Design features with no backend support. None are faked client-side.
+Most of the Phase 1 gaps are now closed with real backend support.
+
+### Closed
+
+| Was | Now |
+| --- | --- |
+| Discovery search filtered the loaded page client-side | **Real `q` parameter**, searched server-side over display name and bio, composing with filters and pagination. Debounced 350ms client-side. |
+| Callers/Video toggle only changed the displayed rate | **Real `callType` filter**, backed by `accepts_audio` / `accepts_video`. The toggle refetches. |
+| Verified badge was hardcoded `true` | **Published `verified` boolean.** KYC status itself is still never sent to clients. |
+| Favourite / Follow were disabled | **Real, idempotent, backend-persisted.** Optimistic in the UI with full rollback on failure. |
+| `listener:presence` declared but never emitted | **Emitted** on the listener's online toggle and on socket disconnect, broadcast to all clients. Discovery updates in place. |
+| `PATCH /users/me` returned snake_case | **Canonical camelCase**, identical to `GET`. The client's extra re-read is gone. |
+
+### Still open
 
 | Design feature | Backend status | What the client does |
 | --- | --- | --- |
-| Discovery search | `GET /listeners` has no search param | Filters the **already-loaded page** client-side. Labelled "Search loaded listeners", not presented as a full search. |
-| Callers/Video toggle | No per-listener capability flag; every listener has both rates | Switches which **rate is displayed**. It is not a filter. |
-| Verified badge | No `verified` field | Discovery only ever returns KYC-approved listeners, so every visible listener is verified by construction. Badge shown on that basis. |
 | Listener age | Not exposed | Omitted. |
-| Favourite / Follow | No endpoints | Buttons visible but **disabled** with a tooltip. Nothing is stored locally to fake a like. |
 | Similar listeners | No similarity endpoint | Client-side heuristic over real discovery data: same primary language, self excluded. |
-| Shots / Posts / Photos / Voice | No content endpoints | Tabs render an honest empty state. |
+| Shots / Posts / Photos / Voice | No content endpoints | Tabs render honest empty states. Deliberately out of scope for Phase 1.1. |
 | Profile interests / preferences | `PATCH /users/me` accepts only `displayName`, `avatarUrl`, `language`, `gender` | Only the supported fields are collected. |
-| Live presence | `listener:presence` is declared in `constants.js` but **never emitted** | Online state comes from the HTTP response. Pull-to-refresh updates it; there is no live stream to subscribe to. |
-| `PATCH /users/me` response shape | Returns snake_case (`display_name`) while `GET /users/me` returns camelCase (`displayName`) | Client re-reads `GET /users/me` after a patch rather than parsing two shapes for one resource. **No backend change was made.** |
+
+### Known scale note
+
+Discovery search uses unanchored `ILIKE`, which cannot use a btree index. It is
+scoped to KYC-approved listeners so it is fine at current volume; a `pg_trgm`
+GIN index on `(display_name, bio)` is the scale-up path, and the query carries a
+comment saying so.
 
 ## Phase 2+ placeholders
 
@@ -189,6 +203,9 @@ development placeholder rather than invented feature UI:
 - **Profile** — Phase 2
 - **Chats** — Phase 3 (backend endpoints exist; no UI yet)
 - **Feed** — later phase (no backend at all)
+
+Listener profile content tabs (Shots/Posts/Photos/Voice) have no backend and
+show empty states; media upload is explicitly not part of Phase 1.1.
 
 Call CTAs on the listener profile are real UI showing the real backend rate, but
 the calling stack is not built. Outside production they surface "Calling arrives

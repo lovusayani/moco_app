@@ -156,12 +156,19 @@ class MocoPrimaryButton extends StatelessWidget {
                             ),
                             const SizedBox(width: MocoSpacing.sm),
                           ],
-                          Text(
-                            label,
-                            style: const TextStyle(
-                              color: MocoColors.textOnAccent,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
+                          // Flexible so a long label ellipsises inside the
+                          // button instead of overflowing the row — call CTAs
+                          // carry a rate, so their width is data-dependent.
+                          Flexible(
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: MocoColors.textOnAccent,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         ],
@@ -200,7 +207,7 @@ class MocoSecondaryButton extends StatelessWidget {
         child: OutlinedButton.icon(
           onPressed: onPressed,
           icon: icon == null ? const SizedBox.shrink() : Icon(icon, size: 20),
-          label: Text(label),
+          label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
           style: OutlinedButton.styleFrom(
             foregroundColor: MocoColors.textPrimary,
             side: const BorderSide(color: MocoColors.borderStrong),

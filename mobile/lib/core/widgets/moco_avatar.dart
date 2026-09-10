@@ -98,9 +98,8 @@ class _Fallback extends StatelessWidget {
 
 /// Verified marker.
 ///
-/// The backend only ever returns KYC-approved listeners from discovery, so
-/// every listener the client can see is verified by construction. There is no
-/// per-listener `verified` field to read (see mobile/README.md, API gaps).
+/// Driven by the server's public `verified` boolean. KYC status itself is never
+/// sent to clients — only this derived flag.
 class MocoVerifiedBadge extends StatelessWidget {
   const MocoVerifiedBadge({super.key, this.size = 16});
 

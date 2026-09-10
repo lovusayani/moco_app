@@ -120,13 +120,19 @@ class _ProfileBody extends ConsumerWidget {
     final user = ref.watch(authControllerProvider).user;
     final similar = ref.watch(similarListenersProvider(listener));
 
+    // The relations controller is seeded from the fetched profile and owns
+    // follow/favourite state from then on. Reading it here — rather than the
+    // fetched value — is what lets the follower count update the moment the
+    // button is pressed, and roll back with it on failure.
+    final current = ref.watch(listenerRelationsProvider(listener));
+
     return Stack(
       children: [
         ListView(
           controller: scrollController,
           padding: EdgeInsets.zero,
           children: [
-            _Hero(listener: listener),
+            _Hero(listener: current),
             Padding(
               padding: const EdgeInsets.symmetric(
                 horizontal: MocoSpacing.screenPadding,
@@ -135,7 +141,7 @@ class _ProfileBody extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: MocoSpacing.lg),
-                  _ActionRow(listenerId: listener.id),
+                  _ActionRow(listener: listener),
                   const SizedBox(height: MocoSpacing.xl),
                   if ((listener.bio ?? '').trim().isNotEmpty) ...[
                     const MocoSectionHeader(title: 'About'),
@@ -166,7 +172,9 @@ class _ProfileBody extends ConsumerWidget {
                   const SizedBox(height: MocoSpacing.lg),
                   // Honest empty content: no backend exists for these tabs.
                   SizedBox(
-                    height: 180,
+                    // MocoEmptyState needs ~200 at its natural size; 180 clipped
+                    // it by a pixel on every width.
+                    height: 208,
                     child: MocoEmptyState(
                       key: Key('profile_tab_${tab.name}'),
                       icon: Icons.photo_library_outlined,
@@ -333,8 +341,10 @@ class _Hero extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 6),
-              const MocoVerifiedBadge(size: 20),
+              if (listener.verified) ...[
+                const SizedBox(width: 6),
+                const MocoVerifiedBadge(size: 20),
+              ],
             ],
           ),
           const SizedBox(height: MocoSpacing.sm),
@@ -360,28 +370,53 @@ class _Hero extends StatelessWidget {
             ],
           ),
           const SizedBox(height: MocoSpacing.lg),
+          // Three stats with fixed-width dividers overflowed a 360px screen
+          // once follower counts reached four digits. Each stat now takes an
+          // equal share and truncates, so the row fits at any width.
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _Stat(
-                value: listener.rating > 0
-                    ? listener.rating.toStringAsFixed(1)
-                    : '—',
-                label: listener.ratingCount == 1
-                    ? '1 rating'
-                    : '${listener.ratingCount} ratings',
+              Expanded(
+                child: _Stat(
+                  value: listener.rating > 0
+                      ? listener.rating.toStringAsFixed(1)
+                      : '—',
+                  label: listener.ratingCount == 1
+                      ? '1 rating'
+                      : '${listener.ratingCount} ratings',
+                ),
               ),
-              Container(
-                width: 1,
-                height: 30,
-                color: MocoColors.borderSubtle,
-                margin: const EdgeInsets.symmetric(horizontal: MocoSpacing.xl),
+              const _StatDivider(),
+              Expanded(
+                child: _Stat(
+                  value: '${listener.totalCalls}',
+                  label: 'calls taken',
+                ),
               ),
-              _Stat(value: '${listener.totalCalls}', label: 'calls taken'),
+              const _StatDivider(),
+              Expanded(
+                child: _Stat(
+                  value: '${listener.followerCount}',
+                  label: listener.followerCount == 1 ? 'follower' : 'followers',
+                ),
+              ),
             ],
           ),
         ],
       ),
+    );
+  }
+}
+
+class _StatDivider extends StatelessWidget {
+  const _StatDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 1,
+      height: 30,
+      color: MocoColors.borderSubtle,
+      margin: const EdgeInsets.symmetric(horizontal: MocoSpacing.md),
     );
   }
 }
@@ -395,6 +430,7 @@ class _Stat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           value,
@@ -406,6 +442,9 @@ class _Stat extends StatelessWidget {
         ),
         Text(
           label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
           style: const TextStyle(color: MocoColors.textMuted, fontSize: 12),
         ),
       ],
@@ -462,32 +501,59 @@ class _CompactHeader extends StatelessWidget {
 
 /// Favourite / Follow / Chat.
 ///
-/// The backend exposes NO favourite or follow endpoint, so those stay disabled
-/// rather than storing a like locally and pretending it synced. Chat has real
-/// endpoints but no UI until Phase 3.
-class _ActionRow extends StatelessWidget {
-  const _ActionRow({required this.listenerId});
+/// Favourite and follow are real, backend-persisted and idempotent. They update
+/// optimistically and roll back on failure — nothing is stored locally, so a
+/// rollback means the action genuinely did not happen.
+///
+/// Chat has real endpoints but no UI until Phase 3, so it stays disabled.
+class _ActionRow extends ConsumerWidget {
+  const _ActionRow({required this.listener});
 
-  final int listenerId;
+  final ListenerDetail listener;
+
+  Future<void> _run(
+    BuildContext context,
+    Future<ApiException?> Function() action,
+  ) async {
+    final error = await action();
+    if (error == null || !context.mounted) return;
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(error.message)));
+  }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = ref.watch(listenerRelationsProvider(listener));
+    final controller = ref.read(listenerRelationsProvider(listener).notifier);
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         MocoIconButton(
-          icon: Icons.favorite_border_rounded,
-          tooltip: 'Favourites arrive in a later phase',
-          onPressed: null,
+          key: const Key('action_favorite'),
+          icon: current.isFavorited
+              ? Icons.favorite_rounded
+              : Icons.favorite_border_rounded,
+          active: current.isFavorited,
+          tooltip: current.isFavorited
+              ? 'Remove from favourites'
+              : 'Add to favourites',
+          onPressed: () => _run(context, controller.toggleFavorite),
         ),
         const SizedBox(width: MocoSpacing.lg),
         MocoIconButton(
-          icon: Icons.person_add_alt_1_outlined,
-          tooltip: 'Following arrives in a later phase',
-          onPressed: null,
+          key: const Key('action_follow'),
+          icon: current.isFollowing
+              ? Icons.person_remove_alt_1_outlined
+              : Icons.person_add_alt_1_outlined,
+          active: current.isFollowing,
+          tooltip: current.isFollowing ? 'Unfollow' : 'Follow',
+          onPressed: () => _run(context, controller.toggleFollow),
         ),
         const SizedBox(width: MocoSpacing.lg),
-        MocoIconButton(
+        const MocoIconButton(
+          key: Key('action_chat'),
           icon: Icons.chat_bubble_outline_rounded,
           tooltip: 'Chat arrives in Phase 3',
           onPressed: null,
@@ -582,25 +648,34 @@ class _CallBar extends StatelessWidget {
                 ),
               ),
             ),
+          // Only offer a call type this listener actually accepts — offering
+          // video to someone who does not take video fails at call time.
           Row(
             children: [
-              Expanded(
-                child: MocoSecondaryButton(
-                  key: const Key('cta_audio_call'),
-                  label: 'Audio · ${listener.audioRate}/min',
-                  icon: Icons.call_rounded,
-                  onPressed: enabled ? () => _notReady(context, 'Audio') : null,
+              if (listener.acceptsAudio)
+                Expanded(
+                  child: MocoSecondaryButton(
+                    key: const Key('cta_audio_call'),
+                    label: 'Audio · ${listener.audioRate}/min',
+                    icon: Icons.call_rounded,
+                    onPressed: enabled
+                        ? () => _notReady(context, 'Audio')
+                        : null,
+                  ),
                 ),
-              ),
-              const SizedBox(width: MocoSpacing.md),
-              Expanded(
-                child: MocoPrimaryButton(
-                  key: const Key('cta_video_call'),
-                  label: 'Video · ${listener.videoRate}/min',
-                  icon: Icons.videocam_rounded,
-                  onPressed: enabled ? () => _notReady(context, 'Video') : null,
+              if (listener.acceptsAudio && listener.acceptsVideo)
+                const SizedBox(width: MocoSpacing.md),
+              if (listener.acceptsVideo)
+                Expanded(
+                  child: MocoPrimaryButton(
+                    key: const Key('cta_video_call'),
+                    label: 'Video · ${listener.videoRate}/min',
+                    icon: Icons.videocam_rounded,
+                    onPressed: enabled
+                        ? () => _notReady(context, 'Video')
+                        : null,
+                  ),
                 ),
-              ),
             ],
           ),
         ],

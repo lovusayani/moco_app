@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  # Only main on push. A PR branch would otherwise trigger BOTH this and the
+  # pull_request event for the same commit, running every check twice and
+  # doubling Actions minutes.
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 jobs:

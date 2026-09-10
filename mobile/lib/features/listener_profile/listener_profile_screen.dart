@@ -2,15 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/config/env.dart';
+import '../../core/calling/call_controller.dart';
+import '../../core/calling/call_session.dart';
 import '../../core/errors/api_exception.dart';
 import '../../core/providers.dart';
+import '../../core/routing/app_router.dart';
 import '../../core/theme/moco_colors.dart';
 import '../../core/theme/moco_spacing.dart';
 import '../../core/widgets/moco_avatar.dart';
 import '../../core/widgets/moco_background.dart';
 import '../../core/widgets/moco_states.dart';
 import '../../core/widgets/moco_surfaces.dart';
+import '../../shared/models/call.dart';
 import '../../shared/models/listener.dart';
 import 'listener_profile_controller.dart';
 
@@ -598,29 +601,45 @@ class _ProfileTabs extends StatelessWidget {
 
 /// Call CTAs.
 ///
-/// The UI and the backend-derived price are real; the calling stack is not
-/// built until Phase 2. Rather than fake a connection, the buttons are gated:
-/// outside production they explain when calling arrives, and in production they
-/// are simply disabled.
-class _CallBar extends StatelessWidget {
+/// Tapping either button starts a REAL call: `initiateCall` runs the
+/// server-side pre-flight balance check and atomically claims the listener —
+/// this widget makes no availability or balance decision of its own, it only
+/// reacts to what the call controller reports back.
+class _CallBar extends ConsumerWidget {
   const _CallBar({required this.listener, required this.freeCall});
 
   final ListenerDetail listener;
   final bool freeCall;
 
-  void _notReady(BuildContext context, String type) {
-    if (!Env.showDevPlaceholders) return;
+  Future<void> _call(
+    BuildContext context,
+    WidgetRef ref,
+    CallType type,
+  ) async {
+    final controller = ref.read(callControllerProvider.notifier);
+    await controller.initiateCall(listener: listener, type: type);
+    if (!context.mounted) return;
+
+    final session = ref.read(callControllerProvider);
+    if (session.phase == CallPhase.ringing) {
+      context.push(Routes.callOutgoing);
+      return;
+    }
+
+    // initiateCall() already turned this into a typed ApiException — surface
+    // its human-readable message rather than inventing our own copy.
+    final message = session.error?.message ?? 'Could not start the call.';
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$type calling arrives in Phase 2.'),
-        duration: const Duration(seconds: 2),
-      ),
+      SnackBar(content: Text(message), duration: const Duration(seconds: 3)),
     );
   }
 
   @override
-  Widget build(BuildContext context) {
-    final enabled = Env.showDevPlaceholders && listener.isAvailable;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isBusy = ref.watch(
+      callControllerProvider.select((s) => s.isBusy && s.phase == CallPhase.initiating),
+    );
+    final enabled = listener.isAvailable && !isBusy;
 
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -659,7 +678,7 @@ class _CallBar extends StatelessWidget {
                     label: 'Audio · ${listener.audioRate}/min',
                     icon: Icons.call_rounded,
                     onPressed: enabled
-                        ? () => _notReady(context, 'Audio')
+                        ? () => _call(context, ref, CallType.audio)
                         : null,
                   ),
                 ),
@@ -672,7 +691,7 @@ class _CallBar extends StatelessWidget {
                     label: 'Video · ${listener.videoRate}/min',
                     icon: Icons.videocam_rounded,
                     onPressed: enabled
-                        ? () => _notReady(context, 'Video')
+                        ? () => _call(context, ref, CallType.video)
                         : null,
                   ),
                 ),

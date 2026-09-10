@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/calling/call_controller.dart';
+import '../../core/calling/call_session.dart';
 import '../../core/config/env.dart';
+import '../../core/routing/app_router.dart';
 import '../../core/theme/moco_colors.dart';
 import '../../core/theme/moco_spacing.dart';
 import '../../core/widgets/moco_background.dart';
@@ -65,7 +69,7 @@ enum AppShellTab {
   };
 }
 
-class AppShell extends StatelessWidget {
+class AppShell extends ConsumerWidget {
   const AppShell({super.key, required this.child});
 
   final Widget child;
@@ -79,8 +83,17 @@ class AppShell extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final index = _indexFor(context);
+
+    // Global: an incoming call must interrupt whatever tab is on screen. The
+    // controller's socket subscription is already app-lifetime (see
+    // CallController), so this only has to react to the phase, not re-listen.
+    ref.listen<CallSession>(callControllerProvider, (previous, next) {
+      if (previous?.phase != CallPhase.idle) return;
+      if (next.phase != CallPhase.incoming) return;
+      context.push(Routes.callIncoming);
+    });
 
     return Scaffold(
       extendBody: true,

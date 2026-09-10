@@ -4,6 +4,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/app_shell/app_shell.dart';
 import '../../features/auth/login_screen.dart';
+import '../../features/calling/active_audio_call_screen.dart';
+import '../../features/calling/active_video_call_screen.dart';
+import '../../features/calling/call_ended_summary_screen.dart';
+import '../../features/calling/incoming_call_screen.dart';
+import '../../features/calling/outgoing_call_screen.dart';
 import '../../features/discovery/discovery_screen.dart';
 import '../../features/listener_profile/listener_profile_screen.dart';
 import '../../features/onboarding/onboarding_screen.dart';
@@ -25,6 +30,15 @@ class Routes {
   /// `moco://listener/42` maps cleanly once deep links are enabled.
   static const listener = '/listener/:id';
   static String listenerPath(int id) => '/listener/$id';
+
+  /// Call screens read the live [CallSession] from `callControllerProvider`
+  /// rather than route parameters — there is exactly one call in progress at
+  /// a time, so nothing here needs to be threaded through the URL.
+  static const callOutgoing = '/call/outgoing';
+  static const callIncoming = '/call/incoming';
+  static const callActiveAudio = '/call/active/audio';
+  static const callActiveVideo = '/call/active/video';
+  static const callSummary = '/call/summary';
 }
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -60,6 +74,35 @@ final routerProvider = Provider<GoRouter>((ref) {
           final id = int.tryParse(state.pathParameters['id'] ?? '');
           return ListenerProfileScreen(listenerId: id);
         },
+      ),
+      // Call screens are full-screen and outside the tab shell, like a phone
+      // call overlaying whatever app was open — none of them are reachable by
+      // a back-swipe (each disables system pop; the call controller owns
+      // leaving a call, not the navigator).
+      GoRoute(
+        path: Routes.callOutgoing,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const OutgoingCallScreen(),
+      ),
+      GoRoute(
+        path: Routes.callIncoming,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const IncomingCallScreen(),
+      ),
+      GoRoute(
+        path: Routes.callActiveAudio,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const ActiveAudioCallScreen(),
+      ),
+      GoRoute(
+        path: Routes.callActiveVideo,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const ActiveVideoCallScreen(),
+      ),
+      GoRoute(
+        path: Routes.callSummary,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const CallEndedSummaryScreen(),
       ),
       // One shell for both roles. Listener capability is modelled as user state
       // rather than a second navigation tree (Phase 1 decision).

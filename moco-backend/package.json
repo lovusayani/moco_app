@@ -20,6 +20,7 @@
     "smoke": "node scripts/supabase_smoke_test.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
     "agora-token": "^2.0.5",
     "bullmq": "^5.34.0",
     "dotenv": "^16.4.7",

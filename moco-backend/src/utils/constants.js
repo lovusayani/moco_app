@@ -125,10 +125,22 @@ const WS_EVENTS = Object.freeze({
   CALL_ENDED: 'call:ended',
   PRESENCE: 'listener:presence',
   CHAT_MESSAGE: 'chat:message',
+  CHAT_REACTION: 'chat:reaction',
 });
 
 /** Minimum a listener must have accrued before requesting a withdrawal. */
 const MIN_PAYOUT_INR = 100;
+
+/** Chat message content types. Mirrors the `message_type` Postgres enum. */
+const MESSAGE_TYPE = Object.freeze({ TEXT: 'text', IMAGE: 'image' });
+
+/** Server-side limits for a photo message upload. Enforced again on the
+ * upload-authorization endpoint, never trusted from the client alone. */
+const CHAT_MEDIA = Object.freeze({
+  maxBytes: 8 * 1024 * 1024,
+  allowedMimeTypes: Object.freeze(['image/jpeg', 'image/png', 'image/webp']),
+  bucket: 'chat-media',
+});
 
 /**
  * Rate for a call type, as an object. Throws rather than returning a default:
@@ -196,6 +208,8 @@ module.exports = {
   PAYOUT_STATUS,
   WS_EVENTS,
   MIN_PAYOUT_INR,
+  MESSAGE_TYPE,
+  CHAT_MEDIA,
   rateFor,
   coinsPerMinute,
   listenerSharePerMinute,

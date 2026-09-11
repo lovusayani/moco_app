@@ -111,6 +111,17 @@ const env = {
     ttlSeconds: int('OTP_TTL', 300),
     maxAttempts: int('OTP_MAX_ATTEMPTS', 5),
   },
+
+  // Storage only — the same Supabase project used for Postgres, or a separate
+  // one, doesn't matter here. The service-role key is backend-only and never
+  // reaches Flutter; it exists to mint short-lived signed upload/view URLs.
+  // Both unset is a valid, honest "photo messages unavailable" state — see
+  // src/integrations/chat.storage.js — not a boot-time failure, since this
+  // backend must run without it during local dev before the bucket exists.
+  supabaseStorage: {
+    url: optional('SUPABASE_URL', ''),
+    serviceRoleKey: optional('SUPABASE_SERVICE_ROLE_KEY', ''),
+  },
 };
 
 module.exports = env;

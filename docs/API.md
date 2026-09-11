@@ -174,6 +174,37 @@ without hanging up, so a call can never sit `active` indefinitely.
 | `GET` | `/api/chat` | Conversation list with unread counts |
 | `GET` | `/api/chat/:userId/messages` | Message history (marks incoming as read) |
 | `POST` | `/api/chat/:userId/messages` | Send a message |
+| `POST` | `/api/chat/media/upload-url` | Authorize a photo-message upload |
+| `PUT` | `/api/chat/messages/:messageId/reaction` | Set/change the caller's reaction |
+| `DELETE` | `/api/chat/messages/:messageId/reaction` | Remove the caller's reaction |
+
+A message is `{ id, conversationId, senderId, type, body, mediaUrl, readAt,
+createdAt, reactions }`. `type` is `text` or `image`; a text message has
+`body` and `mediaUrl: null`, an image message has `body: null` and a
+short-lived signed `mediaUrl` (never a stored public URL — see the wallet
+section's "server is the only source of truth" principle applied to media:
+a client never holds long-lived access to another user's private bucket
+path). `reactions` is `[{ userId, emoji }]`, at most one entry per user.
+
+### `POST /api/chat/:userId/messages`
+Either `{ "body": "..." }` (text, 1–2000 chars) or
+`{ "type": "image", "mediaPath": "..." }` (photo — `mediaPath` must be one
+this caller was issued by `/media/upload-url`; referencing someone else's
+path is a 403). Blocked in either direction is a 403, same as before.
+
+### `POST /api/chat/media/upload-url`
+`{ "mimeType": "image/jpeg" | "image/png" | "image/webp" }` →
+`{ path, uploadUrl, token, maxBytes }`. The client `PUT`s the raw image bytes
+to `uploadUrl` directly (Supabase Storage's signed-upload-URL protocol; the
+`token` is part of that protocol, not a bearer credential for this API), then
+sends the message referencing `path`. Requires the backend's
+`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` to be configured; without them
+this returns `400 storage_not_configured` — photo messages are honestly
+unavailable rather than faked.
+
+### `PUT/DELETE /api/chat/messages/:messageId/reaction`
+`PUT` takes `{ "emoji": "❤️" }`. Both are idempotent and restricted to the
+message's two conversation participants (403 otherwise).
 
 ---
 
@@ -246,7 +277,8 @@ during a call to keep presence alive.
 | `call:low_balance` | caller | `balance`, `minutesRemaining`, `coinsPerMinute` |
 | `call:forced_end` | both | `reason: "insufficient_balance"`, `billedMinutes`, `coinsSpent` |
 | `call:ended` | both | `reason`, `billedMinutes`, `coinsSpent`, `durationSeconds`, `callerBalance` (listener payload also adds `earned`) |
-| `chat:message` | recipient | `conversationId`, `messageId`, `senderId`, `body` |
+| `chat:message` | recipient | `conversationId`, `messageId`, `senderId`, `type`, `body`, `mediaUrl`, `createdAt` |
+| `chat:reaction` | the message's other participant | `conversationId`, `messageId`, `userId`, `emoji` (`null` means removed) |
 
 `call:low_balance` fires at roughly one minute of runway and is **non-blocking** —
 the call continues while the client shows the inline recharge overlay.

@@ -76,6 +76,9 @@ const callAccepted = (userId, payload) => publishToUser(userId, WS_EVENTS.CALL_A
 const callEnded = (userId, payload) => publishToUser(userId, WS_EVENTS.CALL_ENDED, payload);
 const chatMessage = (userId, payload) => publishToUser(userId, WS_EVENTS.CHAT_MESSAGE, payload);
 
+/** A reaction was added, changed, or removed. `emoji: null` means removed. */
+const chatReaction = (userId, payload) => publishToUser(userId, WS_EVENTS.CHAT_REACTION, payload);
+
 /**
  * A listener came online or went offline.
  *
@@ -102,5 +105,6 @@ module.exports = {
   callAccepted,
   callEnded,
   chatMessage,
+  chatReaction,
   listenerPresence,
 };

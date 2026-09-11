@@ -15,10 +15,11 @@ void main() {
       ]);
     });
 
-    test('only Discovery is real in Phase 1', () {
+    test('Discovery and Wallet are real; the rest are placeholders', () {
       expect(AppShellTab.discovery.isPlaceholder, isFalse);
+      expect(AppShellTab.wallet.isPlaceholder, isFalse);
       for (final tab in AppShellTab.values.where(
-        (t) => t != AppShellTab.discovery,
+        (t) => t != AppShellTab.discovery && t != AppShellTab.wallet,
       )) {
         expect(
           tab.isPlaceholder,
@@ -38,11 +39,11 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      wrapWidget(const PlaceholderTabScreen(tab: AppShellTab.wallet)),
+      wrapWidget(const PlaceholderTabScreen(tab: AppShellTab.profile)),
     );
     await tester.pump();
 
-    expect(find.text('Wallet'), findsOneWidget);
+    expect(find.text('Profile'), findsOneWidget);
     expect(find.textContaining('Phase 2'), findsOneWidget);
   });
 

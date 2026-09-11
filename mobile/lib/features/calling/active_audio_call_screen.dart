@@ -239,6 +239,10 @@ class _StatusBar extends StatelessWidget {
   }
 }
 
+/// Non-blocking: the call keeps running underneath while Wallet is open (the
+/// call controller is app-lifetime and unaffected by navigation), and only a
+/// server forced-end can actually stop it — this banner never ends the call
+/// itself, and tapping "Add coins" never pretends to extend it locally.
 class _LowBalanceBanner extends StatelessWidget {
   const _LowBalanceBanner({required this.minutesRemaining});
 
@@ -258,7 +262,6 @@ class _LowBalanceBanner extends StatelessWidget {
         border: Border.all(color: MocoColors.warning.withValues(alpha: 0.5)),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(
             Icons.warning_amber_rounded,
@@ -266,15 +269,27 @@ class _LowBalanceBanner extends StatelessWidget {
             size: 18,
           ),
           const SizedBox(width: MocoSpacing.sm),
-          Flexible(
+          Expanded(
             child: Text(
-              'Low balance — about $minutesRemaining min left. '
-              'Top up from Wallet to keep talking.',
+              'Low balance — about $minutesRemaining min left.',
               style: const TextStyle(
                 color: MocoColors.warning,
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
               ),
+            ),
+          ),
+          TextButton(
+            key: const Key('active_call_add_coins'),
+            onPressed: () => context.push(Routes.wallet),
+            style: TextButton.styleFrom(
+              foregroundColor: MocoColors.warning,
+              padding: const EdgeInsets.symmetric(horizontal: MocoSpacing.sm),
+              minimumSize: const Size(0, 32),
+            ),
+            child: const Text(
+              'Add coins',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
             ),
           ),
         ],

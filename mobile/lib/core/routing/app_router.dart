@@ -13,6 +13,7 @@ import '../../features/discovery/discovery_screen.dart';
 import '../../features/listener_profile/listener_profile_screen.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/profile_setup/profile_setup_screen.dart';
+import '../../features/wallet/wallet_screen.dart';
 import '../auth/auth_state.dart';
 import '../providers.dart';
 
@@ -25,6 +26,7 @@ class Routes {
   static const profileSetup = '/profile-setup';
   static const app = '/app';
   static const discovery = '/discovery';
+  static const wallet = '/wallet';
 
   /// Deep-link safe: the listener id is a path segment, so
   /// `moco://listener/42` maps cleanly once deep links are enabled.
@@ -115,6 +117,11 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: Routes.discovery,
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: DiscoveryScreen()),
+          ),
+          GoRoute(
+            path: Routes.wallet,
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: WalletScreen()),
           ),
           for (final tab in AppShellTab.values.where((t) => t.isPlaceholder))
             GoRoute(

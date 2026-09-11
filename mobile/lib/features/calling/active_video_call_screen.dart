@@ -134,6 +134,13 @@ class _ActiveVideoCallScreenState extends ConsumerState<ActiveVideoCallScreen> {
                           shadows: [Shadow(blurRadius: 8, color: Colors.black54)],
                         ),
                       ),
+                    if (session.role == CallRole.caller && session.lowBalance)
+                      Padding(
+                        padding: const EdgeInsets.only(top: MocoSpacing.sm),
+                        child: _VideoLowBalanceBanner(
+                          minutesRemaining: session.minutesRemaining ?? 0,
+                        ),
+                      ),
                     const Spacer(),
                     // Local preview tile — only ever a real Agora surface or
                     // nothing; never a stand-in frame pretending to be video.
@@ -223,6 +230,57 @@ class _ActiveVideoCallScreenState extends ConsumerState<ActiveVideoCallScreen> {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$m:$s';
+  }
+}
+
+class _VideoLowBalanceBanner extends StatelessWidget {
+  const _VideoLowBalanceBanner({required this.minutesRemaining});
+
+  final int minutesRemaining;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('active_video_low_balance_banner'),
+      padding: const EdgeInsets.symmetric(
+        horizontal: MocoSpacing.md,
+        vertical: 6,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(MocoRadius.sm),
+        border: Border.all(color: MocoColors.warning.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: MocoColors.warning, size: 15),
+          const SizedBox(width: 6),
+          Text(
+            '~$minutesRemaining min left',
+            style: const TextStyle(
+              color: MocoColors.warning,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(width: MocoSpacing.sm),
+          GestureDetector(
+            key: const Key('active_video_add_coins'),
+            onTap: () => context.push(Routes.wallet),
+            child: const Text(
+              'Add coins',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

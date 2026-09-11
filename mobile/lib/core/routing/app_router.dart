@@ -9,11 +9,14 @@ import '../../features/calling/active_video_call_screen.dart';
 import '../../features/calling/call_ended_summary_screen.dart';
 import '../../features/calling/incoming_call_screen.dart';
 import '../../features/calling/outgoing_call_screen.dart';
+import '../../features/chat_thread/chat_thread_screen.dart';
+import '../../features/chats/chats_screen.dart';
 import '../../features/discovery/discovery_screen.dart';
 import '../../features/listener_profile/listener_profile_screen.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/profile_setup/profile_setup_screen.dart';
 import '../../features/wallet/wallet_screen.dart';
+import '../../shared/models/chat.dart';
 import '../auth/auth_state.dart';
 import '../providers.dart';
 
@@ -27,11 +30,19 @@ class Routes {
   static const app = '/app';
   static const discovery = '/discovery';
   static const wallet = '/wallet';
+  static const chats = '/chats';
 
   /// Deep-link safe: the listener id is a path segment, so
   /// `moco://listener/42` maps cleanly once deep links are enabled.
   static const listener = '/listener/:id';
   static String listenerPath(int id) => '/listener/$id';
+
+  /// The counterparty's id, same deep-link-safe shape as [listener]. The
+  /// Chats row passes the [Conversation] it already has via `extra` so the
+  /// thread header doesn't wait on a network round trip to show a name — but
+  /// the id in the path is what the screen and controller actually key off.
+  static const chatThread = '/chat/:userId';
+  static String chatThreadPath(int userId) => '/chat/$userId';
 
   /// Call screens read the live [CallSession] from `callControllerProvider`
   /// rather than route parameters — there is exactly one call in progress at
@@ -106,6 +117,23 @@ final routerProvider = Provider<GoRouter>((ref) {
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const CallEndedSummaryScreen(),
       ),
+      // Full-screen over the shell, like Listener Profile — Chats stays
+      // mounted underneath so it keeps receiving chat:message live.
+      GoRoute(
+        path: Routes.chatThread,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) {
+          final id = int.tryParse(state.pathParameters['userId'] ?? '');
+          final conversation = state.extra is Conversation
+              ? state.extra as Conversation
+              : null;
+          return ChatThreadScreen(
+            counterpartyId: id ?? conversation?.counterpartyId ?? 0,
+            counterpartyName: conversation?.displayName,
+            counterpartyAvatarUrl: conversation?.counterpartyAvatarUrl,
+          );
+        },
+      ),
       // One shell for both roles. Listener capability is modelled as user state
       // rather than a second navigation tree (Phase 1 decision).
       ShellRoute(
@@ -122,6 +150,11 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: Routes.wallet,
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: WalletScreen()),
+          ),
+          GoRoute(
+            path: Routes.chats,
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: ChatsScreen()),
           ),
           for (final tab in AppShellTab.values.where((t) => t.isPlaceholder))
             GoRoute(

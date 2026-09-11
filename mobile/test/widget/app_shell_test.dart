@@ -15,12 +15,12 @@ void main() {
       ]);
     });
 
-    test('Discovery and Wallet are real; the rest are placeholders', () {
-      expect(AppShellTab.discovery.isPlaceholder, isFalse);
-      expect(AppShellTab.wallet.isPlaceholder, isFalse);
-      for (final tab in AppShellTab.values.where(
-        (t) => t != AppShellTab.discovery && t != AppShellTab.wallet,
-      )) {
+    test('Discovery, Wallet and Chats are real; the rest are placeholders', () {
+      const real = {AppShellTab.discovery, AppShellTab.wallet, AppShellTab.chats};
+      for (final tab in real) {
+        expect(tab.isPlaceholder, isFalse, reason: '${tab.label} should be real');
+      }
+      for (final tab in AppShellTab.values.where((t) => !real.contains(t))) {
         expect(
           tab.isPlaceholder,
           isTrue,
@@ -47,12 +47,12 @@ void main() {
     expect(find.textContaining('Phase 2'), findsOneWidget);
   });
 
-  testWidgets('the chats placeholder points at Phase 3', (tester) async {
+  testWidgets('the feed placeholder points at a later phase', (tester) async {
     await tester.pumpWidget(
-      wrapWidget(const PlaceholderTabScreen(tab: AppShellTab.chats)),
+      wrapWidget(const PlaceholderTabScreen(tab: AppShellTab.feed)),
     );
     await tester.pump();
 
-    expect(find.textContaining('Phase 3'), findsOneWidget);
+    expect(find.textContaining('a later phase'), findsOneWidget);
   });
 }

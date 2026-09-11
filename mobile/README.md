@@ -152,6 +152,45 @@ unavailable (dev mode)" instead of pretending a connection exists, which is
 enough to test the state machine, billing display and screens without a real
 Agora project.
 
+### Two-device chat testing
+
+Same two-device setup as calling above (Device A / Device B, same
+`flutter run` commands). Chat doesn't need the listener role — any two
+signed-in accounts can message each other.
+
+Test flow:
+1. On **Device A**, open Device B's listener profile from Discovery and go
+   to the Chats tab, or navigate directly to `/chat/<deviceB-userId>` —
+   either way opens (or creates) the conversation.
+2. Send a text message from A. It should appear immediately in A's thread
+   (server-confirmed, not optimistic-before-response).
+3. **Device B**: open the Chats tab. The conversation should already show
+   the new message and an unread badge (delivered live over the socket B is
+   already connected on — no manual refresh needed). Open the thread; the
+   badge clears.
+4. Reply from B. A's thread should show the reply live if A's thread is
+   still open, or bump to the top of A's Chats list with an unread badge if
+   A has navigated away.
+5. **Reconnect check**: turn on Airplane Mode on Device B for ~10 seconds
+   with B's thread open, send a message from A during that window, then turn
+   Airplane Mode back off. B's thread should show A's message once
+   reconnected (via the reconnect-refetch, not require a manual pull down)
+   without duplicating any earlier messages.
+6. **Reaction**: long-press a message bubble on either device, pick an
+   emoji. It should appear under the bubble on both devices within a second
+   or two. Tap the same emoji again to remove it.
+7. **Block check**: from Device A's side, block Device B (via Listener
+   Profile or the safety endpoints — there is no dedicated block button in
+   Chat yet). Sending from either device afterward should show an inline
+   error rather than appear to send.
+8. **Photo message**: only testable once the backend has
+   `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` configured and a private
+   `chat-media` bucket created in that Supabase project — without them, the
+   photo-attach button correctly surfaces "Photo messages are not available
+   right now" rather than failing silently or faking an upload. With storage
+   configured: tap the photo icon, pick an image from the gallery, confirm it
+   appears in both devices' threads.
+
 ## Tests
 
 ```bash
@@ -285,3 +324,25 @@ subscribes to the full call event surface (`call:incoming`, `call:accepted`,
 `call:tick`, `call:low_balance`, `call:forced_end`, `call:ended`,
 `listener:presence`) via `CallController`, which lives for the app's lifetime
 so an incoming call is caught regardless of which screen is open.
+
+## Phase 3 status
+
+Complete: the Chats list and Chat Thread, both against the real backend —
+send/receive text, realtime delivery and unread badges (`chat:message`),
+reactions (`chat:reaction`, a new backend feature this phase added), and a
+photo-message path (upload-authorize → direct-to-storage PUT → send). Block
+is enforced server-side exactly as before; the client only surfaces the 403
+honestly. Reconnect handling merges by message id everywhere (history pages,
+live events, and the reconnect refetch), so a dropped-and-restored socket
+cannot duplicate a message.
+
+Photo messages need the backend's `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`
+configured against a private `chat-media` bucket — without them the
+photo-attach button reports itself unavailable rather than failing silently.
+This is the one part of Phase 3 not yet exercised against a real bucket; see
+the backend README's Supabase Storage section.
+
+Chats sits inside the tab shell; Chat Thread is a full-screen route outside
+it (same pattern as Listener Profile and the call screens), so the Chats
+list stays mounted — and keeps receiving `chat:message` live — underneath an
+open thread.

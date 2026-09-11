@@ -56,9 +56,27 @@ node-pg's parameterized queries. `npm run migrate` and `npm run seed` both go
 through the same `src/config/db.js` pool, so they pick up `DATABASE_URL`
 automatically — no separate Supabase-specific tooling.
 
-Supabase Storage (if used later for chat/feed media) is a separate concern
-from the database connection here and is likewise backend-mediated — the
-service-role key never reaches the Flutter client.
+### Supabase Storage (chat photo messages)
+
+A separate concern from `DATABASE_URL` above — may be the same Supabase
+project or a different one, doesn't matter — and likewise entirely
+backend-mediated: the service-role key never reaches the Flutter client, and
+Flutter never talks to Supabase directly. `src/integrations/chat.storage.js`
+mints short-lived signed upload/view URLs; the client PUTs the image bytes
+straight to Supabase Storage with one of those, never through this API.
+
+To enable it:
+1. In the Supabase dashboard, create a **private** Storage bucket named
+   `chat-media` (must match `CHAT_MEDIA.bucket` in `src/utils/constants.js`).
+2. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env` (Project
+   Settings → API — the service-role key, not the anon key).
+3. Restart the server.
+
+Both unset is a deliberately valid state, not a boot failure: `POST
+/api/chat/media/upload-url` returns `400 storage_not_configured` and the
+Flutter photo-attach button surfaces that honestly rather than faking an
+upload — the rest of chat (text messages, reactions, everything else) works
+identically either way.
 
 **Do not run `npm test` against a Supabase dev database with real seed data**
 — `resetDb()` in `tests/helpers.js` truncates every table, and Supabase

@@ -6,9 +6,16 @@ require('dotenv').config();
 const { pool, close: closeDb } = require('../src/config/db');
 
 const BASE = 'http://127.0.0.1:3000/api';
-const CALLER_PHONE = '+919800000001'; // seeded, balance 45
+const CALLER_PHONE = '+919800000001'; // seeded, used only for identity/relation checks below
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A fresh phone per run, so the free-trial/billing chain never depends on
+ * another run having left a seeded account in a particular state. */
+function freshTestPhone() {
+  const digits = String(9_000_000_000 + (Date.now() % 900_000_000));
+  return `+91${digits}`;
+}
 
 let passed = 0;
 let failed = 0;
@@ -95,21 +102,46 @@ async function main() {
   const unfollow = await call('DELETE', `/listeners/${listener.id}/follow`, { token });
   check('unfollow clears', unfollow.status === 200 && unfollow.body.active === false, unfollow.body);
 
+  const listenerSession = await login(listenerPhone);
+
+  // A brand-new account for the whole free-trial + billing chain, so these
+  // checks never depend on another run having already burned a seeded
+  // caller's trial — every run gets a caller who is guaranteed eligible for
+  // Call 1 and guaranteed not eligible for Call 2, deterministically.
+  console.log('== Fresh billing-test account ==');
+  const billingPhone = freshTestPhone();
+  const billingSession = await login(billingPhone);
+  const billingToken = billingSession.token;
+  const billingUserId = billingSession.user.id;
+
+  // Fund the wallet directly, the same way tests/helpers.js and seed.js do —
+  // this is test-fixture setup, not a purchase flow, so it bypasses the
+  // payment gateway on purpose. A matching ledger row keeps the reconcile
+  // check (admin/reconcile: wallet == ledger sum) honest.
+  await pool.query(
+    `UPDATE wallets SET coin_balance = 50 WHERE user_id = $1`,
+    [billingUserId],
+  );
+  await pool.query(
+    `INSERT INTO coin_ledger (user_id, delta, reason, balance_after)
+     VALUES ($1, 50, 'topup', 50)`,
+    [billingUserId],
+  );
+
   console.log('== Call 1: burn the free trial (end before any tick) ==');
   const initiate1 = await call('POST', '/calls/initiate', {
-    token,
+    token: billingToken,
     body: { listenerId: listener.id, type: 'audio' },
   });
   check('call 1 initiates', initiate1.status === 201, initiate1.body);
   check('call 1 is free-trial eligible', initiate1.body.freeSeconds > 0, initiate1.body);
 
-  const listenerSession = await login(listenerPhone);
   const accept1 = await call('POST', `/calls/${initiate1.body.callId}/accept`, {
     token: listenerSession.token,
   });
   check('call 1 accepts', accept1.status === 200 && accept1.body.status === 'active', accept1.body);
 
-  const end1 = await call('POST', `/calls/${initiate1.body.callId}/end`, { token });
+  const end1 = await call('POST', `/calls/${initiate1.body.callId}/end`, { token: billingToken });
   check(
     'call 1 ends with zero billed minutes (trial burned, no tick fired yet)',
     end1.status === 200 && end1.body.billedMinutes === 0 && end1.body.coinsSpent === 0,
@@ -118,7 +150,7 @@ async function main() {
 
   console.log('== Call 2: real billing tick ==');
   const initiate2 = await call('POST', '/calls/initiate', {
-    token,
+    token: billingToken,
     body: { listenerId: listener.id, type: 'audio' },
   });
   check('call 2 initiates', initiate2.status === 201, initiate2.body);
@@ -135,12 +167,12 @@ async function main() {
   let ticked = false;
   for (let i = 0; i < 8 && !ticked; i += 1) {
     await sleep(1000);
-    const live = await call('GET', `/calls/${initiate2.body.callId}`, { token });
+    const live = await call('GET', `/calls/${initiate2.body.callId}`, { token: billingToken });
     if (live.body.billedMinutes > 0) ticked = true;
   }
   check('call 2 billed at least one minute via the tick worker', ticked);
 
-  const end2 = await call('POST', `/calls/${initiate2.body.callId}/end`, { token });
+  const end2 = await call('POST', `/calls/${initiate2.body.callId}/end`, { token: billingToken });
   check('call 2 ends with billedMinutes >= 1', end2.status === 200 && end2.body.billedMinutes >= 1, end2.body);
   check(
     'call 2 end response carries callerBalance',
@@ -149,7 +181,7 @@ async function main() {
   );
 
   console.log('== Wallet debit + ledger reconciliation ==');
-  const wallet = await call('GET', '/wallet', { token });
+  const wallet = await call('GET', '/wallet', { token: billingToken });
   check(
     'wallet balance matches call-end callerBalance',
     wallet.status === 200 && wallet.body.coinBalance === end2.body.callerBalance,
@@ -161,7 +193,7 @@ async function main() {
     { before: balanceBeforeTick, after: wallet.body.coinBalance },
   );
 
-  const ledger = await call('GET', '/wallet/ledger?limit=5', { token });
+  const ledger = await call('GET', '/wallet/ledger?limit=5', { token: billingToken });
   const debitEntry = ledger.body.entries?.find((e) => e.reason === 'call_debit');
   check('ledger has a call_debit entry', ledger.status === 200 && !!debitEntry, ledger.body);
 

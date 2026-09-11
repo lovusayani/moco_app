@@ -197,6 +197,52 @@ async function main() {
   const debitEntry = ledger.body.entries?.find((e) => e.reason === 'call_debit');
   check('ledger has a call_debit entry', ledger.status === 200 && !!debitEntry, ledger.body);
 
+  console.log('== Chat: send, list, history, reactions ==');
+  const chatSend = await call('POST', `/chat/${listener.id}/messages`, {
+    token,
+    body: { body: 'smoke test message' },
+  });
+  check('chat message sends', chatSend.status === 201 && chatSend.body.message.type === 'text', chatSend.body);
+
+  const chatList = await call('GET', '/chat', { token: listenerSession.token });
+  const conv = chatList.body.conversations?.find((c) => c.counterparty.id === callerId);
+  check('chat conversation appears in the recipient\'s list', chatList.status === 200 && !!conv, chatList.body);
+  check('chat list shows the last message and an unread count', conv?.lastMessage === 'smoke test message' && conv?.unreadCount >= 1, conv);
+
+  const chatHistory = await call('GET', `/chat/${callerId}/messages`, { token: listenerSession.token });
+  check('chat history returns the message', chatHistory.status === 200 && chatHistory.body.messages.length >= 1, chatHistory.body);
+
+  const reactMessageId = chatSend.body.message.id;
+  const react = await call('PUT', `/chat/messages/${reactMessageId}/reaction`, {
+    token: listenerSession.token,
+    body: { emoji: '❤️' },
+  });
+  check('reaction sets', react.status === 200 && react.body.emoji === '❤️', react.body);
+
+  const historyAfterReact = await call('GET', `/chat/${listener.id}/messages`, { token });
+  const reacted = historyAfterReact.body.messages?.find((m) => m.id === reactMessageId);
+  check(
+    'reaction appears when the sender re-fetches history',
+    reacted?.reactions?.some((r) => r.userId === listener.id && r.emoji === '❤️'),
+    reacted,
+  );
+
+  const unreact = await call('DELETE', `/chat/messages/${reactMessageId}/reaction`, {
+    token: listenerSession.token,
+  });
+  check('reaction removes', unreact.status === 200, unreact.body);
+
+  const uploadUrl = await call('POST', '/chat/media/upload-url', {
+    token,
+    body: { mimeType: 'image/jpeg' },
+  });
+  check(
+    'photo upload endpoint responds honestly (configured or not)',
+    uploadUrl.status === 200 || (uploadUrl.status === 400 && uploadUrl.body.error?.code === 'storage_not_configured'),
+    uploadUrl.body,
+  );
+  console.log(`  photo messages: ${uploadUrl.status === 200 ? 'configured' : 'not configured (expected without SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY)'}`);
+
   console.log(`\n${passed} passed, ${failed} failed`);
   await closeDb();
   process.exit(failed > 0 ? 1 : 0);

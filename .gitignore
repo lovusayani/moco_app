@@ -1,0 +1,9 @@
+# Local scratch/notes files that must never hold real credentials in git.
+helpu
+
+# Environment files anywhere in the repo — every module keeps its own
+# .env.example committed as the template; the real .env never is.
+.env
+.env.*
+!.env.example
+!**/.env.example

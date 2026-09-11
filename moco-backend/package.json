@@ -16,7 +16,8 @@
     "migrate": "node src/db/migrate.js up",
     "migrate:down": "node src/db/migrate.js down",
     "seed": "node src/db/seed.js",
-    "test": "node --test --test-concurrency=1 tests/*.test.js"
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "smoke": "node scripts/supabase_smoke_test.js"
   },
   "dependencies": {
     "agora-token": "^2.0.5",

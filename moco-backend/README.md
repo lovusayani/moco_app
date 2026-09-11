@@ -60,6 +60,17 @@ Supabase Storage (if used later for chat/feed media) is a separate concern
 from the database connection here and is likewise backend-mediated — the
 service-role key never reaches the Flutter client.
 
+**Do not run `npm test` against a Supabase dev database with real seed data**
+— `resetDb()` in `tests/helpers.js` truncates every table, and Supabase
+doesn't support a second database per project (only schemas), so there's no
+config-only way to point the test suite at an isolated database the way
+`createdb moco_test` gives you locally. `npm run smoke` instead exercises the
+real, running server end to end (OTP login, discovery, listener profile,
+follow/favorite, a full call including a real billing tick from the tick
+worker, wallet debit, ledger reconciliation) without truncating anything, and
+is safe to run against Supabase; re-run `npm run seed` afterward to restore
+the sample balances it spends.
+
 ## Admin console
 
 A dependency-free web console is served by the API itself at

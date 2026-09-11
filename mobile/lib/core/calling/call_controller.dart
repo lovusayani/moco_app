@@ -162,6 +162,52 @@ class CallController extends StateNotifier<CallSession> {
     state = const CallSession();
   }
 
+  /// Re-checks the call's authoritative state against the server.
+  ///
+  /// The socket is the live source of truth during normal operation, but it
+  /// does not replay missed events — if the app was backgrounded or the
+  /// socket briefly dropped exactly while a forced-end or call:ended event
+  /// was delivered, that event is gone for good. Called on app resume and on
+  /// socket reconnect while a call is in progress, so a call that already
+  /// ended server-side cannot leave the UI stuck showing it as live.
+  Future<void> reconcile() async {
+    if (_finalized) return;
+    final callId = state.callId;
+    if (callId == null || !state.isInCall) return;
+
+    CallLiveState live;
+    try {
+      live = await _callsApi.get(callId);
+    } on ApiException {
+      // A failed reconciliation check is not itself a reason to end the
+      // call — the next heartbeat/tick or the next reconcile() will try
+      // again. Only the server actually ending the call does that.
+      return;
+    }
+    if (_finalized || live.callId != state.callId) return;
+
+    if (live.status == CallStatus.ended || live.status == CallStatus.failed) {
+      _finalized = true;
+      _stopHeartbeat();
+      unawaited(_agora.leave());
+      final reason = live.endReason ?? CallEndReason.unknown;
+      state = state.copyWith(
+        phase: reason == CallEndReason.insufficientBalance
+            ? CallPhase.insufficientBalance
+            : CallPhase.ended,
+        summary: CallSummary(
+          callId: live.callId,
+          endReason: reason,
+          billedMinutes: live.billedMinutes,
+          coinsSpent: live.coinsSpent,
+          durationSeconds: live.durationSeconds,
+        ),
+      );
+    }
+    // Still active/ringing server-side: nothing to reconcile — the socket
+    // resumes delivering ticks normally once reconnected.
+  }
+
   // ---- Shared end/settle path ---------------------------------------------
 
   Future<void> _settleLocally({
@@ -239,6 +285,9 @@ class CallController extends StateNotifier<CallSession> {
     } else if (state.phase == CallPhase.reconnecting &&
         connectivity == SocketStatus.connected) {
       state = state.copyWith(phase: CallPhase.active);
+      // The socket may have missed an end event while it was down — confirm
+      // the call is genuinely still active rather than assume it.
+      unawaited(reconcile());
     }
   }
 

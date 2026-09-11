@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/auth/auth_state.dart';
+import 'core/calling/call_controller.dart';
 import 'core/providers.dart';
 import 'core/routing/app_router.dart';
 import 'core/storage/secure_store.dart';
@@ -40,14 +41,32 @@ class MocoApp extends ConsumerStatefulWidget {
   ConsumerState<MocoApp> createState() => _MocoAppState();
 }
 
-class _MocoAppState extends ConsumerState<MocoApp> {
+class _MocoAppState extends ConsumerState<MocoApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Restore the session before the first frame settles.
     Future.microtask(
       () => ref.read(authControllerProvider.notifier).bootstrap(),
     );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // A call in progress is never torn down just because the app backgrounded
+    // — only the server ends a call. On resume, check whether an end event
+    // was missed while backgrounded (the socket may have been suspended by
+    // the OS) rather than assume the call is still live.
+    if (state == AppLifecycleState.resumed) {
+      ref.read(callControllerProvider.notifier).reconcile();
+    }
   }
 
   @override

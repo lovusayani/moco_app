@@ -184,6 +184,52 @@ class CallSummary {
   }
 }
 
+/// `GET /api/calls/:id` — the call's authoritative state, used to reconcile
+/// the client after a gap where a socket event could have been missed (the
+/// app backgrounded, or the socket was briefly disconnected). Deliberately
+/// minimal: this is read on resume/reconnect to check "did this call already
+/// end without me hearing about it", not a live-state replacement for the
+/// socket events during normal operation.
+class CallLiveState {
+  const CallLiveState({
+    required this.callId,
+    required this.status,
+    required this.billedMinutes,
+    required this.coinsSpent,
+    this.startedAt,
+    this.endedAt,
+    this.endReason,
+  });
+
+  final int callId;
+  final CallStatus status;
+  final int billedMinutes;
+  final int coinsSpent;
+  final DateTime? startedAt;
+  final DateTime? endedAt;
+  final CallEndReason? endReason;
+
+  int get durationSeconds {
+    if (startedAt == null || endedAt == null) return 0;
+    final seconds = endedAt!.difference(startedAt!).inSeconds;
+    return seconds < 0 ? 0 : seconds;
+  }
+
+  factory CallLiveState.fromJson(Map<String, dynamic> json) {
+    return CallLiveState(
+      callId: (json['callId'] as num).toInt(),
+      status: CallStatus.fromJson(json['status'] as String?),
+      billedMinutes: (json['billedMinutes'] as num?)?.toInt() ?? 0,
+      coinsSpent: (json['coinsSpent'] as num?)?.toInt() ?? 0,
+      startedAt: DateTime.tryParse(json['startedAt'] as String? ?? ''),
+      endedAt: DateTime.tryParse(json['endedAt'] as String? ?? ''),
+      endReason: json['endReason'] == null
+          ? null
+          : CallEndReason.fromJson(json['endReason'] as String?),
+    );
+  }
+}
+
 /// `call:incoming` — delivered to the listener only.
 class IncomingCallEvent {
   const IncomingCallEvent({

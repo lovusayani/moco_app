@@ -442,6 +442,95 @@ void main() {
     });
   });
 
+  group('reconcile', () {
+    Future<void> becomeActive() async {
+      when(() => callsApi.initiate(listenerId: 7, type: CallType.audio)).thenAnswer(
+        (_) async => const CallInitiation(
+          callId: 42,
+          status: CallStatus.ringing,
+          agora: _configuredCredentials,
+          ratePerMinute: 6,
+          freeSeconds: 0,
+          balance: 100,
+        ),
+      );
+      await controller.initiateCall(listener: _listener, type: CallType.audio);
+      emit('call:accepted', {'callId': 42});
+      await Future<void>.delayed(Duration.zero);
+      agoraConnectionStatus.value = RtcConnectionStatus.connected;
+    }
+
+    test('does nothing when there is no call in progress', () async {
+      await controller.reconcile();
+      verifyNever(() => callsApi.get(any()));
+    });
+
+    test('does nothing when the server still says the call is active', () async {
+      await becomeActive();
+      when(() => callsApi.get(42)).thenAnswer(
+        (_) async => const CallLiveState(
+          callId: 42,
+          status: CallStatus.active,
+          billedMinutes: 2,
+          coinsSpent: 12,
+        ),
+      );
+
+      await controller.reconcile();
+
+      expect(controller.state.phase, CallPhase.active);
+      expect(controller.debugHeartbeatActive, isTrue);
+    });
+
+    test('finalizes locally when the server says the call already ended', () async {
+      await becomeActive();
+      when(() => callsApi.get(42)).thenAnswer(
+        (_) async => const CallLiveState(
+          callId: 42,
+          status: CallStatus.ended,
+          billedMinutes: 3,
+          coinsSpent: 18,
+          endReason: CallEndReason.callerHangup,
+        ),
+      );
+
+      await controller.reconcile();
+
+      expect(controller.state.phase, CallPhase.ended);
+      expect(controller.state.summary?.billedMinutes, 3);
+      expect(controller.state.summary?.coinsSpent, 18);
+      expect(controller.debugHeartbeatActive, isFalse);
+    });
+
+    test('a forced end discovered on reconcile maps to insufficientBalance', () async {
+      await becomeActive();
+      when(() => callsApi.get(42)).thenAnswer(
+        (_) async => const CallLiveState(
+          callId: 42,
+          status: CallStatus.failed,
+          billedMinutes: 5,
+          coinsSpent: 30,
+          endReason: CallEndReason.insufficientBalance,
+        ),
+      );
+
+      await controller.reconcile();
+
+      expect(controller.state.phase, CallPhase.insufficientBalance);
+    });
+
+    test('a failed reconcile request leaves the call as-is', () async {
+      await becomeActive();
+      when(() => callsApi.get(42)).thenThrow(
+        const ApiException(kind: ApiErrorKind.network, message: 'offline'),
+      );
+
+      await controller.reconcile();
+
+      expect(controller.state.phase, CallPhase.active);
+    });
+  });
+
   group('reset', () {
     test('returns to a clean idle session', () async {
       emit('call:incoming', {

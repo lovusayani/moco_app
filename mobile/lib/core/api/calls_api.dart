@@ -47,6 +47,17 @@ class CallsApi {
     );
   }
 
+  /// `GET /calls/:id` — the call's authoritative state, for reconciling after
+  /// a gap where a socket event could have been missed (app backgrounded, or
+  /// a brief disconnect). Not used during normal operation, where the socket
+  /// events are the live source of truth.
+  Future<CallLiveState> get(int callId) {
+    return _client.request(
+      () => _client.dio.get<dynamic>('/calls/$callId'),
+      (data) => CallLiveState.fromJson(Map<String, dynamic>.from(data as Map)),
+    );
+  }
+
   static String? _reasonToJson(CallEndReason reason) => switch (reason) {
     CallEndReason.rejected => 'rejected',
     CallEndReason.disconnect => 'disconnect',

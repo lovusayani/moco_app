@@ -13,17 +13,33 @@ const logger = require('../utils/logger');
  */
 require('pg').types.setTypeParser(20, (value) => Number.parseInt(value, 10));
 
-const pool = new Pool({
-  host: env.db.host,
-  port: env.db.port,
-  user: env.db.user,
-  password: env.db.password,
-  database: env.db.database,
-  ssl: env.db.ssl,
-  max: env.db.poolMax,
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 5_000,
-});
+/**
+ * DATABASE_URL (e.g. Supabase's session pooler or a direct connection) wins
+ * over the discrete PG* fields when set, so a hosted database is a pure env
+ * change — see the comment on env.db.connectionString for why it must be the
+ * session pooler, not the transaction pooler.
+ */
+const pool = new Pool(
+  env.db.connectionString
+    ? {
+        connectionString: env.db.connectionString,
+        ssl: env.db.ssl,
+        max: env.db.poolMax,
+        idleTimeoutMillis: 30_000,
+        connectionTimeoutMillis: 5_000,
+      }
+    : {
+        host: env.db.host,
+        port: env.db.port,
+        user: env.db.user,
+        password: env.db.password,
+        database: env.db.database,
+        ssl: env.db.ssl,
+        max: env.db.poolMax,
+        idleTimeoutMillis: 30_000,
+        connectionTimeoutMillis: 5_000,
+      },
+);
 
 pool.on('error', (err) => {
   logger.error({ err }, 'idle postgres client error');

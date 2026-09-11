@@ -47,12 +47,21 @@ const env = {
   logLevel: optional('LOG_LEVEL', isProduction ? 'info' : 'debug'),
 
   db: {
+    // When set (e.g. a Supabase session-pooler or direct-connection URI), this
+    // takes over from the discrete PG* fields below entirely — see db.js.
+    // Prefer Supabase's SESSION pooler or a direct connection, not the
+    // transaction pooler: withTransaction() holds one BEGIN..COMMIT open on a
+    // single checked-out client, which the transaction pooler does not
+    // reliably support alongside node-pg's parameterized (extended-protocol)
+    // queries.
+    connectionString: optional('DATABASE_URL', undefined),
     host: optional('PGHOST', '127.0.0.1'),
     port: int('PGPORT', 5432),
     user: optional('PGUSER', 'moco'),
     password: optional('PGPASSWORD', 'moco'),
     database: optional('PGDATABASE', isTest ? 'moco_test' : 'moco'),
-    // DO managed Postgres requires TLS; a local droplet-resident Postgres does not.
+    // DO managed Postgres and Supabase both require TLS; a local droplet- or
+    // Docker-resident Postgres does not.
     ssl: bool('PGSSL', false) ? { rejectUnauthorized: false } : false,
     poolMax: int('PG_POOL_MAX', 10),
   },

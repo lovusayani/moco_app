@@ -33,6 +33,33 @@ npm run worker:tick           # billing worker, in a second terminal
 Sign in without an SMS gateway: `SMS_PROVIDER=log` prints the OTP to the log,
 and outside production any account accepts `OTP_FIXED_CODE` (default `123456`).
 
+### Running against Supabase instead of local Postgres
+
+Supabase is used here **only as hosted Postgres** — not Supabase Auth, not the
+Supabase client SDK, not the Data API. This backend is the only thing that
+holds database credentials; Flutter never talks to Supabase directly (it only
+ever calls this API, exactly as with local Postgres). Everything else —
+custom OTP auth, Redis, Socket.IO, BullMQ, Agora, the billing engine — is
+unchanged.
+
+```bash
+DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+PGSSL=true
+```
+
+Use the **session pooler** connection string (Supabase dashboard: Project
+Settings → Database → Connection string → "Session pooler"), or a direct
+connection — not the transaction pooler. `withTransaction()` in
+`src/config/db.js` holds one `BEGIN..COMMIT` open per call on a single checked-
+out client, which the transaction pooler does not reliably support alongside
+node-pg's parameterized queries. `npm run migrate` and `npm run seed` both go
+through the same `src/config/db.js` pool, so they pick up `DATABASE_URL`
+automatically — no separate Supabase-specific tooling.
+
+Supabase Storage (if used later for chat/feed media) is a separate concern
+from the database connection here and is likewise backend-mediated — the
+service-role key never reaches the Flutter client.
+
 ## Admin console
 
 A dependency-free web console is served by the API itself at

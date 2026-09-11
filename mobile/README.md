@@ -256,13 +256,26 @@ comment saying so.
 
 ## Phase 2 status
 
-Calling (audio + video) and its realtime billing display are implemented end
-to end against the real backend — see the scope line above. Not yet built:
+Complete: calling (audio + video) with realtime billing display, the low-
+balance banner's "Add coins" action, the Wallet tab (real balance, real
+backend-published coin packs, recent ledger activity), and app
+background/foreground + socket-reconnect reconciliation (`GET /calls/:id`,
+so a missed `call:ended`/`call:forced_end` while backgrounded cannot leave
+the UI stuck showing a call as live). All against the real backend — see the
+scope line above.
 
-- **Wallet screen / coin packs / top-up** — the CTAs and low-balance banner
-  reference it, but the screen itself is still a placeholder.
-- Chat, Feed, Posts/Shots/Voice, payouts, Google Play Billing — unchanged,
-  still out of scope.
+Real-money purchase is intentionally not implemented: `PurchaseProvider`
+(`core/payments/purchase_provider.dart`) is the interface the wallet screen
+purchases through, with a `MockPurchaseProvider` that exercises the real
+topup → webhook → credited-balance path for local testing only (gated by
+`Env.isDevelopment` client-side and by the backend's `PAYMENT_PROVIDER=mock`
+non-production check server-side — a release build never shows the option,
+and the server refuses the request regardless of what a client sends).
+Google Play Billing is documented as the production path at that same
+interface but needs Play Console credentials this project doesn't have yet.
+
+Chat, Feed, Posts/Shots/Voice, payouts — unchanged, still out of scope for
+this phase.
 
 Listener profile content tabs (Shots/Posts/Photos/Voice) have no backend and
 show empty states; media upload is explicitly not part of this phase.

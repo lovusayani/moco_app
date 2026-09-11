@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'api/api_client.dart';
 import 'api/auth_api.dart';
+import 'api/chat_api.dart';
 import 'api/config_api.dart';
 import 'api/listeners_api.dart';
 import 'api/users_api.dart';
@@ -37,6 +38,9 @@ final listenersApiProvider = Provider<ListenersApi>(
 );
 final configApiProvider = Provider<ConfigApi>(
   (ref) => ConfigApi(ref.watch(apiClientProvider)),
+);
+final chatApiProvider = Provider<ChatApi>(
+  (ref) => ChatApi(ref.watch(apiClientProvider)),
 );
 
 /// Bridges the ValueNotifier-based controller into Riverpod.

@@ -13,4 +13,5 @@ class WsEvents {
   static const forcedEnd = 'call:forced_end';
   static const callEnded = 'call:ended';
   static const chatMessage = 'chat:message';
+  static const chatReaction = 'chat:reaction';
 }

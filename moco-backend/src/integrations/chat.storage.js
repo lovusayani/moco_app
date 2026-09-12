@@ -1,28 +1,18 @@
 'use strict';
 
 const crypto = require('crypto');
-const { createClient } = require('@supabase/supabase-js');
-const env = require('../config/env');
+const storage = require('./storage');
 const { CHAT_MEDIA } = require('../utils/constants');
 
 /**
- * Photo-message storage: Supabase Storage, used only as an object store.
- *
- * The service-role key lives here and nowhere else — Flutter never receives
- * it, never talks to Supabase directly, and never mints its own signed URL.
- * Every upload is authorized by this backend (path scoped to the requesting
- * user, MIME type and size checked before a URL is even issued) and every
- * read goes through a short-lived signed URL rather than a public bucket.
+ * Photo-message storage — the chat-specific path scheme and authorization
+ * over the shared Supabase Storage client in storage.js. Every upload is
+ * authorized by this backend (path scoped to the requesting user, MIME type
+ * checked before a URL is even issued) and every read goes through a
+ * short-lived signed URL rather than a public bucket.
  */
 
-let client = null;
-if (env.supabaseStorage.url && env.supabaseStorage.serviceRoleKey) {
-  client = createClient(env.supabaseStorage.url, env.supabaseStorage.serviceRoleKey, {
-    auth: { persistSession: false },
-  });
-}
-
-const isConfigured = () => client !== null;
+const isConfigured = storage.isConfigured;
 
 /**
  * A per-user, per-message-attempt path. Scoped under the uploader's own id so
@@ -46,27 +36,12 @@ function pathBelongsToUser(path, userId) {
  * proxies the image data itself.
  */
 async function createUploadUrl({ userId, mimeType }) {
-  if (!isConfigured()) throw new Error('storage_not_configured');
-
-  const path = buildPath(userId, mimeType);
-  const { data, error } = await client.storage
-    .from(CHAT_MEDIA.bucket)
-    .createSignedUploadUrl(path);
-
-  if (error) throw error;
-  return { path, uploadUrl: data.signedUrl, token: data.token };
+  return storage.createUploadUrl(CHAT_MEDIA.bucket, buildPath(userId, mimeType));
 }
 
 /** Mints a short-lived signed URL to view a stored photo message. */
-async function createViewUrl(path, { expiresInSeconds = 3600 } = {}) {
-  if (!isConfigured()) return null;
-
-  const { data, error } = await client.storage
-    .from(CHAT_MEDIA.bucket)
-    .createSignedUrl(path, expiresInSeconds);
-
-  if (error) return null;
-  return data.signedUrl;
+async function createViewUrl(path, options) {
+  return storage.createViewUrl(CHAT_MEDIA.bucket, path, options);
 }
 
 module.exports = { isConfigured, createUploadUrl, createViewUrl, pathBelongsToUser, buildPath };

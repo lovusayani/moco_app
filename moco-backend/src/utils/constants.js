@@ -142,6 +142,63 @@ const CHAT_MEDIA = Object.freeze({
   bucket: 'chat-media',
 });
 
+/** Feed post media types. Mirrors the `post_media_type` Postgres enum. */
+const POST_MEDIA_TYPE = Object.freeze({ IMAGE: 'image', VIDEO: 'video' });
+
+/** Feed post lifecycle. Mirrors the `post_status` Postgres enum. A removed
+ * post is soft-deleted: it stops being served but its row survives so a
+ * report filed against it still resolves to something. */
+const POST_STATUS = Object.freeze({ ACTIVE: 'active', REMOVED: 'removed' });
+
+/**
+ * Server-side limits for feed media, enforced on the upload-authorization
+ * endpoint — the MIME type decides which bucket path and which size cap
+ * apply, so a client cannot declare "image" and upload a 400MB video.
+ *
+ * Sizes are deliberately modest: the target market is India on mid-range
+ * Android over mobile data, where a 60MB upload is a real cost to the poster
+ * and a real wait to every viewer. `maxVideoSeconds` matches the approved
+ * "short video" product decision and is advertised to the client so it can
+ * reject an over-long clip before spending the upload.
+ */
+const FEED_MEDIA = Object.freeze({
+  bucket: 'feed-media',
+  allowedImageMimeTypes: Object.freeze(['image/jpeg', 'image/png', 'image/webp']),
+  allowedVideoMimeTypes: Object.freeze(['video/mp4', 'video/quicktime']),
+  maxImageBytes: 8 * 1024 * 1024,
+  maxVideoBytes: 64 * 1024 * 1024,
+  maxVideoSeconds: 60,
+  maxCaptionLength: 500,
+  /**
+   * Signed view URLs last an hour. Long enough that a user scrolling a feed
+   * page never watches a URL expire mid-view, short enough that a leaked URL
+   * is not a durable public link to a private bucket.
+   */
+  viewUrlSeconds: 3600,
+});
+
+/** Every MIME type the feed accepts, in one list for schema validation. */
+const FEED_MEDIA_MIME_TYPES = Object.freeze([
+  ...FEED_MEDIA.allowedImageMimeTypes,
+  ...FEED_MEDIA.allowedVideoMimeTypes,
+]);
+
+/**
+ * The post media type a MIME type maps to, or null if it is not accepted.
+ * Single source of truth for that mapping — the upload endpoint and the
+ * storage path builder must never disagree about it.
+ */
+function postMediaTypeForMime(mimeType) {
+  if (FEED_MEDIA.allowedImageMimeTypes.includes(mimeType)) return POST_MEDIA_TYPE.IMAGE;
+  if (FEED_MEDIA.allowedVideoMimeTypes.includes(mimeType)) return POST_MEDIA_TYPE.VIDEO;
+  return null;
+}
+
+/** Byte cap for a feed media type. */
+function feedMaxBytesFor(mediaType) {
+  return mediaType === POST_MEDIA_TYPE.VIDEO ? FEED_MEDIA.maxVideoBytes : FEED_MEDIA.maxImageBytes;
+}
+
 /**
  * Rate for a call type, as an object. Throws rather than returning a default:
  * a bad call type must never silently bill at the wrong rate.
@@ -210,6 +267,12 @@ module.exports = {
   MIN_PAYOUT_INR,
   MESSAGE_TYPE,
   CHAT_MEDIA,
+  POST_MEDIA_TYPE,
+  POST_STATUS,
+  FEED_MEDIA,
+  FEED_MEDIA_MIME_TYPES,
+  postMediaTypeForMime,
+  feedMaxBytesFor,
   rateFor,
   coinsPerMinute,
   listenerSharePerMinute,

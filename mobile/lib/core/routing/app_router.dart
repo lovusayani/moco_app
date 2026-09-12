@@ -12,6 +12,8 @@ import '../../features/calling/outgoing_call_screen.dart';
 import '../../features/chat_thread/chat_thread_screen.dart';
 import '../../features/chats/chats_screen.dart';
 import '../../features/discovery/discovery_screen.dart';
+import '../../features/feed/feed_screen.dart';
+import '../../features/feed/post_composer_screen.dart';
 import '../../features/listener_profile/listener_profile_screen.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/profile_setup/profile_setup_screen.dart';
@@ -31,6 +33,7 @@ class Routes {
   static const discovery = '/discovery';
   static const wallet = '/wallet';
   static const chats = '/chats';
+  static const feed = '/feed';
 
   /// Deep-link safe: the listener id is a path segment, so
   /// `moco://listener/42` maps cleanly once deep links are enabled.
@@ -43,6 +46,10 @@ class Routes {
   /// the id in the path is what the screen and controller actually key off.
   static const chatThread = '/chat/:userId';
   static String chatThreadPath(int userId) => '/chat/$userId';
+
+  /// The post composer is full-screen over the shell, like a call screen —
+  /// publishing should not be interrupted by a stray tab tap.
+  static const postCompose = '/feed/compose';
 
   /// Call screens read the live [CallSession] from `callControllerProvider`
   /// rather than route parameters — there is exactly one call in progress at
@@ -134,6 +141,11 @@ final routerProvider = Provider<GoRouter>((ref) {
           );
         },
       ),
+      GoRoute(
+        path: Routes.postCompose,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const PostComposerScreen(),
+      ),
       // One shell for both roles. Listener capability is modelled as user state
       // rather than a second navigation tree (Phase 1 decision).
       ShellRoute(
@@ -155,6 +167,11 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: Routes.chats,
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: ChatsScreen()),
+          ),
+          GoRoute(
+            path: Routes.feed,
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: FeedScreen()),
           ),
           for (final tab in AppShellTab.values.where((t) => t.isPlaceholder))
             GoRoute(

@@ -217,10 +217,11 @@ fixtures would happily keep passing.
 ```
 lib/
 ├── core/
-│   ├── api/         Dio client, auth/users/listeners/config/calls endpoints
+│   ├── api/         Dio client, auth/users/listeners/config/calls/chat/feed/safety
 │   ├── auth/        AuthController + AuthState (the session's single owner)
 │   ├── calling/      CallController (state machine), AgoraCallService
 │   ├── config/      env.dart — all --dart-define reading
+│   ├── media/       FeedVideoPlayback — the only video_player import
 │   ├── errors/      ApiException + status → message mapping
 │   ├── realtime/    Socket.IO service
 │   ├── routing/     go_router config and the startup redirect
@@ -232,10 +233,12 @@ lib/
 │   ├── onboarding/  carousel + local completion
 │   ├── auth/        phone + OTP
 │   ├── profile_setup/
-│   ├── app_shell/   bottom nav, placeholder tabs, global incoming-call listener
+│   ├── app_shell/   bottom nav, Profile placeholder, global incoming-call listener
 │   ├── discovery/   grid, filters, pagination
 │   ├── listener_profile/  real Audio/Video CTAs
-│   └── calling/     outgoing/incoming/active audio/active video/summary screens
+│   ├── calling/     outgoing/incoming/active audio/active video/summary screens
+│   ├── chats/ + chat_thread/  conversation list and thread
+│   └── feed/        snap feed, video lifecycle, post composer
 ├── shared/models/   plain Dart models mirroring docs/API.md
 └── main.dart
 ```
@@ -346,3 +349,85 @@ Chats sits inside the tab shell; Chat Thread is a full-screen route outside
 it (same pattern as Listener Profile and the call screens), so the Chats
 list stays mounted — and keeps receiving `chat:message` live — underneath an
 open thread.
+
+## Phase 4 status
+
+Complete: the Feed — a vertical, full-screen, snapping page view of image and
+short-video posts, plus the composer that publishes them.
+
+**Feed → post (image or video) → author → existing listener profile**, and
+**Compose → pick media → optional caption → upload → publish**.
+
+Pagination is keyset, on the same post id the server orders by, so publishing
+mid-scroll cannot make a page skip or repeat a post. The controller also
+merges by id, so a duplicate could not survive even if one arrived.
+
+**Video lifecycle** is the part most worth understanding, and it is driven by
+exactly two facts the feed screen owns — which page is current, and whether
+the app is in the foreground. Their `&&` is handed to one item as `isActive`,
+so "only the visible video plays" and "background pauses playback" are one
+rule rather than two mechanisms that can drift apart. An inactive item holds
+**no controller at all** rather than a paused one: on a mid-range Android
+device the decoder ceiling matters more than the swipe latency that costs.
+Audio starts muted with a visible toggle — a tab switch that suddenly plays
+sound out loud, in an app whose purpose is paid voice calls, is the wrong
+default.
+
+`video_player` is imported in exactly one file
+([`lib/core/media/feed_video_playback.dart`](lib/core/media/feed_video_playback.dart)).
+Every platform call it makes is unavailable in a widget test, so without that
+seam the lifecycle rules could only be checked on a device; behind it they are
+ordinary tests (see `test/widget/feed_video_test.dart`).
+
+**Media never passes through the Moco API.** The client asks the backend to
+authorize an upload, PUTs the bytes straight to Supabase Storage with the
+signed URL it gets back, and only then asks the backend to record the post.
+The upload uses its own Dio client rather than the app's `ApiClient`, because
+the signed URL points at a third-party host and carries its own one-time
+token — sending the Moco session token there would leak it. A post exists only
+when all three steps succeed; a failure at any step keeps the chosen media so
+Retry is one tap.
+
+Posting needs the backend's `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` and a
+private `feed-media` bucket. Without them the compose flow reports itself
+unavailable rather than faking an upload, and the feed itself still works —
+a post whose signed URL could not be minted renders a media error state
+instead of vanishing or breaking the page.
+
+Tapping an author opens the **existing** `/listener/:id` route; no second
+profile screen was built. A non-listener author has no profile screen at all,
+so the server publishes `author.isListener` and the name renders as plain text
+rather than as a control that goes nowhere.
+
+Report and block go to the existing `/api/safety` endpoints — the same system
+discovery and chat already rely on. This is the first Flutter client for them;
+the safety model itself is unchanged and there is no second block list.
+
+**Deliberately not built** (no approved design and no backend support — they
+were not invented here): likes, comments, shares, follower-only feeds, and any
+kind of ranking or recommendation. Feed ordering is newest-first, full stop.
+The Feed also needs no realtime, so it opens no socket subscription — pull to
+refresh and pagination are the whole update model.
+
+### Feed manual QA (needs a real device)
+
+The tests cover the lifecycle rules against a fake player; they cannot cover
+decoding, and no phase has yet been verified on real hardware.
+
+1. Configure the backend's Supabase Storage and create the private
+   `feed-media` bucket (backend README), then restart the API.
+2. Compose → choose a photo → caption → Publish. It should appear at the top
+   of the feed immediately.
+3. Compose → choose a video over 60s. The picker should refuse to hand back
+   more than 60 seconds.
+4. Compose → start a large upload → background the app → return. The progress
+   bar must reflect the real transfer, not a fake animation.
+5. Scroll a feed containing several videos: exactly one should have audio
+   available at a time, and scrolling away must stop the previous one.
+6. Background the app while a video plays. Audio must stop immediately, not
+   continue behind the launcher.
+7. Scroll ~30 posts and watch memory. Controllers must not accumulate.
+8. Receive a call while the feed is open — the incoming-call screen must take
+   over and feed audio must not play under it.
+9. Block an author from a post, then refresh: none of their posts should
+   return.

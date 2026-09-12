@@ -15,18 +15,17 @@ void main() {
       ]);
     });
 
-    test('Discovery, Wallet and Chats are real; the rest are placeholders', () {
-      const real = {AppShellTab.discovery, AppShellTab.wallet, AppShellTab.chats};
+    test('only Profile is still a placeholder', () {
+      const real = {
+        AppShellTab.discovery,
+        AppShellTab.feed,
+        AppShellTab.chats,
+        AppShellTab.wallet,
+      };
       for (final tab in real) {
         expect(tab.isPlaceholder, isFalse, reason: '${tab.label} should be real');
       }
-      for (final tab in AppShellTab.values.where((t) => !real.contains(t))) {
-        expect(
-          tab.isPlaceholder,
-          isTrue,
-          reason: '${tab.label} is not built yet',
-        );
-      }
+      expect(AppShellTab.profile.isPlaceholder, isTrue);
     });
 
     test('every tab has a unique route', () {
@@ -44,15 +43,6 @@ void main() {
     await tester.pump();
 
     expect(find.text('Profile'), findsOneWidget);
-    expect(find.textContaining('Phase 2'), findsOneWidget);
-  });
-
-  testWidgets('the feed placeholder points at a later phase', (tester) async {
-    await tester.pumpWidget(
-      wrapWidget(const PlaceholderTabScreen(tab: AppShellTab.feed)),
-    );
-    await tester.pump();
-
     expect(find.textContaining('a later phase'), findsOneWidget);
   });
 }

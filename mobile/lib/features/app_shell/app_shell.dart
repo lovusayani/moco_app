@@ -55,20 +55,14 @@ enum AppShellTab {
   final IconData icon;
   final IconData activeIcon;
 
-  /// Discovery, Wallet and Chats are real; the rest exist so the tab bar
-  /// matches the design and show an explicit development placeholder rather
-  /// than invented feature UI.
-  bool get isPlaceholder =>
-      this != AppShellTab.discovery &&
-      this != AppShellTab.wallet &&
-      this != AppShellTab.chats;
+  /// Everything but Profile is real now; it exists so the tab bar matches the
+  /// design and shows an explicit development placeholder rather than invented
+  /// feature UI.
+  bool get isPlaceholder => this == AppShellTab.profile;
 
   String get phase => switch (this) {
-    AppShellTab.chats => '',
-    AppShellTab.wallet => '',
-    AppShellTab.feed => 'a later phase',
-    AppShellTab.profile => 'Phase 2',
-    AppShellTab.discovery => '',
+    AppShellTab.profile => 'a later phase',
+    _ => '',
   };
 }
 

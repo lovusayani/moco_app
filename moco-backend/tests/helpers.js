@@ -85,11 +85,37 @@ const tickCount = async (callId) =>
       .rows[0].c,
   );
 
+/**
+ * A feed post, inserted directly.
+ *
+ * Posts are created through the API only when Supabase Storage is configured
+ * (the endpoint verifies the object actually exists in the bucket), so tests
+ * that need existing posts seed them here instead. `mediaPath` mirrors the
+ * real scheme — prefixed with the author's own id — because the ownership
+ * checks under test are prefix checks on exactly that.
+ */
+async function createPost({ author, mediaType = 'image', caption = null, status = 'active' }) {
+  const ext = mediaType === 'video' ? 'mp4' : 'jpg';
+  const { rows } = await query(
+    `INSERT INTO posts (author_user_id, media_type, media_path, caption, status)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [
+      author.id,
+      mediaType,
+      `${author.id}/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`,
+      caption,
+      status,
+    ],
+  );
+  return rows[0];
+}
+
 async function resetDb() {
   await query(
     `TRUNCATE users, wallets, coin_ledger, listener_profiles, listener_earnings,
-              calls, call_ticks, payouts, conversations, messages, blocks, reports,
-              call_ratings, auth_events RESTART IDENTITY CASCADE`,
+              calls, call_ticks, payouts, conversations, messages, message_reactions,
+              posts, blocks, reports, call_ratings, auth_events
+              RESTART IDENTITY CASCADE`,
   );
   await redis.flushdb();
 }
@@ -97,6 +123,7 @@ async function resetDb() {
 module.exports = {
   createUser,
   createActiveCall,
+  createPost,
   balanceOf,
   earningsOf,
   ledgerCount,

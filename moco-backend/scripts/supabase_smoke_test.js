@@ -49,6 +49,39 @@ async function call(method, path, { token, body } = {}) {
   return { status: response.status, body: json };
 }
 
+/**
+ * A 1x1 PNG and a minimal MP4 header. Real bytes, so a storage upload is a
+ * genuine round trip, but tiny enough that the smoke run stays fast and
+ * costs nothing. The MP4 is a valid ftyp box only — enough to exercise the
+ * upload/authorize/post path server-side; actual PLAYBACK is device QA, not
+ * something this script can assert.
+ */
+const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+  'base64',
+);
+const TINY_MP4 = Buffer.concat([
+  Buffer.from([0x00, 0x00, 0x00, 0x18]),
+  Buffer.from('ftypmp42'),
+  Buffer.from([0x00, 0x00, 0x00, 0x00]),
+  Buffer.from('mp42isom'),
+]);
+
+/** PUTs raw bytes to a signed Supabase Storage upload URL, exactly as the
+ * Flutter client does — never through this API. */
+async function uploadToSignedUrl({ uploadUrl, token, mimeType, bytes }) {
+  const response = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': mimeType,
+      'x-upsert': 'false',
+    },
+    body: bytes,
+  });
+  return { status: response.status, text: await response.text() };
+}
+
 async function login(phone) {
   const req = await call('POST', '/auth/otp/request', { body: { phone } });
   check(`otp request (${phone})`, req.status === 200 && req.body.sent === true, req.body);
@@ -242,6 +275,236 @@ async function main() {
     uploadUrl.body,
   );
   console.log(`  photo messages: ${uploadUrl.status === 200 ? 'configured' : 'not configured (expected without SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY)'}`);
+
+  console.log('== Feed: pagination shape, authorization, media honesty ==');
+  const feed = await call('GET', '/feed?limit=5', { token });
+  check(
+    'feed returns a posts array and a nextCursor field',
+    feed.status === 200 && Array.isArray(feed.body.posts) && 'nextCursor' in feed.body,
+    feed.body,
+  );
+  check(
+    'feed is newest-first by id',
+    feed.body.posts.every((p, i, all) => i === 0 || all[i - 1].id > p.id),
+    feed.body.posts?.map((p) => p.id),
+  );
+  check(
+    'feed rejects a non-numeric cursor rather than ignoring it',
+    (await call('GET', '/feed?cursor=abc', { token })).status === 400,
+  );
+
+  // Ownership is enforced regardless of whether storage is configured: a path
+  // under someone else's user id is never postable.
+  const foreignPath = await call('POST', '/feed', {
+    token,
+    body: { mediaPath: `${callerId + 99999}/not_mine.jpg` },
+  });
+  check(
+    "posting media under another user's path is forbidden",
+    foreignPath.status === 403,
+    foreignPath.body,
+  );
+
+  const badExt = await call('POST', '/feed', {
+    token,
+    body: { mediaPath: `${callerId}/payload.exe` },
+  });
+  check(
+    'posting an unsupported file extension is refused',
+    badExt.status === 400 && badExt.body.error?.code === 'unsupported_media',
+    badExt.body,
+  );
+
+  const badMime = await call('POST', '/feed/media/upload-url', {
+    token,
+    body: { mimeType: 'application/x-msdownload' },
+  });
+  check('feed upload-url refuses a disallowed MIME type', badMime.status === 400, badMime.body);
+
+  const missingPost = await call('DELETE', '/feed/999999999', { token });
+  check('deleting a non-existent post is a 404', missingPost.status === 404, missingPost.body);
+
+  const feedUpload = await call('POST', '/feed/media/upload-url', {
+    token,
+    body: { mimeType: 'image/png' },
+  });
+  const storageLive =
+    feedUpload.status === 200 && !!feedUpload.body.uploadUrl && !!feedUpload.body.token;
+  check(
+    'feed upload endpoint responds honestly (configured or not)',
+    storageLive ||
+      (feedUpload.status === 400 && feedUpload.body.error?.code === 'storage_not_configured'),
+    feedUpload.body,
+  );
+
+  if (!storageLive) {
+    console.log(
+      '  feed-media: NOT configured — skipping live upload/post/playback checks\n' +
+        '    (set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY and create the private\n' +
+        '     chat-media and feed-media buckets to enable them)',
+    );
+  } else {
+    console.log('== Feed: LIVE storage round trip ==');
+    check(
+      'feed upload authorization advertises its media type and size cap',
+      feedUpload.body.mediaType === 'image' && feedUpload.body.maxBytes > 0,
+      feedUpload.body,
+    );
+
+    const put = await uploadToSignedUrl({
+      uploadUrl: feedUpload.body.uploadUrl,
+      token: feedUpload.body.token,
+      mimeType: 'image/png',
+      bytes: TINY_PNG,
+    });
+    check('image uploads directly to Supabase Storage', put.status === 200, put);
+
+    const created = await call('POST', '/feed', {
+      token,
+      body: { mediaPath: feedUpload.body.path, caption: 'smoke test post' },
+    });
+    check(
+      'image post publishes with a signed media URL',
+      created.status === 201 &&
+        created.body.post.mediaType === 'image' &&
+        !!created.body.post.mediaUrl &&
+        created.body.post.caption === 'smoke test post',
+      created.body,
+    );
+
+    const postId = created.body.post?.id;
+
+    check(
+      're-posting the same upload is refused rather than duplicated',
+      (
+        await call('POST', '/feed', {
+          token,
+          body: { mediaPath: feedUpload.body.path },
+        })
+      ).status === 400,
+    );
+
+    const feedAfter = await call('GET', '/feed?limit=5', { token });
+    const mine = feedAfter.body.posts?.find((p) => p.id === postId);
+    check('the new post appears in the feed', !!mine, feedAfter.body.posts?.map((p) => p.id));
+    check(
+      'the feed post carries author info and a fetchable signed URL',
+      mine?.author?.id === callerId &&
+        typeof mine?.author?.isListener === 'boolean' &&
+        (await fetch(mine.mediaUrl)).status === 200,
+      mine,
+    );
+
+    // A second, unauthorized account must not be able to delete it.
+    const otherSession = await login(freshTestPhone());
+    const otherDelete = await call('DELETE', `/feed/${postId}`, {
+      token: otherSession.token,
+    });
+    check('another user cannot delete this post', otherDelete.status === 404, otherDelete.body);
+
+    // Video: server-side authorize -> upload -> publish. Playback is device QA.
+    const videoUpload = await call('POST', '/feed/media/upload-url', {
+      token,
+      body: { mimeType: 'video/mp4' },
+    });
+    check(
+      'video upload authorization uses the larger video cap',
+      videoUpload.status === 200 &&
+        videoUpload.body.mediaType === 'video' &&
+        videoUpload.body.maxBytes > feedUpload.body.maxBytes &&
+        videoUpload.body.maxVideoSeconds > 0,
+      videoUpload.body,
+    );
+
+    const videoPut = await uploadToSignedUrl({
+      uploadUrl: videoUpload.body.uploadUrl,
+      token: videoUpload.body.token,
+      mimeType: 'video/mp4',
+      bytes: TINY_MP4,
+    });
+    check('video uploads directly to Supabase Storage', videoPut.status === 200, videoPut);
+
+    const videoPost = await call('POST', '/feed', {
+      token,
+      body: { mediaPath: videoUpload.body.path },
+    });
+    check(
+      'video post publishes and is typed as video',
+      videoPost.status === 201 && videoPost.body.post.mediaType === 'video',
+      videoPost.body,
+    );
+
+    // Clean up both test posts — this script must leave no feed litter.
+    check(
+      'author can delete their own post',
+      (await call('DELETE', `/feed/${postId}`, { token })).status === 200,
+    );
+    check(
+      'deleting an already-deleted own post is idempotent',
+      (await call('DELETE', `/feed/${postId}`, { token })).status === 200,
+    );
+    check(
+      'the deleted post is gone from the feed',
+      !(await call('GET', '/feed?limit=10', { token })).body.posts?.some((p) => p.id === postId),
+    );
+    if (videoPost.body.post?.id) {
+      await call('DELETE', `/feed/${videoPost.body.post.id}`, { token });
+    }
+
+    console.log('== Chat: LIVE photo message round trip ==');
+    const chatUpload = await call('POST', '/chat/media/upload-url', {
+      token,
+      body: { mimeType: 'image/png' },
+    });
+    check(
+      'chat upload URL is issued',
+      chatUpload.status === 200 && !!chatUpload.body.uploadUrl,
+      chatUpload.body,
+    );
+
+    const chatPut = await uploadToSignedUrl({
+      uploadUrl: chatUpload.body.uploadUrl,
+      token: chatUpload.body.token,
+      mimeType: 'image/png',
+      bytes: TINY_PNG,
+    });
+    check('chat photo uploads directly to Supabase Storage', chatPut.status === 200, chatPut);
+
+    const photoMessage = await call('POST', `/chat/${listener.id}/messages`, {
+      token,
+      body: { type: 'image', mediaPath: chatUpload.body.path },
+    });
+    check(
+      'photo message sends with a signed media URL',
+      photoMessage.status === 201 &&
+        photoMessage.body.message.type === 'image' &&
+        !!photoMessage.body.message.mediaUrl,
+      photoMessage.body,
+    );
+    check(
+      "the photo message's signed URL is fetchable",
+      photoMessage.body.message?.mediaUrl &&
+        (await fetch(photoMessage.body.message.mediaUrl)).status === 200,
+    );
+
+    const recipientHistory = await call('GET', `/chat/${callerId}/messages`, {
+      token: listenerSession.token,
+    });
+    const seenPhoto = recipientHistory.body.messages?.find(
+      (m) => m.id === photoMessage.body.message?.id,
+    );
+    check('the participant sees the photo with their own signed URL', !!seenPhoto?.mediaUrl, seenPhoto);
+
+    const foreignChatPath = await call('POST', `/chat/${listener.id}/messages`, {
+      token,
+      body: { type: 'image', mediaPath: `${callerId + 99999}/not_mine.png` },
+    });
+    check(
+      "sending a photo under another user's path is forbidden",
+      foreignChatPath.status === 403,
+      foreignChatPath.body,
+    );
+  }
 
   console.log(`\n${passed} passed, ${failed} failed`);
   await closeDb();

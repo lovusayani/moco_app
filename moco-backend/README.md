@@ -56,7 +56,7 @@ node-pg's parameterized queries. `npm run migrate` and `npm run seed` both go
 through the same `src/config/db.js` pool, so they pick up `DATABASE_URL`
 automatically — no separate Supabase-specific tooling.
 
-### Supabase Storage (chat photo messages)
+### Supabase Storage (chat photos and feed media)
 
 A separate concern from `DATABASE_URL` above — may be the same Supabase
 project or a different one, doesn't matter — and likewise entirely
@@ -65,18 +65,45 @@ Flutter never talks to Supabase directly. `src/integrations/chat.storage.js`
 mints short-lived signed upload/view URLs; the client PUTs the image bytes
 straight to Supabase Storage with one of those, never through this API.
 
+`src/integrations/storage.js` is the single Supabase Storage client — one
+SDK client for every bucket. `chat.storage.js` and `feed.storage.js` wrap it
+with their own path scheme and authorization; nothing else in the codebase
+touches the Supabase client, and the service-role key exists only in that one
+file.
+
 To enable it:
-1. In the Supabase dashboard, create a **private** Storage bucket named
-   `chat-media` (must match `CHAT_MEDIA.bucket` in `src/utils/constants.js`).
+1. In the Supabase dashboard (Storage → New bucket), create **two private
+   buckets** — leave "Public bucket" **off** for both:
+   - `chat-media` (must match `CHAT_MEDIA.bucket` in `src/utils/constants.js`)
+   - `feed-media` (must match `FEED_MEDIA.bucket` in the same file)
 2. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env` (Project
-   Settings → API — the service-role key, not the anon key).
+   Settings → API — the service-role key, **not** the anon key).
 3. Restart the server.
 
-Both unset is a deliberately valid state, not a boot failure: `POST
-/api/chat/media/upload-url` returns `400 storage_not_configured` and the
-Flutter photo-attach button surfaces that honestly rather than faking an
-upload — the rest of chat (text messages, reactions, everything else) works
-identically either way.
+No bucket policies are needed. The buckets stay private and every read and
+write goes through a signed URL this backend mints with the service-role key,
+so there is no anonymous or authenticated-role access to configure — and
+nothing for a misconfigured policy to expose.
+
+Both env vars unset is a deliberately valid state, not a boot failure:
+`POST /api/chat/media/upload-url` and `POST /api/feed/media/upload-url`
+return `400 storage_not_configured`, and the Flutter photo-attach button and
+post composer surface that honestly rather than faking an upload. Everything
+else works identically either way — chat text and reactions, and the feed
+itself (posts are still listed; a post whose signed URL cannot be minted
+shows a media error state rather than failing the whole page).
+
+Both media paths are scoped to the uploader: `<user-id>/<random>.<ext>`, a
+path this backend mints and the client never chooses. Authorizing "is this
+the caller's own upload" is therefore a prefix check, and it runs **before**
+the storage-configured check, so config state can never widen access.
+
+Feed posting adds two checks a signed upload URL cannot carry itself: after
+the client uploads, the server confirms the object actually exists in the
+bucket and that its real size is within the cap for its type (8MB image,
+64MB video) before any row references it. Media never passes through this
+API — a 64MB video going through the droplet's Node process is exactly what
+the direct-to-storage upload avoids.
 
 **Do not run `npm test` against a Supabase dev database with real seed data**
 — `resetDb()` in `tests/helpers.js` truncates every table, and Supabase
@@ -88,6 +115,14 @@ follow/favorite, a full call including a real billing tick from the tick
 worker, wallet debit, ledger reconciliation) without truncating anything, and
 is safe to run against Supabase; re-run `npm run seed` afterward to restore
 the sample balances it spends.
+
+`npm run smoke` also covers the feed (pagination shape, ordering, upload
+authorization, ownership refusal) and, **once the two buckets above exist**,
+switches on a live storage round trip it otherwise skips: real image and video
+uploads straight to Supabase Storage, publishing, fetching the signed URL
+back, author-only delete, and the Phase 3 chat photo-message path end to end.
+It cleans up every post it creates. Video *playback* is not something a script
+can assert — that stays device QA (see `../mobile/README.md`).
 
 ## Admin console
 
@@ -180,13 +215,14 @@ src/
 │   ├── listeners/   discovery, online state, KYC submission
 │   ├── calls/       lifecycle, Agora tokens, billing.engine.js
 │   ├── chat/        conversations and messages
+│   ├── feed/        posts (image + short video), cursor-paginated
 │   ├── payouts/     withdrawal requests
 │   ├── safety/      report, block, call rating
 │   └── admin/       KYC/payout/report queues, stats, reconciliation
 ├── db/          migrations/, migrate.js, seed.js
 ├── realtime/    socket.server.js, call.events.js, presence.js
 ├── workers/     tick, payout, notification (separate PM2 processes)
-├── integrations/agora, sms, fcm, payment.gateway
+├── integrations/agora, sms, fcm, payment.gateway, storage (one Supabase client)
 ├── middleware/  auth, error, rateLimit, validate
 └── utils/       constants.js (single source of truth), logger, errors
 

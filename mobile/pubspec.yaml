@@ -35,8 +35,13 @@ dependencies:
   agora_rtc_engine: ^6.5.2
   permission_handler: ^11.3.1
 
-  # Chat photo messages (Phase 3)
+  # Chat photo messages (Phase 3), feed post media (Phase 4)
   image_picker: ^1.1.2
+
+  # Feed video posts (Phase 4). The official package — playback is driven by
+  # the snap feed's current page index rather than a visibility library, so
+  # exactly one controller is ever playing and the rule is testable.
+  video_player: ^2.14.0
 
 dev_dependencies:
   flutter_test:

@@ -4,7 +4,9 @@ import 'api/api_client.dart';
 import 'api/auth_api.dart';
 import 'api/chat_api.dart';
 import 'api/config_api.dart';
+import 'api/feed_api.dart';
 import 'api/listeners_api.dart';
+import 'api/safety_api.dart';
 import 'api/users_api.dart';
 import 'auth/auth_controller.dart';
 import 'auth/auth_state.dart';
@@ -41,6 +43,12 @@ final configApiProvider = Provider<ConfigApi>(
 );
 final chatApiProvider = Provider<ChatApi>(
   (ref) => ChatApi(ref.watch(apiClientProvider)),
+);
+final feedApiProvider = Provider<FeedApi>(
+  (ref) => FeedApi(ref.watch(apiClientProvider)),
+);
+final safetyApiProvider = Provider<SafetyApi>(
+  (ref) => SafetyApi(ref.watch(apiClientProvider)),
 );
 
 /// Bridges the ValueNotifier-based controller into Riverpod.

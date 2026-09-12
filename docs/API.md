@@ -208,6 +208,95 @@ message's two conversation participants (403 otherwise).
 
 ---
 
+## Feed
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/feed` | Newest-first page of posts |
+| `POST` | `/api/feed/media/upload-url` | Authorize a post media upload |
+| `POST` | `/api/feed` | Publish a post for already-uploaded media |
+| `DELETE` | `/api/feed/:postId` | Soft-delete the caller's own post |
+
+A post is `{ id, mediaType, mediaUrl, caption, createdAt, author }` with
+`author` = `{ id, name, avatarUrl, isListener, verified }`. `mediaType` is
+`image` or `video`. `mediaUrl` is a short-lived **signed** URL into a private
+bucket, minted per read — the same rule as chat photo messages, so a client
+never holds durable access to stored media. `caption` is `null` or non-blank,
+never `""`.
+
+`author.isListener` tells the client whether tapping the author has a
+destination: the only profile screen that exists is the listener profile, so a
+non-listener author is rendered without a link rather than navigating to a
+dead route. `verified` is the same derived KYC boolean discovery publishes —
+raw KYC status is never sent to clients.
+
+**No ranking.** Ordering is `id DESC`, which for an identity column is
+creation order. There is deliberately no recommendation, scoring or
+personalization here, and no likes or comments: none of those are in the
+approved design, so no schema or endpoint guesses at their shape.
+
+### `GET /api/feed`
+`?limit=1..30` (default 10) `&cursor=<post id>` →
+`{ posts: [...], nextCursor }`.
+
+Keyset pagination, not `OFFSET`: `cursor` is the id of the last post the
+client already holds and the server returns strictly older ones. That is what
+makes paging stable when someone posts mid-scroll — an `OFFSET` page would
+skip or repeat a post in that window. `nextCursor` is `null` only when the
+page came back short, which is the one reliable end-of-feed signal.
+
+Filtered server-side: only `active` posts by `active` users, and never a post
+by a user blocked in **either** direction. That is the existing `blocks`
+table with the same both-directions predicate discovery and chat already use
+— there is no second block system.
+
+### `POST /api/feed/media/upload-url`
+`{ "mimeType": "image/jpeg" | "image/png" | "image/webp" | "video/mp4" | "video/quicktime" }`
+→ `{ path, uploadUrl, token, mediaType, maxBytes, maxVideoSeconds }`.
+
+The client `PUT`s the raw bytes to `uploadUrl` directly — media never travels
+through this API, which is the point: a 64MB video must not pass through the
+droplet's Node process. `maxBytes` is 8MB for images and 64MB for video.
+Returns `400 storage_not_configured` when `SUPABASE_URL` /
+`SUPABASE_SERVICE_ROLE_KEY` are unset, so posting is honestly unavailable
+rather than faked.
+
+### `POST /api/feed`
+`{ "mediaPath": "...", "caption": "..."? }` → `201 { post }`.
+
+Five things are verified, none taken on trust from the request body:
+
+1. **Ownership** — `mediaPath` must start with the caller's own user id, the
+   prefix every minted path carries. Checked *before* the storage-configured
+   check, so config state can never widen access.
+2. **Media type** — derived from the path's extension, never read from the
+   body. The extension was chosen server-side from the MIME type the upload
+   authorization already validated, so a client cannot upload a video and
+   register it as an image.
+3. **Existence** — the object must actually be in the bucket
+   (`400 media_not_uploaded` otherwise), so a post can never reference media
+   that was never uploaded and render as a broken feed item.
+4. **Size** — the object's real size against its type's cap
+   (`400 media_too_large`). A signed upload URL cannot carry a size limit, so
+   this is enforced after the upload and before any row references it.
+5. **Uniqueness** — `UNIQUE (media_path)`, so a double-tapped Publish is
+   `400 already_posted` rather than two posts of the same video.
+
+`403` if the path is not the caller's. Caption is 0–500 chars, trimmed;
+blank becomes `null`.
+
+### `DELETE /api/feed/:postId`
+Author-only soft delete → `{ ok: true, postId }`. The row is marked `removed`
+rather than deleted so a report filed against the post still resolves to
+something; the stored object is then removed best-effort. Deleting an
+already-deleted own post is a success (idempotent). Someone else's post is a
+`404`, not a `403` — a post id must not be confirmable by probing.
+
+Admin removal of another user's post is not this endpoint; that goes through
+the existing report queue.
+
+---
+
 ## Payouts (listener)
 
 | Method | Path | Purpose |

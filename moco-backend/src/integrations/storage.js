@@ -13,11 +13,34 @@ const env = require('../config/env');
  * here — Flutter never receives it, never talks to Supabase directly.
  */
 
+/**
+ * Reduces whatever was put in SUPABASE_URL to the project base URL the SDK
+ * actually wants (`https://<ref>.supabase.co`).
+ *
+ * The dashboard displays the REST endpoint — `.../rest/v1` — far more
+ * prominently than the bare project URL, so pasting that one is the obvious
+ * mistake to make. The SDK appends its own `/storage/v1/...` to whatever it
+ * is given, and the resulting double path fails with "Invalid path specified
+ * in request URL", which points nowhere near the actual cause. Normalising is
+ * unambiguous here (there is exactly one right answer) and turns a confusing
+ * runtime failure into no failure at all.
+ */
+function normalizeProjectUrl(raw) {
+  try {
+    const url = new URL(raw);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return raw;
+  }
+}
+
 let client = null;
 if (env.supabaseStorage.url && env.supabaseStorage.serviceRoleKey) {
-  client = createClient(env.supabaseStorage.url, env.supabaseStorage.serviceRoleKey, {
-    auth: { persistSession: false },
-  });
+  client = createClient(
+    normalizeProjectUrl(env.supabaseStorage.url),
+    env.supabaseStorage.serviceRoleKey,
+    { auth: { persistSession: false } },
+  );
 }
 
 const isConfigured = () => client !== null;

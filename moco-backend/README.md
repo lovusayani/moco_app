@@ -78,6 +78,13 @@ To enable it:
    - `feed-media` (must match `FEED_MEDIA.bucket` in the same file)
 2. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env` (Project
    Settings → API — the service-role key, **not** the anon key).
+
+   `SUPABASE_URL` is the **project URL** — `https://<project-ref>.supabase.co`
+   — not the REST endpoint the dashboard shows more prominently
+   (`.../rest/v1`). The SDK appends its own `/storage/v1/...`, so a REST URL
+   produces a doubled path and the unhelpful error *"Invalid path specified in
+   request URL"*. `storage.js` normalises this rather than letting you debug
+   it, but the project URL is what belongs there.
 3. Restart the server.
 
 No bucket policies are needed. The buckets stay private and every read and

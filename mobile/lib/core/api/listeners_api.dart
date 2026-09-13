@@ -123,6 +123,51 @@ class ListenersApi {
       (data) => RelationResult.fromJson(Map<String, dynamic>.from(data as Map)),
     );
   }
+
+  /// `PATCH /listeners/status` — the listener's own online/offline toggle.
+  ///
+  /// The backend remains authoritative: it refuses to go online before KYC is
+  /// approved, and Discovery's live grid updates from the server's own
+  /// `listener:presence` broadcast, not from this call's response.
+  Future<ListenerStatusResult> setOnline(bool isOnline) {
+    return _client.request(
+      () => _client.dio.patch<dynamic>(
+        '/listeners/status',
+        data: {'isOnline': isOnline},
+      ),
+      (data) => ListenerStatusResult.fromJson(Map<String, dynamic>.from(data as Map)),
+    );
+  }
+
+  /// `PATCH /listeners/me` — the listener-editable profile fields. Rates are
+  /// admin-controlled and not sent here.
+  Future<void> updateMyListenerProfile({String? bio, List<String>? languages}) {
+    return _client.request(
+      () => _client.dio.patch<dynamic>(
+        '/listeners/me',
+        data: {
+          if (bio != null) 'bio': bio,
+          if (languages != null) 'languages': languages,
+        },
+      ),
+      (_) {},
+    );
+  }
+}
+
+/// Result of `PATCH /listeners/status`.
+class ListenerStatusResult {
+  const ListenerStatusResult({required this.isOnline, required this.isBusy});
+
+  final bool isOnline;
+  final bool isBusy;
+
+  factory ListenerStatusResult.fromJson(Map<String, dynamic> json) {
+    return ListenerStatusResult(
+      isOnline: json['isOnline'] as bool? ?? false,
+      isBusy: json['isBusy'] as bool? ?? false,
+    );
+  }
 }
 
 /// Outcome of a favourite/follow write, including the resulting follower count

@@ -53,6 +53,7 @@ class AppPreferences {
   final SharedPreferences _prefs;
 
   static const _onboardingKey = 'moco_onboarding_complete';
+  static const _activeRoleKey = 'moco_active_role';
 
   static Future<AppPreferences> create() async =>
       AppPreferences(await SharedPreferences.getInstance());
@@ -61,4 +62,13 @@ class AppPreferences {
 
   Future<void> setOnboardingComplete(bool value) =>
       _prefs.setBool(_onboardingKey, value);
+
+  /// Which side of the account the Profile screen currently shows —
+  /// 'caller' or 'listener'. Purely a display preference: the backend has no
+  /// concept of an "active mode", since a `both`-role account can always do
+  /// both. Persisted locally only so the choice survives an app restart.
+  String get activeRole => _prefs.getString(_activeRoleKey) ?? 'caller';
+
+  Future<void> setActiveRole(String value) =>
+      _prefs.setString(_activeRoleKey, value);
 }

@@ -60,4 +60,15 @@ class UsersApi {
       (_) {},
     );
   }
+
+  /// `DELETE /users/me` — soft delete. The backend clears personal fields and
+  /// retains the row so financial history (coin_ledger, listener_earnings)
+  /// stays reconstructable; it never returns a new session, so the caller
+  /// must clear local auth state itself after this succeeds.
+  Future<void> deleteAccount() {
+    return _client.request(
+      () => _client.dio.delete<dynamic>('/users/me'),
+      (_) {},
+    );
+  }
 }

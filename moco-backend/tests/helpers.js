@@ -114,7 +114,7 @@ async function resetDb() {
   await query(
     `TRUNCATE users, wallets, coin_ledger, listener_profiles, listener_earnings,
               calls, call_ticks, payouts, conversations, messages, message_reactions,
-              posts, blocks, reports, call_ratings, auth_events
+              posts, notifications, blocks, reports, call_ratings, auth_events
               RESTART IDENTITY CASCADE`,
   );
   await redis.flushdb();

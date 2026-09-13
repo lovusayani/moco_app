@@ -15,6 +15,7 @@ const listenersRoutes = require('./modules/listeners/listeners.routes');
 const callsRoutes = require('./modules/calls/calls.routes');
 const chatRoutes = require('./modules/chat/chat.routes');
 const feedRoutes = require('./modules/feed/feed.routes');
+const notificationsRoutes = require('./modules/notifications/notifications.routes');
 const payoutsRoutes = require('./modules/payouts/payouts.routes');
 const safetyRoutes = require('./modules/safety/safety.routes');
 const adminRoutes = require('./modules/admin/admin.routes');
@@ -73,6 +74,7 @@ function createApp() {
   app.use('/api/calls', callsRoutes);
   app.use('/api/chat', chatRoutes);
   app.use('/api/feed', feedRoutes);
+  app.use('/api/notifications', notificationsRoutes);
   app.use('/api/payouts', payoutsRoutes);
   app.use('/api/safety', safetyRoutes);
   app.use('/api/admin', adminRoutes);

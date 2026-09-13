@@ -4,6 +4,7 @@ const express = require('express');
 const { z } = require('zod');
 const { query, withTransaction } = require('../../config/db');
 const { payoutQueue } = require('../../workers/queues');
+const notifications = require('../notifications/notifications.service');
 const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
 const { authenticate, requireAdmin } = require('../../middleware/auth');
@@ -44,6 +45,15 @@ router.post(
     );
 
     if (rows.length === 0) throw notFound('Listener profile');
+
+    await notifications.create({
+      userId: rows[0].user_id,
+      type: req.body.approve ? 'kyc_approved' : 'kyc_rejected',
+      title: req.body.approve ? 'You are verified!' : 'Verification was not approved',
+      body: req.body.approve
+        ? 'You can now go online and take calls.'
+        : req.body.note || 'Please review your details and try again.',
+    });
 
     logger.info(
       { adminId: req.user.id, userId: req.params.userId, status: nextStatus },
@@ -99,6 +109,16 @@ router.post(
     if (req.body.approve) {
       await payoutQueue.add('payout', { payoutId: payout.id }, { jobId: `payout-${payout.id}` });
     }
+
+    await notifications.create({
+      userId: payout.listener_id,
+      type: req.body.approve ? 'payout_approved' : 'payout_rejected',
+      title: req.body.approve ? 'Withdrawal approved' : 'Withdrawal rejected',
+      body: req.body.approve
+        ? `Your withdrawal of ₹${payout.amount} is on its way.`
+        : req.body.note || `Your withdrawal of ₹${payout.amount} was rejected.`,
+      data: { payoutId: payout.id },
+    });
 
     logger.info({ adminId: req.user.id, payoutId: payout.id, approved: req.body.approve }, 'payout reviewed');
     res.json({ payoutId: payout.id, status: payout.status });

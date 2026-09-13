@@ -324,6 +324,45 @@ a listener cannot stack requests beyond what they have earned.
 
 ---
 
+## Notifications
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/notifications` | Newest-first page, with an unread count |
+| `POST` | `/api/notifications/:id/read` | Mark one read (idempotent) |
+| `POST` | `/api/notifications/read-all` | Mark everything read |
+| `DELETE` | `/api/notifications/:id` | Remove one |
+
+The durable counterpart to the fire-and-forget FCM push in
+`src/integrations/fcm.js`: a user who missed the push (no token registered,
+device offline, FCM unconfigured in dev) can still see the notification the
+next time they open the app.
+
+A notification is `{ id, type, title, body, data, read, createdAt }`. `data`
+is a small object carrying only what the client needs to route a tap (e.g.
+`{ "payoutId": 12 }`) — never anything sensitive, since it is returned
+verbatim. `type` is a free-text tag, not an enum: `kyc_approved`,
+`kyc_rejected`, `payout_approved`, `payout_rejected` today. Deliberately not
+persisted here: incoming calls and chat messages, which already have their
+own live delivery (Socket.IO + push) and would only accumulate as stale
+"incoming call" entries after the call ends.
+
+### `GET /api/notifications`
+`?limit=1..50` (default 30) `&cursor=<id>` → same keyset-pagination shape as
+the feed and both ledgers: `nextCursor` is the id to pass back for the next
+page, `null` only when the page came back short.
+
+### `POST /api/notifications/:id/read`
+Marks one of the caller's own notifications read. A 404 for a notification
+that doesn't exist or belongs to someone else — indistinguishable, so a
+notification id can't be probed. Marking an already-read notification read
+again is a no-op, not an error.
+
+### `DELETE /api/notifications/:id`
+Same ownership rule as read. Permanent — there is no undo/archive state.
+
+---
+
 ## Admin
 
 Gated by an allow-list of phone numbers in `ADMIN_PHONES`, not a database role,

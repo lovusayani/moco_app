@@ -42,6 +42,7 @@ dependencies:
   # the snap feed's current page index rather than a visibility library, so
   # exactly one controller is ever playing and the rule is testable.
   video_player: ^2.14.0
+  in_app_purchase: ^3.3.0
 
 dev_dependencies:
   flutter_test:

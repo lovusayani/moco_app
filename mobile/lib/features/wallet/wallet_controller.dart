@@ -1,8 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api/purchases_api.dart';
 import '../../core/api/wallet_api.dart';
 import '../../core/config/env.dart';
 import '../../core/errors/api_exception.dart';
+import '../../core/payments/google_play_billing_client.dart';
 import '../../core/payments/purchase_provider.dart';
 import '../../core/providers.dart';
 import '../../shared/models/app_config.dart';
@@ -94,12 +96,36 @@ final walletApiProvider = Provider<WalletApi>(
   (ref) => WalletApi(ref.watch(apiClientProvider)),
 );
 
+final purchasesApiProvider = Provider<PurchasesApi>(
+  (ref) => PurchasesApi(ref.watch(apiClientProvider)),
+);
+
+/// The billing client, created once per app run — a real
+/// `InAppPurchase.instance` connection is not something to open per-purchase.
+final googlePlayBillingClientProvider = Provider<GooglePlayBillingClient>((ref) {
+  final client = createGooglePlayBillingClient();
+  ref.onDispose(client.dispose);
+  return client;
+});
+
+/// Exactly one of these is ever offered: the mock provider only in
+/// development (it exercises the backend's own dev-only unsigned-webhook
+/// path), Google Play Billing everywhere else. There is no build
+/// configuration in which both — or neither — are considered available,
+/// which is what a production build cannot accidentally expose mock credits.
 final purchaseProviderProvider = Provider<PurchaseProvider>((ref) {
-  final session = ref.watch(authControllerProvider);
-  return MockPurchaseProvider(
-    ref.watch(walletApiProvider),
-    session,
-    isDevelopment: Env.isDevelopment,
+  if (Env.isDevelopment) {
+    final session = ref.watch(authControllerProvider);
+    return MockPurchaseProvider(
+      ref.watch(walletApiProvider),
+      session,
+      isDevelopment: true,
+    );
+  }
+  return GooglePlayBillingProvider(
+    ref.watch(googlePlayBillingClientProvider),
+    ref.watch(purchasesApiProvider),
+    isDevelopment: false,
   );
 });
 

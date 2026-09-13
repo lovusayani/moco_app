@@ -134,6 +134,23 @@ class _LedgerRow extends StatelessWidget {
       ),
       child: Row(
         children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: (row.isCredit ? MocoColors.success : MocoColors.textMuted)
+                  .withValues(alpha: 0.14),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              row.isCredit
+                  ? Icons.add_circle_outline_rounded
+                  : Icons.remove_circle_outline_rounded,
+              size: 18,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: MocoSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

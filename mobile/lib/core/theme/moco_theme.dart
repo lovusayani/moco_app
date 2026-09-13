@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'moco_colors.dart';
 import 'moco_spacing.dart';
@@ -95,30 +96,83 @@ class MocoTheme {
     );
   }
 
+  /// The approved reference sets Inter for Latin text and Noto Sans
+  /// Devanagari/Telugu for Hindi/Telugu copy. Almost every screen in this app
+  /// builds its own `TextStyle(fontSize: ..., color: ...)` inline rather than
+  /// reading `Theme.of(context).textTheme` — but none of those inline styles
+  /// set `fontFamily`, and `Text` merges its style onto the ambient
+  /// `DefaultTextStyle` (which Material derives from this `TextTheme`). So
+  /// setting the family once here, via `GoogleFonts.interTextTheme()`, is
+  /// enough to change every screen's typeface without editing any of them —
+  /// exactly the "central theme" fix this pass calls for.
+  ///
+  /// `fontFamilyFallback` is what makes Hindi/Telugu strings (chip labels
+  /// like "हिंदी"/"తెలుగు", bilingual copy) render in the matching Noto Sans
+  /// weight instead of falling back to the platform's own system font for
+  /// glyphs Inter doesn't cover — Flutter walks this list per-glyph
+  /// automatically; nothing else has to know which script it's rendering.
   static TextTheme _textTheme(TextTheme base) {
-    return base
+    final interTheme = GoogleFonts.interTextTheme(base);
+    final fallback = [
+      GoogleFonts.notoSansDevanagari().fontFamily!,
+      GoogleFonts.notoSansTelugu().fontFamily!,
+    ];
+
+    TextStyle? withFallback(TextStyle? style) =>
+        style?.copyWith(fontFamilyFallback: fallback);
+
+    return interTheme
         .copyWith(
-          displaySmall: base.displaySmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.5,
+          displaySmall: withFallback(
+            interTheme.displaySmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.5,
+            ),
           ),
-          headlineMedium: base.headlineMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.4,
+          headlineMedium: withFallback(
+            interTheme.headlineMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.4,
+            ),
           ),
-          headlineSmall: base.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w600,
-            letterSpacing: -0.3,
+          headlineSmall: withFallback(
+            interTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.3,
+            ),
           ),
-          titleLarge: base.titleLarge?.copyWith(fontWeight: FontWeight.w600),
-          titleMedium: base.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-          bodyLarge: base.bodyLarge?.copyWith(height: 1.45),
-          bodyMedium: base.bodyMedium?.copyWith(height: 1.45),
-          labelLarge: base.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+          titleLarge: withFallback(
+            interTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          titleMedium: withFallback(
+            interTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          bodyLarge: withFallback(interTheme.bodyLarge?.copyWith(height: 1.45)),
+          bodyMedium: withFallback(
+            interTheme.bodyMedium?.copyWith(height: 1.45),
+          ),
+          bodySmall: withFallback(interTheme.bodySmall),
+          labelLarge: withFallback(
+            interTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          labelMedium: withFallback(interTheme.labelMedium),
+          labelSmall: withFallback(interTheme.labelSmall),
+          titleSmall: withFallback(interTheme.titleSmall),
+          displayLarge: withFallback(interTheme.displayLarge),
+          displayMedium: withFallback(interTheme.displayMedium),
+          headlineLarge: withFallback(interTheme.headlineLarge),
         )
         .apply(
           bodyColor: MocoColors.textPrimary,
           displayColor: MocoColors.textPrimary,
         );
   }
+
+  /// The reference's one deliberate typographic exception: the Discovery
+  /// screen's "Discover" wordmark is set in a serif, not Inter. Rather than
+  /// pull in a whole new Google Font family for a single word, this uses the
+  /// platform's own generic "serif" family name (Noto Serif on Android,
+  /// Georgia-equivalent on iOS) — the "closest appropriate serif already
+  /// available" rather than a new asset/dependency.
+  static const String discoverWordmarkFontFamily = 'serif';
 }

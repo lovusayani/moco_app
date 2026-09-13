@@ -43,6 +43,7 @@ dependencies:
   # exactly one controller is ever playing and the rule is testable.
   video_player: ^2.14.0
   in_app_purchase: ^3.3.0
+  google_fonts: ^8.2.1
 
 dev_dependencies:
   flutter_test:

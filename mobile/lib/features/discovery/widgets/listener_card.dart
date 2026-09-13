@@ -35,8 +35,6 @@ class ListenerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final rate = showVideoRate ? listener.videoRate : listener.audioRate;
-
     return MocoGlassCard(
       onTap: onTap,
       padding: const EdgeInsets.all(MocoSpacing.md),
@@ -104,41 +102,34 @@ class ListenerCard extends StatelessWidget {
               ),
             ),
           const SizedBox(height: MocoSpacing.sm),
-          // At 360px a card is ~130px wide, and the rating plus the rate pill
-          // together exceeded it. The rate must stay legible in full — it is
-          // the price — so the rating is what gives way.
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              if (listener.rating > 0)
-                Flexible(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.star_rounded,
-                        size: 14,
-                        color: MocoColors.coinAccent,
-                      ),
-                      const SizedBox(width: 2),
-                      Flexible(
-                        child: Text(
-                          listener.rating.toStringAsFixed(1),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: MocoColors.textSecondary,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
+          if (listener.rating > 0)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.star_rounded,
+                  size: 13,
+                  color: MocoColors.coinAccent,
+                ),
+                const SizedBox(width: 2),
+                Text(
+                  listener.rating.toStringAsFixed(1),
+                  style: const TextStyle(
+                    color: MocoColors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              _RatePill(rate: rate, isVideo: showVideoRate),
-            ],
-          ),
+              ],
+            ),
+          const SizedBox(height: 3),
+          // Both rates, always — the audio/video toggle up in the header
+          // still reaches the server as a real capability filter (unchanged);
+          // it no longer decides which single rate this card can show, since
+          // the backend already returns both on every listener.
+          _RateLine(rate: listener.audioRate, isVideo: false),
+          const SizedBox(height: 2),
+          _RateLine(rate: listener.videoRate, isVideo: true),
         ],
       ),
     );
@@ -152,39 +143,39 @@ class ListenerCard extends StatelessWidget {
   };
 }
 
-class _RatePill extends StatelessWidget {
-  const _RatePill({required this.rate, required this.isVideo});
+/// A compact icon+rate line — the reference shows both audio and video rates
+/// stacked, rather than one pill sized for a 2-column card, so this is a
+/// plain row rather than the old badge-shaped pill (there isn't room for two
+/// pills at 3-column width without truncating the price).
+class _RateLine extends StatelessWidget {
+  const _RateLine({required this.rate, required this.isVideo});
 
   final int rate;
   final bool isVideo;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: MocoColors.coinAccent.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(MocoRadius.pill),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            isVideo ? Icons.videocam_rounded : Icons.call_rounded,
-            size: 12,
-            color: MocoColors.coinAccent,
-          ),
-          const SizedBox(width: 4),
-          Text(
+    return Row(
+      children: [
+        Icon(
+          isVideo ? Icons.videocam_rounded : Icons.call_rounded,
+          size: 10,
+          color: MocoColors.coinAccent,
+        ),
+        const SizedBox(width: 3),
+        Flexible(
+          child: Text(
             '$rate/min',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: MocoColors.coinAccent,
-              fontSize: 11.5,
+              fontSize: 10.5,
               fontWeight: FontWeight.w700,
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

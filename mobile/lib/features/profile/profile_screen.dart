@@ -98,10 +98,39 @@ class _IdentityCard extends ConsumerWidget {
     return MocoGlassCard(
       child: Row(
         children: [
-          MocoAvatar(
-            name: user.displayName ?? user.phone,
-            imageUrl: user.avatarUrl,
-            size: 64,
+          GestureDetector(
+            key: const Key('profile_avatar_edit'),
+            onTap: () => context.push(Routes.editProfile),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                MocoAvatar(
+                  name: user.displayName ?? user.phone,
+                  imageUrl: user.avatarUrl,
+                  size: 64,
+                ),
+                Positioned(
+                  bottom: -2,
+                  right: -2,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: MocoColors.accentPrimary,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: MocoColors.backgroundPrimary,
+                        width: 2,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.edit_rounded,
+                      size: 11,
+                      color: MocoColors.textOnAccent,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(width: MocoSpacing.lg),
           Expanded(

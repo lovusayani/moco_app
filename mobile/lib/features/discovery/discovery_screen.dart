@@ -7,6 +7,7 @@ import '../../core/providers.dart';
 import '../../core/routing/app_router.dart';
 import '../../core/theme/moco_colors.dart';
 import '../../core/theme/moco_spacing.dart';
+import '../../core/theme/moco_theme.dart';
 import '../../core/widgets/moco_states.dart';
 import '../../core/widgets/moco_surfaces.dart';
 import '../notifications/notifications_controller.dart';
@@ -77,16 +78,48 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                   children: [
                     Row(
                       children: [
+                        // The leading group is the sole flexible child (an
+                        // Expanded, not a Flexible competing with a Spacer)
+                        // so it claims exactly the width left over after the
+                        // fixed trailing icons — "Discover" only shrinks on
+                        // the very narrowest supported screens, instead of
+                        // splitting the row down the middle with empty space.
                         Expanded(
-                          child: MocoSectionHeader(
-                            title: 'Discover',
-                            subtitle: user?.displayName == null
-                                ? null
-                                : 'Hi ${user!.displayName}',
+                          child: Row(
+                            children: [
+                              // A one-off serif treatment for this single
+                              // wordmark — the reference's only departure
+                              // from Inter — rather than reusing
+                              // MocoSectionHeader, which every other screen
+                              // also uses and must stay in the app's normal
+                              // typeface.
+                              const Flexible(
+                                child: Text(
+                                  'Discover',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontFamily: MocoTheme.discoverWordmarkFontFamily,
+                                    color: MocoColors.textPrimary,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: MocoSpacing.xs),
+                              _CompactModeToggle(
+                                mode: state.mode,
+                                onChanged: controller.setMode,
+                              ),
+                            ],
                           ),
                         ),
+                        if (user != null) ...[
+                          _CoinBalanceChip(balance: user.coinBalance),
+                          const SizedBox(width: MocoSpacing.xs),
+                        ],
                         const _NotificationsBell(),
-                        const SizedBox(width: MocoSpacing.sm),
+                        const SizedBox(width: MocoSpacing.xs),
                         MocoIconButton(
                           key: const Key('discovery_search_toggle'),
                           icon: _searchOpen
@@ -133,11 +166,6 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                       ),
                     ),
                     const SizedBox(height: MocoSpacing.lg),
-                    _ModeToggle(
-                      mode: state.mode,
-                      onChanged: controller.setMode,
-                    ),
-                    const SizedBox(height: MocoSpacing.md),
                     _FilterRow(
                       filters: state.filters,
                       onChanged: controller.setFilters,
@@ -233,10 +261,10 @@ class _ListenerGrid extends StatelessWidget {
       ),
       sliver: SliverGrid(
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: MocoSpacing.md,
-          crossAxisSpacing: MocoSpacing.md,
-          childAspectRatio: 0.72,
+          crossAxisCount: 3,
+          mainAxisSpacing: MocoSpacing.sm,
+          crossAxisSpacing: MocoSpacing.sm,
+          childAspectRatio: 0.62,
         ),
         delegate: SliverChildBuilderDelegate((context, index) {
           final listener = listeners[index];
@@ -264,10 +292,10 @@ class _LoadingGrid extends StatelessWidget {
       ),
       sliver: SliverGrid(
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: MocoSpacing.md,
-          crossAxisSpacing: MocoSpacing.md,
-          childAspectRatio: 0.72,
+          crossAxisCount: 3,
+          mainAxisSpacing: MocoSpacing.sm,
+          crossAxisSpacing: MocoSpacing.sm,
+          childAspectRatio: 0.62,
         ),
         delegate: SliverChildBuilderDelegate(
           (context, index) => const MocoGlassCard(
@@ -282,108 +310,123 @@ class _LoadingGrid extends StatelessWidget {
               ],
             ),
           ),
-          childCount: 6,
+          childCount: 9,
         ),
       ),
     );
   }
 }
 
-/// Audio/Video switch.
+/// Audio/Video switch, as a compact icon-only pill next to the header
+/// wordmark — matching the reference's placement and chrome.
 ///
-/// Changes which rate the cards display. It is NOT a capability filter — the
-/// backend has no such flag (see the API gaps table in mobile/README.md).
-class _ModeToggle extends StatelessWidget {
-  const _ModeToggle({required this.mode, required this.onChanged});
+/// This reaches the backend as a real capability filter (`callType` on
+/// `GET /listeners`, unchanged) — it is not just a client-side relabel, and
+/// this restyle changes nothing about that.
+class _CompactModeToggle extends StatelessWidget {
+  const _CompactModeToggle({required this.mode, required this.onChanged});
 
   final CallMode mode;
   final ValueChanged<CallMode> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _ModeButton(
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: MocoColors.surfaceGlass,
+        borderRadius: BorderRadius.circular(MocoRadius.pill),
+        border: Border.all(color: MocoColors.borderSubtle),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _CompactModeSegment(
             key: const Key('discovery_mode_audio'),
-            label: 'Callers',
             icon: Icons.call_rounded,
             selected: mode == CallMode.audio,
             onTap: () => onChanged(CallMode.audio),
           ),
-        ),
-        const SizedBox(width: MocoSpacing.sm),
-        Expanded(
-          child: _ModeButton(
+          _CompactModeSegment(
             key: const Key('discovery_mode_video'),
-            label: 'Video',
             icon: Icons.videocam_rounded,
             selected: mode == CallMode.video,
             onTap: () => onChanged(CallMode.video),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
-class _ModeButton extends StatelessWidget {
-  const _ModeButton({
+class _CompactModeSegment extends StatelessWidget {
+  const _CompactModeSegment({
     super.key,
-    required this.label,
     required this.icon,
     required this.selected,
     required this.onTap,
   });
 
-  final String label;
   final IconData icon;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: MocoDuration.tab,
-      height: MocoSpacing.minTouchTarget,
-      decoration: BoxDecoration(
-        color: selected
-            ? MocoColors.accentPrimary.withValues(alpha: 0.16)
-            : MocoColors.surfaceGlass,
-        borderRadius: BorderRadius.circular(MocoRadius.md),
-        border: Border.all(
-          color: selected ? MocoColors.accentPrimary : MocoColors.borderSubtle,
-        ),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(MocoRadius.md),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 17,
-                color: selected
-                    ? MocoColors.accentPrimary
-                    : MocoColors.textMuted,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: selected
-                      ? MocoColors.textPrimary
-                      : MocoColors.textSecondary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+    return Material(
+      color: selected ? MocoColors.accentPrimary : Colors.transparent,
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(
+            icon,
+            size: 14,
+            color: selected ? MocoColors.textOnAccent : MocoColors.textMuted,
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Coin balance shown right in the Discovery header — reads the same
+/// `coinBalance` the Wallet tab shows, already on the signed-in user, so
+/// nothing new is fetched for it.
+class _CoinBalanceChip extends StatelessWidget {
+  const _CoinBalanceChip({required this.balance});
+
+  final int balance;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: MocoColors.surfaceGlass,
+        borderRadius: BorderRadius.circular(MocoRadius.pill),
+        border: Border.all(color: MocoColors.borderSubtle),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.circle,
+            size: 12,
+            color: MocoColors.coinAccent,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            '$balance',
+            style: const TextStyle(
+              color: MocoColors.textPrimary,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -24,6 +24,8 @@ class CallEndedSummaryScreen extends ConsumerWidget {
     final session = ref.watch(callControllerProvider);
     final summary = session.summary;
     final isListener = session.role == CallRole.listener;
+    final insufficientBalance = session.phase == CallPhase.insufficientBalance ||
+        summary?.endReason == CallEndReason.insufficientBalance;
 
     return Scaffold(
       body: MocoBackground(
@@ -56,6 +58,12 @@ class CallEndedSummaryScreen extends ConsumerWidget {
                     fontSize: 14,
                   ),
                 ),
+                if (insufficientBalance) ...[
+                  const SizedBox(height: MocoSpacing.lg),
+                  _InsufficientBalanceBanner(
+                    onAddCoins: () => context.push(Routes.wallet),
+                  ),
+                ],
                 const SizedBox(height: MocoSpacing.xxl),
                 if (summary != null)
                   MocoGlassCard(
@@ -161,6 +169,60 @@ class CallEndedSummaryScreen extends ConsumerWidget {
     final m = seconds ~/ 60;
     final s = seconds % 60;
     return '${m}m ${s.toString().padLeft(2, '0')}s';
+  }
+}
+
+/// Shown only when this call actually ended for insufficient balance — driven
+/// by the server's own end reason, never guessed from the coin figures below.
+class _InsufficientBalanceBanner extends StatelessWidget {
+  const _InsufficientBalanceBanner({required this.onAddCoins});
+
+  final VoidCallback onAddCoins;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('call_summary_insufficient_balance_banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        horizontal: MocoSpacing.lg,
+        vertical: MocoSpacing.md,
+      ),
+      decoration: BoxDecoration(
+        color: MocoColors.warning.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(MocoRadius.md),
+        border: Border.all(color: MocoColors.warning.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: MocoColors.warning, size: 20),
+          const SizedBox(width: MocoSpacing.sm),
+          const Expanded(
+            child: Text(
+              'Your balance ran out mid-call.',
+              style: TextStyle(
+                color: MocoColors.warning,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          TextButton(
+            key: const Key('call_summary_add_coins'),
+            onPressed: onAddCoins,
+            style: TextButton.styleFrom(
+              foregroundColor: MocoColors.warning,
+              padding: const EdgeInsets.symmetric(horizontal: MocoSpacing.sm),
+              minimumSize: const Size(0, 32),
+            ),
+            child: const Text(
+              'Add coins',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

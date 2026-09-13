@@ -166,6 +166,12 @@ class _NotificationRow extends StatelessWidget {
     _ => Icons.notifications_none_rounded,
   };
 
+  Color get _iconColor => switch (notification.type) {
+    'kyc_approved' || 'payout_approved' || 'payout_paid' => MocoColors.online,
+    'kyc_rejected' || 'payout_rejected' => MocoColors.danger,
+    _ => MocoColors.accentSoft,
+  };
+
   @override
   Widget build(BuildContext context) {
     return Material(
@@ -188,7 +194,7 @@ class _NotificationRow extends StatelessWidget {
                   color: MocoColors.surfaceGlass,
                   shape: BoxShape.circle,
                 ),
-                child: Icon(_icon, color: MocoColors.accentSoft, size: 20),
+                child: Icon(_icon, color: _iconColor, size: 20),
               ),
               const SizedBox(width: MocoSpacing.md),
               Expanded(

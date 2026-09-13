@@ -228,77 +228,153 @@ class _PackGrid extends StatelessWidget {
       );
     }
 
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: packs.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: MocoSpacing.md,
-        mainAxisSpacing: MocoSpacing.md,
-        childAspectRatio: 1.35,
-      ),
-      itemBuilder: (context, index) {
-        final pack = packs[index];
-        final busy = purchasingPackId == pack.id;
-        final enabled = purchaseEnabled && purchasingPackId == null;
+    // "Best value" isn't a server flag — `constants.js` publishes price/coins/
+    // bonus only — so this is derived purely from that existing data (highest
+    // coins-per-rupee among packs with more than one option), never a new
+    // client-invented field.
+    String? bestValueId;
+    if (packs.length > 1) {
+      var bestRatio = -1.0;
+      for (final pack in packs) {
+        final ratio = pack.totalCoins / pack.priceInr;
+        if (ratio > bestRatio) {
+          bestRatio = ratio;
+          bestValueId = pack.id;
+        }
+      }
+    }
 
-        return MocoGlassCard(
-          key: Key('coin_pack_${pack.id}'),
-          padding: const EdgeInsets.all(MocoSpacing.md),
-          onTap: enabled ? () => onTap(pack) : null,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.monetization_on_rounded,
-                    color: MocoColors.coinAccent,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    '${pack.totalCoins}',
-                    style: const TextStyle(
-                      color: MocoColors.textPrimary,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-              if (pack.bonus > 0)
-                Text(
-                  '+${pack.bonus} bonus',
-                  style: const TextStyle(color: MocoColors.coinAccentSoft, fontSize: 11.5),
-                ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '₹${pack.priceInr}',
-                    style: const TextStyle(
-                      color: MocoColors.textSecondary,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (busy)
-                    const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else if (purchaseEnabled)
-                    const Icon(Icons.add_circle_rounded, color: MocoColors.accentPrimary, size: 20),
-                ],
-              ),
-            ],
+    return Column(
+      children: [
+        for (final pack in packs) ...[
+          _PackRow(
+            pack: pack,
+            isBestValue: pack.id == bestValueId,
+            busy: purchasingPackId == pack.id,
+            enabled: purchaseEnabled && purchasingPackId == null,
+            purchaseEnabled: purchaseEnabled,
+            onTap: () => onTap(pack),
           ),
-        );
-      },
+          if (pack != packs.last) const SizedBox(height: MocoSpacing.sm),
+        ],
+      ],
+    );
+  }
+}
+
+class _PackRow extends StatelessWidget {
+  const _PackRow({
+    required this.pack,
+    required this.isBestValue,
+    required this.busy,
+    required this.enabled,
+    required this.purchaseEnabled,
+    required this.onTap,
+  });
+
+  final CoinPack pack;
+  final bool isBestValue;
+  final bool busy;
+  final bool enabled;
+  final bool purchaseEnabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return MocoGlassCard(
+      key: Key('coin_pack_${pack.id}'),
+      padding: const EdgeInsets.symmetric(
+        horizontal: MocoSpacing.lg,
+        vertical: MocoSpacing.md,
+      ),
+      strong: isBestValue,
+      glow: isBestValue,
+      onTap: enabled ? onTap : null,
+      child: Row(
+        children: [
+          const Icon(
+            Icons.monetization_on_rounded,
+            color: MocoColors.coinAccent,
+            size: 26,
+          ),
+          const SizedBox(width: MocoSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      '${pack.totalCoins} coins',
+                      style: const TextStyle(
+                        color: MocoColors.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (isBestValue) ...[
+                      const SizedBox(width: 6),
+                      const _BestValueBadge(),
+                    ],
+                  ],
+                ),
+                if (pack.bonus > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      '${pack.coins} + ${pack.bonus} bonus',
+                      style: const TextStyle(
+                        color: MocoColors.coinAccentSoft,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: MocoSpacing.md),
+          Text(
+            '₹${pack.priceInr}',
+            style: const TextStyle(
+              color: MocoColors.textSecondary,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: MocoSpacing.sm),
+          if (busy)
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else if (purchaseEnabled)
+            const Icon(Icons.add_circle_rounded, color: MocoColors.accentPrimary, size: 22),
+        ],
+      ),
+    );
+  }
+}
+
+class _BestValueBadge extends StatelessWidget {
+  const _BestValueBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        gradient: MocoColors.coinGradient,
+        borderRadius: BorderRadius.circular(MocoRadius.pill),
+      ),
+      child: const Text(
+        'Best value',
+        style: TextStyle(
+          color: Color(0xFF2A1338),
+          fontSize: 9.5,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
     );
   }
 }

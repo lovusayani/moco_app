@@ -125,13 +125,23 @@ class _ActiveVideoCallScreenState extends ConsumerState<ActiveVideoCallScreen> {
                     ),
                     const SizedBox(height: MocoSpacing.sm),
                     if (session.balance != null && session.role == CallRole.caller)
-                      Text(
-                        'Balance · ${session.balance} coins',
-                        style: const TextStyle(
-                          color: MocoColors.coinAccentSoft,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          shadows: [Shadow(blurRadius: 8, color: Colors.black54)],
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: MocoSpacing.md,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(MocoRadius.pill),
+                          border: Border.all(color: MocoColors.borderSubtle),
+                        ),
+                        child: Text(
+                          'Balance · ${session.balance} coins',
+                          style: const TextStyle(
+                            color: MocoColors.coinAccentSoft,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     if (session.role == CallRole.caller && session.lowBalance)

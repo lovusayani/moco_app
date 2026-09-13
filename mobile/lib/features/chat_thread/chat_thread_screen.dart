@@ -7,15 +7,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../core/calling/call_controller.dart';
+import '../../core/calling/call_session.dart';
 import '../../core/errors/api_exception.dart';
 import '../../core/providers.dart';
+import '../../core/routing/app_router.dart';
 import '../../core/theme/moco_colors.dart';
 import '../../core/theme/moco_spacing.dart';
 import '../../core/utils/time_format.dart';
 import '../../core/widgets/moco_avatar.dart';
 import '../../core/widgets/moco_background.dart';
 import '../../core/widgets/moco_states.dart';
+import '../../shared/models/call.dart';
 import '../../shared/models/chat.dart';
+import '../../shared/models/listener.dart';
+import '../listener_profile/listener_profile_controller.dart';
 import '../safety/safety_actions_sheet.dart';
 import 'chat_thread_controller.dart';
 
@@ -187,6 +193,46 @@ class _ThreadHeader extends ConsumerWidget {
   final String name;
   final String? avatarUrl;
 
+  /// Reuses the same `initiateCall` path Listener Profile's call CTAs use —
+  /// this only needs the full [ListenerDetail] (id/name/avatar are all
+  /// `initiateCall` reads) to satisfy that existing signature, fetched via
+  /// the same profile endpoint the profile screen already calls. No new
+  /// endpoint, no new call-initiation logic.
+  Future<void> _call(BuildContext context, WidgetRef ref, CallType type) async {
+    final busy = ref.read(
+      callControllerProvider.select((s) => s.phase != CallPhase.idle || s.isBusy),
+    );
+    if (busy) return;
+
+    final ListenerDetail listener;
+    try {
+      listener = await ref.read(listenerProfileProvider(counterpartyId).future);
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not start the call.')),
+      );
+      return;
+    }
+    if (!context.mounted) return;
+
+    await ref
+        .read(callControllerProvider.notifier)
+        .initiateCall(listener: listener, type: type);
+    if (!context.mounted) return;
+
+    final session = ref.read(callControllerProvider);
+    if (session.phase == CallPhase.ringing) {
+      context.push(Routes.callOutgoing);
+      return;
+    }
+
+    final message = session.error?.message ?? 'Could not start the call.';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 3)),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ClipRect(
@@ -221,6 +267,18 @@ class _ThreadHeader extends ConsumerWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+              ),
+              IconButton(
+                key: const Key('chat_thread_call_audio'),
+                icon: const Icon(Icons.call_rounded, color: MocoColors.textPrimary),
+                tooltip: 'Audio call',
+                onPressed: () => _call(context, ref, CallType.audio),
+              ),
+              IconButton(
+                key: const Key('chat_thread_call_video'),
+                icon: const Icon(Icons.videocam_rounded, color: MocoColors.textPrimary),
+                tooltip: 'Video call',
+                onPressed: () => _call(context, ref, CallType.video),
               ),
               IconButton(
                 key: const Key('chat_thread_more'),

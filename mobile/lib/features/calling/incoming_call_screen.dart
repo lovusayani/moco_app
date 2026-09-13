@@ -9,7 +9,9 @@ import '../../core/theme/moco_colors.dart';
 import '../../core/theme/moco_spacing.dart';
 import '../../core/widgets/moco_avatar.dart';
 import '../../core/widgets/moco_background.dart';
+import '../../core/widgets/moco_surfaces.dart';
 import '../../shared/models/call.dart';
+import '../safety/safety_actions_sheet.dart';
 import 'widgets/call_action_buttons.dart';
 
 /// Shown to a listener the instant `call:incoming` arrives, from wherever they
@@ -61,15 +63,34 @@ class IncomingCallScreen extends ConsumerWidget {
               child: Column(
                 children: [
                   const SizedBox(height: MocoSpacing.xl),
-                  Text(
-                    session.callType == CallType.video
-                        ? 'Incoming video call'
-                        : 'Incoming audio call',
-                    style: const TextStyle(
-                      color: MocoColors.textMuted,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        session.callType == CallType.video
+                            ? 'Incoming video call'
+                            : 'Incoming audio call',
+                        style: const TextStyle(
+                          color: MocoColors.textMuted,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (session.counterpartyId != null) ...[
+                        const SizedBox(width: MocoSpacing.sm),
+                        MocoIconButton(
+                          key: const Key('incoming_call_report'),
+                          icon: Icons.shield_outlined,
+                          tooltip: 'Report or block',
+                          onPressed: () => showSafetyActionsSheet(
+                            context: context,
+                            ref: ref,
+                            userId: session.counterpartyId!,
+                            userName: session.counterpartyName ?? 'this user',
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const Spacer(),
                   MocoAvatar(
@@ -96,6 +117,11 @@ class IncomingCallScreen extends ConsumerWidget {
                     color: MocoColors.accentSoft,
                     size: 22,
                   ),
+                  if (session.ratePerMinute != null ||
+                      session.freeSecondsGranted > 0) ...[
+                    const SizedBox(height: MocoSpacing.lg),
+                    _EarningsCard(session: session),
+                  ],
                   const Spacer(),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -152,6 +178,56 @@ class IncomingCallScreen extends ConsumerWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Glass rate/earnings summary — both figures are server data already on
+/// [CallSession] (`ratePerMinute`, `freeSecondsGranted`), never a client
+/// projection.
+class _EarningsCard extends StatelessWidget {
+  const _EarningsCard({required this.session});
+
+  final CallSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    return MocoGlassCard(
+      padding: const EdgeInsets.symmetric(
+        horizontal: MocoSpacing.lg,
+        vertical: MocoSpacing.md,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (session.ratePerMinute != null) ...[
+            const Icon(Icons.monetization_on_rounded, color: MocoColors.coinAccent, size: 18),
+            const SizedBox(width: 6),
+            Text(
+              '${session.ratePerMinute}/min',
+              style: const TextStyle(
+                color: MocoColors.textPrimary,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          if (session.ratePerMinute != null && session.freeSecondsGranted > 0)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: MocoSpacing.sm),
+              child: Text('·', style: TextStyle(color: MocoColors.textMuted)),
+            ),
+          if (session.freeSecondsGranted > 0)
+            const Text(
+              'First-time caller',
+              style: TextStyle(
+                color: MocoColors.textSecondary,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+        ],
       ),
     );
   }

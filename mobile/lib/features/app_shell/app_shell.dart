@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -88,32 +90,131 @@ class AppShell extends ConsumerWidget {
     });
 
     return Scaffold(
-      extendBody: true,
-      body: MocoBackground(ambience: MocoAmbience.rich, child: child),
-      bottomNavigationBar: DecoratedBox(
-        decoration: const BoxDecoration(
-          color: MocoColors.backgroundElevated,
-          border: Border(top: BorderSide(color: MocoColors.borderSubtle)),
-        ),
-        child: NavigationBar(
-          selectedIndex: index,
-          backgroundColor: Colors.transparent,
-          indicatorColor: MocoColors.accentPrimary.withValues(alpha: 0.18),
-          surfaceTintColor: Colors.transparent,
-          height: 66,
-          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          onDestinationSelected: (i) => context.go(AppShellTab.values[i].path),
-          destinations: [
-            for (final tab in AppShellTab.values)
-              NavigationDestination(
-                icon: Icon(tab.icon, color: MocoColors.textMuted),
-                selectedIcon: Icon(
-                  tab.activeIcon,
-                  color: MocoColors.accentPrimary,
-                ),
-                label: tab.label,
+      // No bottomNavigationBar slot: the reference's chrome is a floating
+      // pill that overlaps the page content rather than a docked bar that
+      // reserves its own strip, so it's a Stack layer over the body instead.
+      body: MocoBackground(
+        ambience: MocoAmbience.rich,
+        child: Stack(
+          children: [
+            Positioned.fill(child: child),
+            Positioned(
+              left: MocoSpacing.lg,
+              right: MocoSpacing.lg,
+              bottom: MocoSpacing.lg,
+              child: _FloatingNavBar(
+                selectedIndex: index,
+                onSelect: (i) => context.go(AppShellTab.values[i].path),
               ),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The floating glass-pill tab bar: rounded, inset from both side edges and
+/// the bottom, translucent with a blur behind it, and a subtle border —
+/// matching the reference's chrome exactly, while keeping every destination,
+/// its order, and its action (`context.go` to the same route) unchanged.
+///
+/// Labels stay visible under each icon. The reference shows icons only, but
+/// dropping labels is a usability/accessibility call this pass isn't making
+/// unilaterally — matching the chrome first, as directed, and leaving the
+/// label question open.
+class _FloatingNavBar extends StatelessWidget {
+  const _FloatingNavBar({required this.selectedIndex, required this.onSelect});
+
+  final int selectedIndex;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(MocoRadius.pill),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: MocoSpacing.sm),
+            decoration: BoxDecoration(
+              color: MocoColors.surfaceGlass,
+              borderRadius: BorderRadius.circular(MocoRadius.pill),
+              border: Border.all(color: MocoColors.borderSubtle),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 24,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                for (final tab in AppShellTab.values)
+                  _NavItem(
+                    tab: tab,
+                    selected: AppShellTab.values.indexOf(tab) == selectedIndex,
+                    onTap: () => onSelect(AppShellTab.values.indexOf(tab)),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.tab,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final AppShellTab tab;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? MocoColors.accentPrimary : MocoColors.textMuted;
+
+    return Expanded(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: Key('nav_${tab.name}'),
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(MocoRadius.pill),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: MocoSpacing.sm),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  selected ? tab.activeIcon : tab.icon,
+                  color: color,
+                  size: 22,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  tab.label,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 10.5,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

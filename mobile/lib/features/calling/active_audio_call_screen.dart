@@ -12,6 +12,7 @@ import '../../core/theme/moco_colors.dart';
 import '../../core/theme/moco_spacing.dart';
 import '../../core/widgets/moco_avatar.dart';
 import '../../core/widgets/moco_background.dart';
+import '../../core/widgets/moco_surfaces.dart';
 import 'widgets/call_action_buttons.dart';
 
 /// The live audio call. Every coin figure on screen (balance, low-balance
@@ -105,23 +106,18 @@ class _ActiveAudioCallScreenState extends ConsumerState<ActiveAudioCallScreen> {
                   ),
                   const SizedBox(height: MocoSpacing.md),
                   if (isListener)
-                    Text(
-                      'Earned so far · ${session.earnedThisCall} coins',
-                      style: const TextStyle(
-                        color: MocoColors.coinAccent,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    _BalanceGlassCard(
+                      icon: Icons.savings_rounded,
+                      label: 'Earned so far',
+                      value: '${session.earnedThisCall} coins',
                     )
                   else if (session.balance != null)
-                    Text(
-                      'Balance · ${session.balance} coins'
-                      '${session.ratePerMinute != null ? ' · ${session.ratePerMinute}/min' : ''}',
-                      style: const TextStyle(
-                        color: MocoColors.coinAccentSoft,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    _BalanceGlassCard(
+                      icon: Icons.account_balance_wallet_rounded,
+                      label: 'Balance',
+                      value: '${session.balance} coins'
+                          '${session.ratePerMinute != null ? ' · ${session.ratePerMinute}/min' : ''}',
+                      warning: session.lowBalance,
                     ),
                   if (!isListener && session.lowBalance)
                     Padding(
@@ -200,6 +196,48 @@ class _ActiveAudioCallScreenState extends ConsumerState<ActiveAudioCallScreen> {
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     final h = d.inHours;
     return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+}
+
+/// Glass balance/earnings summary. Every figure is server data straight off
+/// [CallSession] — this only changes how it's presented, never what it says.
+class _BalanceGlassCard extends StatelessWidget {
+  const _BalanceGlassCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.warning = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool warning;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = warning ? MocoColors.warning : MocoColors.coinAccent;
+    return MocoGlassCard(
+      padding: const EdgeInsets.symmetric(
+        horizontal: MocoSpacing.lg,
+        vertical: MocoSpacing.sm,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: accent, size: 16),
+          const SizedBox(width: 6),
+          Text(
+            '$label · $value',
+            style: TextStyle(
+              color: accent,
+              fontSize: 13.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

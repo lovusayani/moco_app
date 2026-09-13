@@ -15,6 +15,7 @@ class MocoAvatar extends StatelessWidget {
     this.imageUrl,
     this.size = 48,
     this.ring = false,
+    this.borderRadius,
   });
 
   final String name;
@@ -22,9 +23,18 @@ class MocoAvatar extends StatelessWidget {
   final double size;
   final bool ring;
 
+  /// Null keeps the default circle every existing call site relies on. Set
+  /// only where the reference explicitly shows a rounded-rectangle avatar
+  /// (the Listener Profile hero) — everywhere else stays circular.
+  final double? borderRadius;
+
   @override
   Widget build(BuildContext context) {
-    final content = ClipOval(
+    final radius = borderRadius;
+    final content = ClipRRect(
+      borderRadius: radius == null
+          ? BorderRadius.circular(size / 2)
+          : BorderRadius.circular(radius),
       child: SizedBox(
         width: size,
         height: size,
@@ -45,7 +55,10 @@ class MocoAvatar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
-        shape: BoxShape.circle,
+        borderRadius: radius == null
+            ? null
+            : BorderRadius.circular(radius + 2),
+        shape: radius == null ? BoxShape.circle : BoxShape.rectangle,
         gradient: MocoColors.accentGradient,
         boxShadow: [
           BoxShadow(

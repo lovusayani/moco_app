@@ -325,13 +325,16 @@ class _ProfileBody extends ConsumerWidget {
   };
 }
 
-class _Hero extends StatelessWidget {
+class _Hero extends ConsumerWidget {
   const _Hero({required this.listener});
 
   final ListenerDetail listener;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(authControllerProvider).user;
+    final firstCallFree = user?.freeTrialAvailable ?? false;
+
     return Padding(
       padding: EdgeInsets.only(
         top: MediaQuery.of(context).padding.top + 64,
@@ -340,11 +343,55 @@ class _Hero extends StatelessWidget {
       ),
       child: Column(
         children: [
-          MocoAvatar(
-            name: listener.name,
-            imageUrl: listener.avatarUrl,
-            size: 128,
-            ring: listener.isAvailable,
+          Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              // Card-deck depth: two faint rounded layers peeking from behind
+              // the hero, echoing the reference without any new asset.
+              Positioned(
+                top: 10,
+                child: Transform.rotate(
+                  angle: -0.12,
+                  child: Container(
+                    width: 128,
+                    height: 128,
+                    decoration: BoxDecoration(
+                      color: MocoColors.surfaceGlass,
+                      borderRadius: BorderRadius.circular(28),
+                      border: Border.all(color: MocoColors.borderSubtle),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 5,
+                child: Transform.rotate(
+                  angle: 0.08,
+                  child: Container(
+                    width: 128,
+                    height: 128,
+                    decoration: BoxDecoration(
+                      color: MocoColors.surfaceGlass,
+                      borderRadius: BorderRadius.circular(28),
+                      border: Border.all(color: MocoColors.borderSubtle),
+                    ),
+                  ),
+                ),
+              ),
+              MocoAvatar(
+                name: listener.name,
+                imageUrl: listener.avatarUrl,
+                size: 128,
+                ring: listener.isAvailable,
+                borderRadius: 28,
+              ),
+              if (firstCallFree)
+                const Positioned(
+                  bottom: -6,
+                  child: _FirstCallFreeBadge(),
+                ),
+            ],
           ),
           const SizedBox(height: MocoSpacing.lg),
           Row(
@@ -423,6 +470,38 @@ class _Hero extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Reflects the SIGNED-IN USER's own `freeTrialAvailable` flag — the same
+/// server field `_CallBar` already reads — never a per-listener eligibility
+/// the backend does not expose.
+class _FirstCallFreeBadge extends StatelessWidget {
+  const _FirstCallFreeBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        gradient: MocoColors.coinGradient,
+        borderRadius: BorderRadius.circular(MocoRadius.pill),
+        boxShadow: [
+          BoxShadow(
+            color: MocoColors.coinAccent.withValues(alpha: 0.4),
+            blurRadius: 12,
+          ),
+        ],
+      ),
+      child: const Text(
+        'First call · 60s free',
+        style: TextStyle(
+          color: Color(0xFF2A1338),
+          fontSize: 10.5,
+          fontWeight: FontWeight.w800,
+        ),
       ),
     );
   }

@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:moco/core/api/auth_api.dart';
+import 'package:moco/core/api/users_api.dart';
+import 'package:moco/core/auth/auth_controller.dart';
 import 'package:moco/core/providers.dart';
 import 'package:moco/core/storage/secure_store.dart';
 import 'package:moco/core/theme/moco_theme.dart';
+import 'package:moco/shared/models/user.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// In-memory token store, so tests never touch the platform keystore.
@@ -34,6 +38,78 @@ Future<List<Override>> baseOverrides({FakeSecureStore? store}) async {
     appPreferencesProvider.overrideWithValue(prefs),
     secureStoreProvider.overrideWithValue(store ?? FakeSecureStore()),
   ];
+}
+
+/// [baseOverrides] plus a fully bootstrapped, signed-in session.
+///
+/// Several Phase 5+ screens (Profile, its sub-screens) read
+/// `authControllerProvider` directly rather than fetching their own copy of
+/// the user, since the signed-in user is already the single source of truth
+/// app-wide. Those screens need a real, bootstrapped [AuthNotifier] rather
+/// than the default uninitialized one — this drives an actual `bootstrap()`
+/// against a mocked [UsersApi] so the resulting state is exactly what the
+/// real app would have produced from a stored token.
+Future<List<Override>> signedInOverrides({
+  required MocoUser user,
+  UsersApi? usersApi,
+}) async {
+  SharedPreferences.setMockInitialValues({});
+  final prefs = await AppPreferences.create();
+  final store = FakeSecureStore('jwt');
+
+  final api = usersApi ?? _StubUsersApi(user);
+  final controller = AuthController(
+    authApi: _NoopAuthApi(),
+    usersApi: api,
+    store: store,
+    prefs: prefs,
+  );
+  await controller.bootstrap();
+
+  return [
+    appPreferencesProvider.overrideWithValue(prefs),
+    secureStoreProvider.overrideWithValue(store),
+    usersApiProvider.overrideWithValue(api),
+    authControllerProvider.overrideWith((ref) => AuthNotifier(controller)),
+  ];
+}
+
+/// Returns [user] from `/users/me`, which is all [AuthController.bootstrap]
+/// needs. Individual tests override [usersApiProvider] again afterward when
+/// they need to assert on a specific call (e.g. `updateProfile`).
+class _StubUsersApi implements UsersApi {
+  _StubUsersApi(this._user);
+  final MocoUser _user;
+
+  @override
+  Future<MocoUser> me() async => _user;
+
+  @override
+  Future<MocoUser> updateProfile({
+    String? displayName,
+    String? avatarUrl,
+    String? language,
+    String? gender,
+  }) async => _user;
+
+  @override
+  Future<Map<String, dynamic>> becomeListener() async => {};
+
+  @override
+  Future<void> registerPushToken(String token) async {}
+
+  @override
+  Future<void> deleteAccount() async {}
+}
+
+/// Never called in a signed-in-session test, but AuthController requires one.
+class _NoopAuthApi implements AuthApi {
+  @override
+  Future<int> requestOtp(String phone) => throw UnimplementedError();
+
+  @override
+  Future<AuthSession> verifyOtp({required String phone, required String code}) =>
+      throw UnimplementedError();
 }
 
 /// Wraps a screen that supplies its own Scaffold (onboarding, login, profile

@@ -14,6 +14,11 @@ import '../../features/chats/chats_screen.dart';
 import '../../features/discovery/discovery_screen.dart';
 import '../../features/feed/feed_screen.dart';
 import '../../features/feed/post_composer_screen.dart';
+import '../../features/profile/account_settings_screen.dart';
+import '../../features/profile/edit_profile_screen.dart';
+import '../../features/profile/ledger_controller.dart';
+import '../../features/profile/ledger_screen.dart';
+import '../../features/profile/profile_screen.dart';
 import '../../features/listener_profile/listener_profile_screen.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/profile_setup/profile_setup_screen.dart';
@@ -34,6 +39,11 @@ class Routes {
   static const wallet = '/wallet';
   static const chats = '/chats';
   static const feed = '/feed';
+  static const profile = '/profile';
+  static const editProfile = '/profile/edit';
+  static const accountSettings = '/profile/settings';
+  static const coinLedger = '/profile/ledger/coins';
+  static const earningsLedger = '/profile/ledger/earnings';
 
   /// Deep-link safe: the listener id is a path segment, so
   /// `moco://listener/42` maps cleanly once deep links are enabled.
@@ -146,6 +156,36 @@ final routerProvider = Provider<GoRouter>((ref) {
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const PostComposerScreen(),
       ),
+      GoRoute(
+        path: Routes.editProfile,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => EditProfileScreen(
+          startWithListenerApplication: state.extra == true,
+        ),
+      ),
+      GoRoute(
+        path: Routes.accountSettings,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const AccountSettingsScreen(),
+      ),
+      GoRoute(
+        path: Routes.coinLedger,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => LedgerScreen(
+          title: 'Coin ledger',
+          provider: walletLedgerControllerProvider,
+          currencyPrefix: '',
+        ),
+      ),
+      GoRoute(
+        path: Routes.earningsLedger,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => LedgerScreen(
+          title: 'Earnings history',
+          provider: earningsLedgerControllerProvider,
+          currencyPrefix: '₹',
+        ),
+      ),
       // One shell for both roles. Listener capability is modelled as user state
       // rather than a second navigation tree (Phase 1 decision).
       ShellRoute(
@@ -172,6 +212,11 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: Routes.feed,
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: FeedScreen()),
+          ),
+          GoRoute(
+            path: Routes.profile,
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: ProfileScreen()),
           ),
           for (final tab in AppShellTab.values.where((t) => t.isPlaceholder))
             GoRoute(

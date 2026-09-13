@@ -55,15 +55,10 @@ enum AppShellTab {
   final IconData icon;
   final IconData activeIcon;
 
-  /// Everything but Profile is real now; it exists so the tab bar matches the
-  /// design and shows an explicit development placeholder rather than invented
-  /// feature UI.
-  bool get isPlaceholder => this == AppShellTab.profile;
+  /// All five tabs are real now.
+  bool get isPlaceholder => false;
 
-  String get phase => switch (this) {
-    AppShellTab.profile => 'a later phase',
-    _ => '',
-  };
+  String get phase => '';
 }
 
 class AppShell extends ConsumerWidget {

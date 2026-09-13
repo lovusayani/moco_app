@@ -16,6 +16,7 @@ import '../../core/widgets/moco_avatar.dart';
 import '../../core/widgets/moco_background.dart';
 import '../../core/widgets/moco_states.dart';
 import '../../shared/models/chat.dart';
+import '../safety/safety_actions_sheet.dart';
 import 'chat_thread_controller.dart';
 
 const _quickReactions = ['❤️', '😂', '👍', '😮', '😢', '🙏'];
@@ -138,6 +139,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
           child: Column(
             children: [
               _ThreadHeader(
+                counterpartyId: widget.counterpartyId,
                 name: widget.counterpartyName ?? 'Chat',
                 avatarUrl: widget.counterpartyAvatarUrl,
               ),
@@ -178,14 +180,15 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   }
 }
 
-class _ThreadHeader extends StatelessWidget {
-  const _ThreadHeader({required this.name, this.avatarUrl});
+class _ThreadHeader extends ConsumerWidget {
+  const _ThreadHeader({required this.counterpartyId, required this.name, this.avatarUrl});
 
+  final int counterpartyId;
   final String name;
   final String? avatarUrl;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return ClipRect(
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
@@ -217,6 +220,17 @@ class _ThreadHeader extends StatelessWidget {
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
                   ),
+                ),
+              ),
+              IconButton(
+                key: const Key('chat_thread_more'),
+                icon: const Icon(Icons.more_vert_rounded, color: MocoColors.textPrimary),
+                tooltip: 'Report or block',
+                onPressed: () => showSafetyActionsSheet(
+                  context: context,
+                  ref: ref,
+                  userId: counterpartyId,
+                  userName: name,
                 ),
               ),
             ],

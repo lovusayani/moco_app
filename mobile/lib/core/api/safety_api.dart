@@ -24,11 +24,13 @@ class SafetyApi {
     'other': 'Something else',
   };
 
-  /// `POST /safety/report`.
+  /// `POST /safety/report`. [callId] links a report to the call it happened
+  /// on, when there was one — the backend accepts it optionally.
   Future<void> report({
     required int userId,
     required String reason,
     String? details,
+    int? callId,
   }) {
     return _client.request(
       () => _client.dio.post<dynamic>(
@@ -38,6 +40,7 @@ class SafetyApi {
           'reason': reason,
           if (details != null && details.trim().isNotEmpty)
             'details': details.trim(),
+          if (callId != null) 'callId': callId,
         },
       ),
       (_) {},

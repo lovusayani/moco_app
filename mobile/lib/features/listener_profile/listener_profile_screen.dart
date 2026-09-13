@@ -15,6 +15,7 @@ import '../../core/widgets/moco_states.dart';
 import '../../core/widgets/moco_surfaces.dart';
 import '../../shared/models/call.dart';
 import '../../shared/models/listener.dart';
+import '../safety/safety_actions_sheet.dart';
 import 'listener_profile_controller.dart';
 
 /// Content tabs.
@@ -276,6 +277,23 @@ class _ProfileBody extends ConsumerWidget {
             key: const Key('listener_profile_back'),
             icon: Icons.arrow_back_rounded,
             onPressed: () => context.pop(),
+          ),
+        ),
+
+        // Report/block, the same sheet Chat Thread and the Feed use.
+        Positioned(
+          top: MediaQuery.of(context).padding.top + MocoSpacing.sm,
+          right: MocoSpacing.md,
+          child: MocoIconButton(
+            key: const Key('listener_profile_more'),
+            icon: Icons.more_horiz_rounded,
+            tooltip: 'Report or block',
+            onPressed: () => showSafetyActionsSheet(
+              context: context,
+              ref: ref,
+              userId: listener.id,
+              userName: listener.name,
+            ),
           ),
         ),
 

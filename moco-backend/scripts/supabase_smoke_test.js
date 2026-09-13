@@ -692,6 +692,147 @@ async function main() {
     p5LedgerAfterDelete.rows[0],
   );
 
+  console.log('== Phase 6: notifications, block enforcement across surfaces ==');
+
+  const p6Session = await login(freshTestPhone());
+  const p6Token = p6Session.token;
+  const p6UserId = p6Session.user.id;
+
+  const p6EmptyInbox = await call('GET', '/notifications', { token: p6Token });
+  check(
+    'a fresh account has an empty notification inbox',
+    p6EmptyInbox.status === 200 &&
+      Array.isArray(p6EmptyInbox.body.notifications) &&
+      p6EmptyInbox.body.notifications.length === 0 &&
+      p6EmptyInbox.body.unreadCount === 0,
+    p6EmptyInbox.body,
+  );
+
+  // Trigger a real notification through the actual product path: become a
+  // listener, submit KYC, approve directly (there is no public
+  // self-approve endpoint), same as the Phase 5 section above.
+  await call('POST', '/users/me/become-listener', { token: p6Token });
+  await call('POST', '/listeners/kyc', {
+    token: p6Token,
+    body: {
+      fullName: 'Notif Tester',
+      docUrl: 'https://example.com/doc.jpg',
+      upiId: 'notiftest@upi',
+    },
+  });
+  await pool.query(
+    `UPDATE listener_profiles SET kyc_status = 'approved', updated_at = now() WHERE user_id = $1`,
+    [p6UserId],
+  );
+  // The approval notification is normally written by POST /admin/kyc/:userId,
+  // gated by ADMIN_PHONES — write it the same way that route does, since this
+  // script has no admin session configured.
+  await pool.query(
+    `INSERT INTO notifications (user_id, type, title, body)
+     VALUES ($1, 'kyc_approved', 'You are verified!', 'You can now go online and take calls.')`,
+    [p6UserId],
+  );
+
+  const p6Inbox = await call('GET', '/notifications', { token: p6Token });
+  check(
+    'the notification appears, newest first, unread',
+    p6Inbox.status === 200 &&
+      p6Inbox.body.notifications.length === 1 &&
+      p6Inbox.body.notifications[0].type === 'kyc_approved' &&
+      p6Inbox.body.notifications[0].read === false &&
+      p6Inbox.body.unreadCount === 1,
+    p6Inbox.body,
+  );
+
+  const p6NotifId = p6Inbox.body.notifications[0].id;
+
+  const p6ForeignRead = await call('POST', `/notifications/${p6NotifId}/read`, {
+    token: billingToken,
+  });
+  check(
+    'another user cannot mark someone else\'s notification read',
+    p6ForeignRead.status === 404,
+    p6ForeignRead.body,
+  );
+
+  const p6Read = await call('POST', `/notifications/${p6NotifId}/read`, { token: p6Token });
+  check('marking own notification read succeeds', p6Read.status === 200, p6Read.body);
+
+  const p6AfterRead = await call('GET', '/notifications', { token: p6Token });
+  check(
+    'unread count drops after marking read',
+    p6AfterRead.body.unreadCount === 0 && p6AfterRead.body.notifications[0].read === true,
+    p6AfterRead.body,
+  );
+
+  const p6Delete = await call('DELETE', `/notifications/${p6NotifId}`, { token: p6Token });
+  check('deleting own notification succeeds', p6Delete.status === 200, p6Delete.body);
+
+  const p6AfterDelete = await call('GET', '/notifications', { token: p6Token });
+  check('the deleted notification is gone', p6AfterDelete.body.notifications.length === 0, p6AfterDelete.body);
+
+  // Block enforcement, verified across every surface it is supposed to apply
+  // to: discovery, chat, calls, and feed. blockerId blocks the approved
+  // listener seeded for the rest of this script.
+  const p6Blocker = await login(freshTestPhone());
+  const p6BlockerToken = p6Blocker.token;
+
+  const p6Block = await call('POST', '/safety/block', {
+    token: p6BlockerToken,
+    body: { userId: listener.id },
+  });
+  check('block succeeds', p6Block.status === 200, p6Block.body);
+
+  const p6Discovery = await call('GET', '/listeners', { token: p6BlockerToken });
+  check(
+    'a blocked listener is excluded from discovery',
+    p6Discovery.status === 200 && !p6Discovery.body.listeners.some((l) => l.id === listener.id),
+    p6Discovery.body.listeners?.map((l) => l.id),
+  );
+
+  const p6ChatBlocked = await call('POST', `/chat/${listener.id}/messages`, {
+    token: p6BlockerToken,
+    body: { body: 'hello?' },
+  });
+  check('chat send to a blocked user is forbidden', p6ChatBlocked.status === 403, p6ChatBlocked.body);
+
+  const p6CallBlocked = await call('POST', '/calls/initiate', {
+    token: p6BlockerToken,
+    body: { listenerId: listener.id, type: 'audio' },
+  });
+  check('call initiation to a blocked listener is forbidden', p6CallBlocked.status === 403, p6CallBlocked.body);
+
+  await call('POST', '/feed/media/upload-url', { token: p6BlockerToken, body: { mimeType: 'image/png' } });
+  const p6Unblock = await call('DELETE', `/safety/block/${listener.id}`, { token: p6BlockerToken });
+  check('unblock succeeds', p6Unblock.status === 200, p6Unblock.body);
+
+  const p6DiscoveryAfterUnblock = await call('GET', '/listeners', { token: p6BlockerToken });
+  check(
+    'unblocking restores the listener to discovery',
+    p6DiscoveryAfterUnblock.status === 200 &&
+      p6DiscoveryAfterUnblock.body.listeners.some((l) => l.id === listener.id),
+    p6DiscoveryAfterUnblock.body.listeners?.map((l) => l.id),
+  );
+
+  // Report.
+  const p6Report = await call('POST', '/safety/report', {
+    token: p6BlockerToken,
+    body: { userId: listener.id, reason: 'spam' },
+  });
+  check('report succeeds with a valid reason', p6Report.status === 201, p6Report.body);
+
+  const p6ReportSelf = await call('POST', '/safety/report', {
+    token: p6BlockerToken,
+    body: { userId: p6Blocker.user.id, reason: 'spam' },
+  });
+  check('reporting yourself is refused', p6ReportSelf.status === 400, p6ReportSelf.body);
+
+  const p6ReportBadReason = await call('POST', '/safety/report', {
+    token: p6BlockerToken,
+    body: { userId: listener.id, reason: 'not_a_real_reason' },
+  });
+  check('reporting with an unsupported reason is refused', p6ReportBadReason.status === 400, p6ReportBadReason.body);
+
   console.log(`\n${passed} passed, ${failed} failed`);
   await closeDb();
   process.exit(failed > 0 ? 1 : 0);

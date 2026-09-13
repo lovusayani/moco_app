@@ -25,6 +25,7 @@ class NotificationsScreen extends ConsumerWidget {
         break;
       case 'payout_approved':
       case 'payout_rejected':
+      case 'payout_paid':
         context.push(Routes.earningsLedger);
         break;
       default:
@@ -161,6 +162,7 @@ class _NotificationRow extends StatelessWidget {
     'kyc_rejected' => Icons.error_outline_rounded,
     'payout_approved' => Icons.check_circle_outline_rounded,
     'payout_rejected' => Icons.cancel_outlined,
+    'payout_paid' => Icons.account_balance_wallet_outlined,
     _ => Icons.notifications_none_rounded,
   };
 

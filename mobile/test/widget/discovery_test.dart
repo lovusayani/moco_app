@@ -4,14 +4,18 @@ import 'package:moco/features/discovery/discovery_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moco/core/api/listeners_api.dart';
+import 'package:moco/core/api/notifications_api.dart';
 import 'package:moco/core/errors/api_exception.dart';
 import 'package:moco/core/providers.dart';
 import 'package:moco/features/discovery/discovery_screen.dart';
 import 'package:moco/shared/models/listener.dart';
+import 'package:moco/shared/models/notification.dart';
 
 import '../support/harness.dart';
 
 class _MockListenersApi extends Mock implements ListenersApi {}
+
+class _MockNotificationsApi extends Mock implements NotificationsApi {}
 
 ListenerSummary _listener(int id, String name, {bool online = true}) =>
     ListenerSummary(
@@ -323,5 +327,44 @@ void main() {
       captured.whereType<DiscoveryFilters>().any((f) => f.language == 'hi'),
       isTrue,
     );
+  });
+
+  testWidgets('the notifications bell shows an unread badge when there is unread mail', (
+    tester,
+  ) async {
+    when(
+      () => api.discover(filters: any(named: 'filters'), offset: any(named: 'offset')),
+    ).thenAnswer((_) async => const DiscoveryPage());
+
+    final notificationsApi = _MockNotificationsApi();
+    when(() => notificationsApi.list()).thenAnswer(
+      (_) async => const NotificationPage(unreadCount: 2),
+    );
+
+    await tester.pumpWidget(
+      wrapShellScreen(
+        const DiscoveryScreen(),
+        overrides: [
+          ...base,
+          listenersApiProvider.overrideWithValue(api),
+          notificationsApiProvider.overrideWithValue(notificationsApi),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('discovery_notifications_badge')), findsOneWidget);
+  });
+
+  testWidgets('no badge when the inbox has nothing unread', (tester) async {
+    when(
+      () => api.discover(filters: any(named: 'filters'), offset: any(named: 'offset')),
+    ).thenAnswer((_) async => const DiscoveryPage());
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+
+    // subject() uses baseOverrides()'s default empty-inbox stub.
+    expect(find.byKey(const Key('discovery_notifications_badge')), findsNothing);
   });
 }

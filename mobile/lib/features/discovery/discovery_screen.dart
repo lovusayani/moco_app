@@ -9,6 +9,7 @@ import '../../core/theme/moco_colors.dart';
 import '../../core/theme/moco_spacing.dart';
 import '../../core/widgets/moco_states.dart';
 import '../../core/widgets/moco_surfaces.dart';
+import '../notifications/notifications_controller.dart';
 import 'discovery_controller.dart';
 import 'widgets/listener_card.dart';
 
@@ -84,6 +85,8 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                                 : 'Hi ${user!.displayName}',
                           ),
                         ),
+                        const _NotificationsBell(),
+                        const SizedBox(width: MocoSpacing.sm),
                         MocoIconButton(
                           key: const Key('discovery_search_toggle'),
                           icon: _searchOpen
@@ -440,6 +443,47 @@ class _FilterRow extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// Reached from Discovery's header rather than a sixth bottom-nav tab — the
+/// five tabs are fixed. Watching [notificationsControllerProvider] here
+/// starts the inbox loading the moment Discovery is on screen, so the badge
+/// is already current the first time a user notices it, and opening the
+/// screen itself is instant (no extra fetch).
+class _NotificationsBell extends ConsumerWidget {
+  const _NotificationsBell();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unread = ref.watch(
+      notificationsControllerProvider.select((s) => s.unreadCount),
+    );
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        MocoIconButton(
+          key: const Key('discovery_notifications_bell'),
+          icon: Icons.notifications_none_rounded,
+          onPressed: () => context.push(Routes.notifications),
+        ),
+        if (unread > 0)
+          Positioned(
+            top: 4,
+            right: 4,
+            child: Container(
+              key: const Key('discovery_notifications_badge'),
+              width: 9,
+              height: 9,
+              decoration: const BoxDecoration(
+                color: MocoColors.danger,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

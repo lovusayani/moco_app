@@ -18,6 +18,7 @@ import '../../features/profile/account_settings_screen.dart';
 import '../../features/profile/edit_profile_screen.dart';
 import '../../features/profile/ledger_controller.dart';
 import '../../features/profile/ledger_screen.dart';
+import '../../features/notifications/notifications_screen.dart';
 import '../../features/profile/profile_screen.dart';
 import '../../features/listener_profile/listener_profile_screen.dart';
 import '../../features/onboarding/onboarding_screen.dart';
@@ -44,6 +45,7 @@ class Routes {
   static const accountSettings = '/profile/settings';
   static const coinLedger = '/profile/ledger/coins';
   static const earningsLedger = '/profile/ledger/earnings';
+  static const notifications = '/notifications';
 
   /// Deep-link safe: the listener id is a path segment, so
   /// `moco://listener/42` maps cleanly once deep links are enabled.
@@ -155,6 +157,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: Routes.postCompose,
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const PostComposerScreen(),
+      ),
+      GoRoute(
+        path: Routes.notifications,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const NotificationsScreen(),
       ),
       GoRoute(
         path: Routes.editProfile,

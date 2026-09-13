@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:moco/core/api/auth_api.dart';
+import 'package:moco/core/api/notifications_api.dart';
 import 'package:moco/core/api/users_api.dart';
 import 'package:moco/core/auth/auth_controller.dart';
 import 'package:moco/core/providers.dart';
 import 'package:moco/core/storage/secure_store.dart';
 import 'package:moco/core/theme/moco_theme.dart';
+import 'package:moco/shared/models/notification.dart';
 import 'package:moco/shared/models/user.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -37,7 +39,29 @@ Future<List<Override>> baseOverrides({FakeSecureStore? store}) async {
   return [
     appPreferencesProvider.overrideWithValue(prefs),
     secureStoreProvider.overrideWithValue(store ?? FakeSecureStore()),
+    // Discovery's header watches the notifications inbox for its unread
+    // badge. Without this override that provider would fall through to a
+    // real, unmocked ApiClient and — if a local dev server happens to be
+    // running on the machine — send it a genuine network request from a
+    // widget test. An empty inbox is a safe, silent default for every test
+    // that does not care about notifications specifically.
+    notificationsApiProvider.overrideWithValue(_EmptyNotificationsApi()),
   ];
+}
+
+class _EmptyNotificationsApi implements NotificationsApi {
+  @override
+  Future<NotificationPage> list({int limit = 30, int? before}) async =>
+      const NotificationPage();
+
+  @override
+  Future<void> markRead(int id) async {}
+
+  @override
+  Future<void> markAllRead() async {}
+
+  @override
+  Future<void> delete(int id) async {}
 }
 
 /// [baseOverrides] plus a fully bootstrapped, signed-in session.
@@ -71,6 +95,7 @@ Future<List<Override>> signedInOverrides({
     secureStoreProvider.overrideWithValue(store),
     usersApiProvider.overrideWithValue(api),
     authControllerProvider.overrideWith((ref) => AuthNotifier(controller)),
+    notificationsApiProvider.overrideWithValue(_EmptyNotificationsApi()),
   ];
 }
 

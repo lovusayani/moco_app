@@ -431,3 +431,145 @@ decoding, and no phase has yet been verified on real hardware.
    over and feed audio must not play under it.
 9. Block an author from a post, then refresh: none of their posts should
    return.
+
+## Phase 5 status
+
+Complete: Own Profile, editing, the role switch, listener availability,
+earnings, and both ledgers (coin + earnings), plus account settings and
+account deletion.
+
+The role switch (`lib/features/profile/profile_controller.dart`'s
+`ActiveRoleController`) is **purely local display state** — the backend has
+no "active mode" concept, since a `both`-role account can always do both.
+Switching never calls the server; it only changes which sections of the one
+Profile screen render, matching the product rule of one account and one
+shell.
+
+Gender has no backend lock (`PATCH /users/me` accepts a change
+unconditionally at any time), so none was invented client-side either — a
+widget test changes it away and back in one session to prove the point.
+
+Account deletion is the existing backend soft-delete (personal fields
+cleared, phone scrambled, financial history retained) with a confirmation
+dialog naming exactly that, then the same session-clearing path an ordinary
+sign-out uses.
+
+## Phase 6 status
+
+Complete: the Notifications inbox (reached from a bell on Discovery — the
+five bottom-nav tabs are fixed) and report/block wired into the two surfaces
+that previously had no safety control at all: Listener Profile and Chat
+Thread. The Feed's own report/block (Phase 4) is unchanged.
+
+Notifications are a new, small backend subsystem (no in-app inbox existed
+before — only fire-and-forget FCM push) — see the backend README. Nothing
+about the block/report model itself changed: every surface (Discovery, chat
+send, call initiation, the feed) already enforced the same `blocks` table in
+both directions before this phase, and still does.
+
+## Phase 7 status
+
+Complete: the full Google Play Billing **architecture** — client purchase
+flow, backend verification, idempotent credit, purchase history — built and
+tested against a mock verifier throughout.
+
+**Not live-verified.** This environment has no Play Console app listing, no
+service account, and no signed release build, so:
+- The real platform channel (`package:in_app_purchase` talking to Play
+  Billing on a device) has never run.
+- The real HTTP call from `src/integrations/google_play.js` to Google's Play
+  Developer API has never run.
+
+Everything else has: the purchase state machine (11 cases against a fake
+billing client), the backend's credit/idempotency logic (against a fake
+verifier, in both `tests/purchases.test.js` and `npm run smoke`), and the
+mutual-exclusion boundary between the mock provider (development only) and
+Google Play Billing (everywhere else).
+
+**To complete Phase 7 for real**, someone with Play Console access needs to:
+1. Create the app listing and enable **Financial data** access for a service
+   account (Setup → API access), matching the backend README's Google Play
+   Billing section.
+2. Create one in-app product per coin pack with the product id set to the
+   pack id exactly (`pack_49`, `pack_99`, …).
+3. Set `GOOGLE_PLAY_PACKAGE_NAME` / `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` on the
+   backend.
+4. Build a signed release (or internal testing track) APK/AAB and run a real
+   test purchase against it — see the Payments section of the QA matrix
+   below.
+
+## Phase 8 readiness — real-device QA matrix
+
+No phase has been verified on real hardware yet. Everything below is a
+PASS/FAIL checklist for two Android devices (one caller, one listener, unless
+noted). Run through it top to bottom; note the device/Android version used.
+
+### Auth
+- [ ] Onboarding carousel completes and does not reappear after reinstall-free restart
+- [ ] OTP request → real SMS arrives (production `SMS_PROVIDER`) or the dev fixed code works
+- [ ] Wrong OTP is rejected with a clear message; correct one signs in
+- [ ] Profile setup: name validation, language, gender, optional listener application
+- [ ] App resume after being backgrounded overnight still shows a valid session
+
+### Discovery
+- [ ] Grid loads real listeners; pull-to-refresh works
+- [ ] Search reaches the backend (not just a local filter)
+- [ ] Language/gender/online filters change results
+- [ ] Follow/favorite persists across app restart
+- [ ] The notifications bell badge reflects real unread state and clears after opening
+
+### Listener Profile
+- [ ] Real bio/languages/rating render; verified badge only for approved listeners
+- [ ] Report and Block (new in Phase 6) both reach the backend and show a result
+- [ ] A blocked listener's profile can no longer be reached from anywhere in the app
+
+### Calls
+- [ ] Audio call: outgoing → the OTHER device rings → accept → both sides connect
+- [ ] Video call: camera/mic both work both directions
+- [ ] Reject on the listener device ends the outgoing screen honestly
+- [ ] Caller cancels before accept — no charge, no stuck ring
+- [ ] A fresh account's first call crosses 60 seconds and visibly switches from free trial to billed
+- [ ] Billed minutes and balance shown match `GET /wallet` afterward
+- [ ] Low-balance overlay appears before the balance actually can't afford another minute
+- [ ] Forced end when balance hits zero mid-call — both sides see it end
+- [ ] Kill and reopen the app mid-call — call state reconciles correctly (not stuck "active")
+- [ ] Backgrounding one device mid-call and returning doesn't drop or duplicate billing
+
+### Chat
+- [ ] Text messages arrive on the other device in real time (Socket.IO, not polling)
+- [ ] Unread badge on Chats list updates live and clears on opening the thread
+- [ ] Kill the socket (airplane mode toggle) and restore — no duplicated messages
+- [ ] Reactions appear live on the other device
+- [ ] Photo message: pick → upload progress → both sides see the image (needs `chat-media` bucket)
+- [ ] Report/Block (new in Phase 6) from the thread header work and a blocked send is refused
+
+### Feed
+- [ ] Image and video posts render; only the on-screen video has audio
+- [ ] Scrolling past a video releases its player (watch memory over ~30 posts)
+- [ ] Backgrounding the app while a video plays stops its audio immediately
+- [ ] Create an image post: pick → optional caption → publish → appears at the top
+- [ ] Create a video post (≤60s) the same way
+- [ ] Tapping a listener author opens their real profile; a non-listener author is not a link
+- [ ] Blocking a feed author (via the post's "more" menu) removes their posts on next refresh
+
+### Profile (new in Phase 5)
+- [ ] Edit name/language/gender persists and survives app restart
+- [ ] Role switch (Calling/Listening) shows/hides the right sections instantly, no network call
+- [ ] Listener availability toggle actually changes Discovery visibility on the OTHER device
+- [ ] Earnings figures match the admin console / database after a real billed call
+- [ ] Coin ledger and earnings ledger both paginate (scroll to the bottom, more loads)
+- [ ] Account deletion: confirm → signed out → the account cannot sign back in and shows as deleted server-side
+
+### Notifications (new in Phase 6)
+- [ ] A real KYC approval/rejection (via the admin console) produces a notification
+- [ ] A real payout approval/rejection/paid transition produces a notification
+- [ ] Swipe-to-delete removes a notification; "Mark all read" clears the badge
+- [ ] Tapping a KYC notification opens Profile; tapping a payout notification opens the earnings ledger
+
+### Payments (new in Phase 7)
+- [ ] **Development build only:** the mock top-up path still works end to end
+- [ ] **Only if Play Console credentials exist:** a real Google Play test purchase
+      completes, credits the correct coin amount, and appears in purchase history
+- [ ] **Only if Play Console credentials exist:** the SAME purchase token replayed
+      (e.g. by force-closing mid-flow and reopening) does not double-credit
+- [ ] A release build never shows the development top-up option

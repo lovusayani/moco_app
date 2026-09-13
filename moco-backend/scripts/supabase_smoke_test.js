@@ -833,6 +833,150 @@ async function main() {
   });
   check('reporting with an unsupported reason is refused', p6ReportBadReason.status === 400, p6ReportBadReason.body);
 
+  console.log('== Phase 7: Google Play purchase verification (mock-verifier boundary) ==');
+
+  const purchasesService = require('../src/modules/purchases/purchases.service');
+  const googlePlay = require('../src/integrations/google_play');
+
+  check(
+    'Google Play is honestly reported as not configured in this environment',
+    googlePlay.isConfigured() === false,
+    { note: 'expected without GOOGLE_PLAY_SERVICE_ACCOUNT_JSON' },
+  );
+
+  const p7Session = await login(freshTestPhone());
+  const p7Token = p7Session.token;
+  const p7UserId = p7Session.user.id;
+  // Tokens must be unique per run — this table is never reset between smoke
+  // runs (unlike freshTestPhone()'s users), and UNIQUE(token_hash) is global.
+  const p7RunId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  // The real, unconfigured integration: the HTTP route must fail honestly
+  // rather than pretend a purchase succeeded.
+  const p7RealVerifyAttempt = await call('POST', '/purchases/google/verify', {
+    token: p7Token,
+    body: { productId: 'pack_49', purchaseToken: 'irrelevant' },
+  });
+  check(
+    'without live Google Play credentials, verification fails honestly (never a fabricated success)',
+    p7RealVerifyAttempt.status === 400 &&
+      p7RealVerifyAttempt.body.error?.code === 'google_play_not_configured',
+    p7RealVerifyAttempt.body,
+  );
+
+  const p7BalanceUnchanged = await call('GET', '/wallet', { token: p7Token });
+  check(
+    'a failed/unconfigured verification credits nothing',
+    p7BalanceUnchanged.body.coinBalance === 0,
+    p7BalanceUnchanged.body,
+  );
+
+  // Everything downstream of a real "Google says yes" is exercised here
+  // directly against the service, using a mock verifier — the same
+  // dependency-injection seam purchases.service.js exposes for tests. This is
+  // the honest boundary: the live HTTP call to Google is NOT exercised by
+  // this script; the credit/ledger/idempotency logic that runs after Google
+  // confirms a purchase is.
+  const fakeVerifier = (result) => ({ verifyPurchase: async () => result });
+
+  const p7UnknownProduct = await purchasesService
+    .verifyAndCredit({
+      userId: p7UserId,
+      productId: 'not_a_real_pack',
+      purchaseToken: 'tok',
+      verifier: fakeVerifier({ valid: true }),
+    })
+    .then(() => null)
+    .catch((e) => e);
+  check(
+    'an unrecognised product id is refused before any verification',
+    p7UnknownProduct?.code === 'unknown_product',
+    p7UnknownProduct,
+  );
+
+  const p7Invalid = await purchasesService
+    .verifyAndCredit({
+      userId: p7UserId,
+      productId: 'pack_49',
+      purchaseToken: `bad-token-${p7RunId}`,
+      verifier: fakeVerifier({ valid: false, reason: 'not_found' }),
+    })
+    .then(() => null)
+    .catch((e) => e);
+  check(
+    'an invalid purchase (Google says no) grants nothing',
+    p7Invalid?.code === 'invalid_purchase',
+    p7Invalid,
+  );
+
+  const p7BalanceAfterInvalid = await call('GET', '/wallet', { token: p7Token });
+  check(
+    'the invalid attempt credited nothing',
+    p7BalanceAfterInvalid.body.coinBalance === 0,
+    p7BalanceAfterInvalid.body,
+  );
+
+  const p7Verified = await purchasesService.verifyAndCredit({
+    userId: p7UserId,
+    productId: 'pack_99', // 99 + 5 bonus
+    purchaseToken: `smoke-good-token-${p7RunId}`,
+    verifier: fakeVerifier({ valid: true, orderId: 'GPA.smoke-1' }),
+  });
+  check(
+    'a verified purchase credits exactly the pack total, server-derived',
+    p7Verified.alreadyProcessed === false && p7Verified.coinsGranted === 104 && p7Verified.balance === 104,
+    p7Verified,
+  );
+
+  const p7Duplicate = await purchasesService.verifyAndCredit({
+    userId: p7UserId,
+    productId: 'pack_99',
+    purchaseToken: `smoke-good-token-${p7RunId}`,
+    verifier: fakeVerifier({ valid: true, orderId: 'GPA.smoke-1' }),
+  });
+  check(
+    'the same purchase token submitted again is not credited twice',
+    p7Duplicate.alreadyProcessed === true && p7Duplicate.coinsGranted === 104,
+    p7Duplicate,
+  );
+
+  const p7WalletAfter = await call('GET', '/wallet', { token: p7Token });
+  check(
+    'the wallet reflects exactly one credit despite two verify calls',
+    p7WalletAfter.body.coinBalance === 104,
+    p7WalletAfter.body,
+  );
+
+  const p7Ledger = await call('GET', '/wallet/ledger', { token: p7Token });
+  const p7TopupEntries = p7Ledger.body.entries?.filter((e) => e.reason === 'topup') ?? [];
+  check(
+    'exactly one ledger row was written for the purchase',
+    p7TopupEntries.length === 1 && p7TopupEntries[0].delta === 104,
+    p7Ledger.body,
+  );
+
+  const p7TokenHashCheck = await pool.query(
+    `SELECT token_hash FROM purchases WHERE user_id = $1 AND status = 'verified'`,
+    [p7UserId],
+  );
+  check(
+    'the raw purchase token is never stored, only its hash',
+    p7TokenHashCheck.rows.length === 1 &&
+      p7TokenHashCheck.rows[0].token_hash !== `smoke-good-token-${p7RunId}` &&
+      p7TokenHashCheck.rows[0].token_hash.length === 64,
+    p7TokenHashCheck.rows,
+  );
+
+  const p7History = await call('GET', '/purchases', { token: p7Token });
+  check(
+    'purchase history lists both the invalid attempt and the verified purchase',
+    p7History.status === 200 &&
+      p7History.body.purchases.length === 2 &&
+      p7History.body.purchases[0].status === 'verified' &&
+      p7History.body.purchases.some((p) => p.status === 'invalid'),
+    p7History.body,
+  );
+
   console.log(`\n${passed} passed, ${failed} failed`);
   await closeDb();
   process.exit(failed > 0 ? 1 : 0);

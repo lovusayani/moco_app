@@ -312,6 +312,66 @@ a listener cannot stack requests beyond what they have earned.
 
 ---
 
+## Purchases (Google Play Billing)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/purchases/google/verify` | Verify a Play purchase and credit coins |
+| `GET` | `/api/purchases` | The caller's own purchase history |
+
+The production purchase path, parallel to the mock/Razorpay topup flow in the
+Wallet section above. Flutter's job ends at obtaining a purchase token from
+Google Play Billing and sending it here — it never credits its own wallet,
+and there is no field anywhere in this API for a client to state how many
+coins a purchase is worth.
+
+`productId` is the coin pack id itself (e.g. `pack_99`) — the Play Console
+product SKU is configured to match a `COIN_PACKS` id 1:1, so there is no
+separate mapping table to keep in sync.
+
+### `POST /api/purchases/google/verify`
+`{ "productId": "pack_99", "purchaseToken": "..." }` →
+`{ coinBalance, coinsGranted, alreadyProcessed }`.
+
+Five things happen, in order, none of them taken on trust from the request:
+
+1. `productId` must be a real coin pack (`400 unknown_product` otherwise).
+2. The purchase token's SHA-256 hash is checked against already-recorded
+   purchases. A match returns the original outcome unchanged
+   (`alreadyProcessed: true`) — no re-verification, no re-credit.
+3. The token is verified against **Google's own records** via the Play
+   Developer API. Unconfigured (`GOOGLE_PLAY_PACKAGE_NAME` /
+   `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` unset) is `400
+   google_play_not_configured` — an honest failure, never a fabricated
+   success. Google saying the purchase is not `PURCHASED`, or already
+   consumed, is `400 invalid_purchase`.
+4. Only once Google confirms it: one transaction inserts the purchase row
+   and credits the wallet with exactly `packTotalCoins(pack)` — a number
+   this endpoint computes itself, never one the request could supply.
+5. `UNIQUE (token_hash)` is the actual correctness guarantee under
+   concurrency: two simultaneous verify calls for the same token can both
+   attempt the insert, but only one succeeds: the other is folded into the
+   `alreadyProcessed: true` response instead of double-crediting.
+
+The raw purchase token is never stored — only its hash. It is not classic
+"sensitive" data, but it is a bearer credential replayable against Google's
+own purchase-status API, so keeping it around indefinitely is unnecessary
+exposure.
+
+### `GET /api/purchases`
+The caller's own purchase history, newest first, including invalid attempts
+(so a failed purchase is visible for support purposes, distinct from one
+never attempted).
+
+**Not live-verified in this environment.** The integration boundary, the
+purchases table, and everything downstream of Google confirming a purchase
+(idempotent credit, the transaction, the ledger row) are exercised against a
+mock verifier in `tests/purchases.test.js` and `npm run smoke`. Only the
+actual HTTP call to Google's Play Developer API — which needs a Play Console
+service account this environment does not have — has never run for real.
+
+---
+
 ## Safety
 
 | Method | Path | Purpose |

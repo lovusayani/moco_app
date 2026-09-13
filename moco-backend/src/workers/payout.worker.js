@@ -5,6 +5,7 @@ const { createQueueConnection } = require('../config/redis');
 const { withTransaction, query } = require('../config/db');
 const walletService = require('../modules/wallet/wallet.service');
 const { notificationQueue } = require('./queues');
+const notifications = require('../modules/notifications/notifications.service');
 const logger = require('../utils/logger');
 const { BULL_QUEUES, PAYOUT_STATUS, EARNING_REASON } = require('../utils/constants');
 
@@ -61,6 +62,13 @@ async function handlePayout(job) {
       userId: payout.listener_id,
       title: 'Withdrawal sent',
       body: `Your withdrawal of ${payout.amount} has been processed.`,
+    });
+    await notifications.create({
+      userId: payout.listener_id,
+      type: 'payout_paid',
+      title: 'Withdrawal sent',
+      body: `Your withdrawal of ₹${payout.amount} has been processed.`,
+      data: { payoutId },
     });
 
     logger.info({ payoutId, listenerId: payout.listener_id, amount: payout.amount }, 'payout paid');

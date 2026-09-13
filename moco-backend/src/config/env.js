@@ -105,6 +105,18 @@ const env = {
     webhookSecret: optional('PAYMENT_WEBHOOK_SECRET', ''),
   },
 
+  // Google Play Billing purchase verification (Play Store builds only). Both
+  // unset is a valid, honest "not configured" state — see
+  // src/integrations/google_play.js — not a boot-time failure, mirroring how
+  // Supabase Storage and FCM are handled: this backend must run without a
+  // Play Console account during development and CI.
+  googlePlay: {
+    packageName: optional('GOOGLE_PLAY_PACKAGE_NAME', ''),
+    // The service account's JSON key, as a single-line string (its own
+    // private key PEM included). Never logged, never returned by any route.
+    serviceAccountJson: optional('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON', ''),
+  },
+
   otp: {
     // In non-production the OTP is fixed so QA and the emulator can log in.
     fixedCode: isProduction ? null : optional('OTP_FIXED_CODE', '123456'),

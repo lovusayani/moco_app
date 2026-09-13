@@ -286,10 +286,43 @@ from env, so this is a config change and a data migration — not a rewrite. Set
 - [ ] Weekly droplet snapshots enabled
 - [ ] `GET /api/admin/reconcile` monitored — a discrepancy means money moved
       without a ledger row
+- [ ] `GOOGLE_PLAY_PACKAGE_NAME` and `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` set
+      before a Play Store build ships — see below
+
+### Google Play Billing (`src/integrations/google_play.js`)
+
+Real-money coin purchases from the Play Store build verify against Google's
+own Play Developer API — a client's purchase token is never trusted on its
+own, only what Google itself confirms about it.
+
+1. In Play Console: **Setup → API access**, create (or link) a Google Cloud
+   service account with the **Pub/Sub → Android Publisher** API enabled, and
+   grant it **Financial data** access under **Users and permissions**.
+2. Download its JSON key and set `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` to the
+   file's contents as a single-line string (never commit it; it belongs in
+   `.env`/your secrets manager only).
+3. Set `GOOGLE_PLAY_PACKAGE_NAME` to the app's application id
+   (`com.example.moco`-shaped).
+4. In Play Console, create one in-app product per `COIN_PACKS` entry in
+   `src/utils/constants.js`, with the **product id set to the pack id
+   exactly** (`pack_49`, `pack_99`, …) — `POST /purchases/google/verify`
+   maps `productId` straight to `findCoinPack()`, so a mismatch here means a
+   purchase nobody can complete.
+
+Both env vars unset is a valid, honest state — the same "not configured"
+pattern as Supabase Storage and FCM — not a boot failure:
+`POST /purchases/google/verify` returns `400 google_play_not_configured`
+rather than crediting anything. `npm run smoke` covers this exact state
+today (this environment has no Play Console service account) plus the full
+credit/idempotency logic against a mock verifier; only the live HTTP call to
+Google has never actually run. See `docs/API.md`'s Purchases section.
 
 ## Open items
 
 - Wire a real UPI disbursement API in `payout.worker.js` (currently marks
   approved payouts paid and records the reference manually)
-- Google Play Billing purchase-token verification for Play Store builds
+- Live-verify Google Play Billing against a real Play Console service
+  account and a real test purchase — the integration boundary is complete
+  and tested against a mock verifier (see above), but the actual call to
+  Google has never run
 - The Flutter client (Batches 2–4 of the design system are still to be built)

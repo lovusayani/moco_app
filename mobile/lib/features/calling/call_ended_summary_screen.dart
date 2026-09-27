@@ -44,7 +44,7 @@ class CallEndedSummaryScreen extends ConsumerWidget {
                 const SizedBox(height: MocoSpacing.lg),
                 Text(
                   session.counterpartyName ?? 'Call ended',
-                  style: const TextStyle(
+                  style:  TextStyle(
                     color: MocoColors.textPrimary,
                     fontSize: 21,
                     fontWeight: FontWeight.w700,
@@ -53,7 +53,7 @@ class CallEndedSummaryScreen extends ConsumerWidget {
                 const SizedBox(height: MocoSpacing.xs),
                 Text(
                   _reasonLabel(session.phase, summary?.endReason),
-                  style: const TextStyle(
+                  style:  TextStyle(
                     color: MocoColors.textMuted,
                     fontSize: 14,
                   ),
@@ -123,7 +123,7 @@ class CallEndedSummaryScreen extends ConsumerWidget {
                   // settlement summary — nothing was spent or earned.
                   Text(
                     'No coins were charged for this call.',
-                    style: const TextStyle(
+                    style:  TextStyle(
                       color: MocoColors.textMuted,
                       fontSize: 14,
                     ),
@@ -250,7 +250,7 @@ class _SummaryRow extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(color: MocoColors.textSecondary, fontSize: 14),
+              style:  TextStyle(color: MocoColors.textSecondary, fontSize: 14),
             ),
           ),
           Text(
@@ -272,6 +272,6 @@ class _RowDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Divider(height: 1, color: MocoColors.borderSubtle);
+    return  Divider(height: 1, color: MocoColors.borderSubtle);
   }
 }

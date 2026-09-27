@@ -27,7 +27,7 @@ class MocoBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: const BoxDecoration(gradient: MocoColors.backgroundGradient),
+      decoration:  BoxDecoration(gradient: MocoColors.backgroundGradient),
       child: Stack(
         children: [
           if (ambience != MocoAmbience.calm)

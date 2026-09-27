@@ -28,7 +28,7 @@ class ChatsScreen extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
+             Padding(
               padding: EdgeInsets.fromLTRB(
                 MocoSpacing.screenPadding,
                 MocoSpacing.lg,
@@ -89,7 +89,7 @@ class _Body extends StatelessWidget {
       key: const Key('chats_list'),
       padding: const EdgeInsets.symmetric(vertical: MocoSpacing.sm),
       itemCount: state.conversations.length,
-      separatorBuilder: (_, __) => const Divider(
+      separatorBuilder: (_, __) =>  Divider(
         height: 1,
         indent: 84,
         color: MocoColors.borderSubtle,
@@ -152,7 +152,7 @@ class _ConversationRow extends StatelessWidget {
                         const SizedBox(width: MocoSpacing.sm),
                         Text(
                           formatRelativeTime(conversation.lastMessageAt),
-                          style: const TextStyle(
+                          style:  TextStyle(
                             color: MocoColors.textMuted,
                             fontSize: 12,
                           ),

@@ -54,6 +54,9 @@ class AppPreferences {
 
   static const _onboardingKey = 'moco_onboarding_complete';
   static const _activeRoleKey = 'moco_active_role';
+  static const _themeModeKey = 'moco_theme_mode';
+  static const _fontChoiceKey = 'moco_font_choice';
+  static const _discoveryColumnsKey = 'moco_discovery_columns';
 
   static Future<AppPreferences> create() async =>
       AppPreferences(await SharedPreferences.getInstance());
@@ -71,4 +74,27 @@ class AppPreferences {
 
   Future<void> setActiveRole(String value) =>
       _prefs.setString(_activeRoleKey, value);
+
+  /// Stored as the `ThemeMode` enum name ('light' / 'dark' / 'system').
+  /// A pure display preference — never sent to or read from the backend.
+  String get themeModeName => _prefs.getString(_themeModeKey) ?? 'dark';
+
+  Future<void> setThemeModeName(String value) =>
+      _prefs.setString(_themeModeKey, value);
+
+  /// 'inter' (the app's default, Moco-branded typeface) or 'system' (the
+  /// platform's default font). Stored as a plain string so a future choice
+  /// can be added without a migration.
+  String get fontChoiceName => _prefs.getString(_fontChoiceKey) ?? 'inter';
+
+  Future<void> setFontChoiceName(String value) =>
+      _prefs.setString(_fontChoiceKey, value);
+
+  /// How many columns Discovery's grid renders — 1, 2, or 3. Display-only;
+  /// never changes what the backend query returns, only how the same
+  /// listener list is laid out.
+  int get discoveryColumns => _prefs.getInt(_discoveryColumnsKey) ?? 3;
+
+  Future<void> setDiscoveryColumns(int value) =>
+      _prefs.setInt(_discoveryColumnsKey, value);
 }

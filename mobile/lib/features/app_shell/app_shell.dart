@@ -19,11 +19,21 @@ import '../../core/widgets/moco_states.dart';
 /// user, not a second navigation tree. That decision is deliberately reversible
 /// — nothing here assumes a caller-only app.
 enum AppShellTab {
+  // Order is the approved final nav order: Feed is the center tab, Chat sits
+  // directly beside Profile. This enum's declaration order IS the bottom
+  // nav's render order (`_FloatingNavBar` iterates `AppShellTab.values`), so
+  // reordering here is the one edit needed — no other index mapping exists.
   discovery(
     '/discovery',
     'Discover',
     Icons.explore_outlined,
     Icons.explore_rounded,
+  ),
+  wallet(
+    '/wallet',
+    'Wallet',
+    Icons.account_balance_wallet_outlined,
+    Icons.account_balance_wallet_rounded,
   ),
   feed(
     '/feed',
@@ -33,15 +43,9 @@ enum AppShellTab {
   ),
   chats(
     '/chats',
-    'Chats',
+    'Chat',
     Icons.chat_bubble_outline_rounded,
     Icons.chat_bubble_rounded,
-  ),
-  wallet(
-    '/wallet',
-    'Wallet',
-    Icons.account_balance_wallet_outlined,
-    Icons.account_balance_wallet_rounded,
   ),
   profile(
     '/profile',

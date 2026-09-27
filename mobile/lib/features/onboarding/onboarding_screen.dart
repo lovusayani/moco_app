@@ -92,7 +92,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                   child: TextButton(
                     key: const Key('onboarding_skip'),
                     onPressed: _finish,
-                    child: const Text(
+                    child:  Text(
                       'Skip',
                       style: TextStyle(color: MocoColors.textMuted),
                     ),
@@ -172,7 +172,7 @@ class _OnboardingPage extends StatelessWidget {
           Text(
             page.title,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style:  TextStyle(
               color: MocoColors.textPrimary,
               fontSize: 29,
               fontWeight: FontWeight.w700,
@@ -184,7 +184,7 @@ class _OnboardingPage extends StatelessWidget {
           Text(
             page.body,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style:  TextStyle(
               color: MocoColors.textSecondary,
               fontSize: 15.5,
               height: 1.55,

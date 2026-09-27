@@ -70,7 +70,7 @@ class IncomingCallScreen extends ConsumerWidget {
                         session.callType == CallType.video
                             ? 'Incoming video call'
                             : 'Incoming audio call',
-                        style: const TextStyle(
+                        style:  TextStyle(
                           color: MocoColors.textMuted,
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -103,7 +103,7 @@ class IncomingCallScreen extends ConsumerWidget {
                   const SizedBox(height: MocoSpacing.xl),
                   Text(
                     session.counterpartyName ?? 'Someone is calling',
-                    style: const TextStyle(
+                    style:  TextStyle(
                       color: MocoColors.textPrimary,
                       fontSize: 24,
                       fontWeight: FontWeight.w700,
@@ -139,7 +139,7 @@ class IncomingCallScreen extends ConsumerWidget {
                                       .declineCall(),
                           ),
                           const SizedBox(height: MocoSpacing.sm),
-                          const Text(
+                           Text(
                             'Decline',
                             style: TextStyle(
                               color: MocoColors.textMuted,
@@ -161,7 +161,7 @@ class IncomingCallScreen extends ConsumerWidget {
                                       .acceptCall(),
                           ),
                           const SizedBox(height: MocoSpacing.sm),
-                          const Text(
+                           Text(
                             'Accept',
                             style: TextStyle(
                               color: MocoColors.textMuted,
@@ -206,7 +206,7 @@ class _EarningsCard extends StatelessWidget {
             const SizedBox(width: 6),
             Text(
               '${session.ratePerMinute}/min',
-              style: const TextStyle(
+              style:  TextStyle(
                 color: MocoColors.textPrimary,
                 fontSize: 13.5,
                 fontWeight: FontWeight.w700,
@@ -214,12 +214,12 @@ class _EarningsCard extends StatelessWidget {
             ),
           ],
           if (session.ratePerMinute != null && session.freeSecondsGranted > 0)
-            const Padding(
+             Padding(
               padding: EdgeInsets.symmetric(horizontal: MocoSpacing.sm),
               child: Text('·', style: TextStyle(color: MocoColors.textMuted)),
             ),
           if (session.freeSecondsGranted > 0)
-            const Text(
+             Text(
               'First-time caller',
               style: TextStyle(
                 color: MocoColors.textSecondary,

@@ -302,7 +302,7 @@ class _AvatarFallback extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: const BoxDecoration(color: MocoColors.backgroundElevated),
+      decoration:  BoxDecoration(color: MocoColors.backgroundElevated),
       child: Center(
         child: MocoAvatar(
           name: session.counterpartyName ?? 'Moco',

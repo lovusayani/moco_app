@@ -15,6 +15,7 @@ import '../../features/discovery/discovery_screen.dart';
 import '../../features/feed/feed_screen.dart';
 import '../../features/feed/post_composer_screen.dart';
 import '../../features/profile/account_settings_screen.dart';
+import '../../features/settings/app_settings_screen.dart';
 import '../../features/profile/edit_profile_screen.dart';
 import '../../features/profile/ledger_controller.dart';
 import '../../features/profile/ledger_screen.dart';
@@ -43,6 +44,7 @@ class Routes {
   static const profile = '/profile';
   static const editProfile = '/profile/edit';
   static const accountSettings = '/profile/settings';
+  static const appSettings = '/profile/app-settings';
   static const coinLedger = '/profile/ledger/coins';
   static const earningsLedger = '/profile/ledger/earnings';
   static const notifications = '/notifications';
@@ -174,6 +176,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: Routes.accountSettings,
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const AccountSettingsScreen(),
+      ),
+      GoRoute(
+        path: Routes.appSettings,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const AppSettingsScreen(),
       ),
       GoRoute(
         path: Routes.coinLedger,

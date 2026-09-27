@@ -53,7 +53,7 @@ class WalletScreen extends ConsumerWidget {
                   MocoSpacing.xxl,
                 ),
                 children: [
-                  const Text(
+                   Text(
                     'Wallet',
                     style: TextStyle(
                       color: MocoColors.textPrimary,
@@ -68,7 +68,7 @@ class WalletScreen extends ConsumerWidget {
                   const SizedBox(height: MocoSpacing.md),
                   config.when(
                     loading: () => const MocoSkeleton(height: 180),
-                    error: (_, __) => const Text(
+                    error: (_, __) =>  Text(
                       'Could not load coin packs.',
                       style: TextStyle(color: MocoColors.textMuted),
                     ),
@@ -81,7 +81,7 @@ class WalletScreen extends ConsumerWidget {
                   ),
                   if (!provider.isAvailable) ...[
                     const SizedBox(height: MocoSpacing.md),
-                    const Text(
+                     Text(
                       'Real purchases arrive with Google Play Billing. '
                       'Coin packs are shown at their real prices already.',
                       style: TextStyle(color: MocoColors.textMuted, fontSize: 12.5),
@@ -91,7 +91,7 @@ class WalletScreen extends ConsumerWidget {
                     const SizedBox(height: MocoSpacing.md),
                     Text(
                       ApiErrorMapper.from(state.lastPurchaseError!).message,
-                      style: const TextStyle(color: MocoColors.danger, fontSize: 13),
+                      style:  TextStyle(color: MocoColors.danger, fontSize: 13),
                     ),
                   ],
                   const SizedBox(height: MocoSpacing.xl),
@@ -118,7 +118,7 @@ class _BalanceCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+           Text(
             'Coin balance',
             style: TextStyle(color: MocoColors.textMuted, fontSize: 13),
           ),
@@ -138,7 +138,7 @@ class _BalanceCard extends StatelessWidget {
                   ),
                 ),
               ),
-              const Padding(
+               Padding(
                 padding: EdgeInsets.only(left: 6, bottom: 6),
                 child: Text(
                   'coins',
@@ -197,7 +197,7 @@ class _MinutesChip extends StatelessWidget {
             child: Text(
               '${minutes ?? 0} min $label',
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: MocoColors.textSecondary, fontSize: 12.5),
+              style:  TextStyle(color: MocoColors.textSecondary, fontSize: 12.5),
             ),
           ),
         ],
@@ -222,7 +222,7 @@ class _PackGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (packs.isEmpty) {
-      return const Text(
+      return  Text(
         'No coin packs available right now.',
         style: TextStyle(color: MocoColors.textMuted),
       );
@@ -306,7 +306,7 @@ class _PackRow extends StatelessWidget {
                   children: [
                     Text(
                       '${pack.totalCoins} coins',
-                      style: const TextStyle(
+                      style:  TextStyle(
                         color: MocoColors.textPrimary,
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
@@ -335,7 +335,7 @@ class _PackRow extends StatelessWidget {
           const SizedBox(width: MocoSpacing.md),
           Text(
             '₹${pack.priceInr}',
-            style: const TextStyle(
+            style:  TextStyle(
               color: MocoColors.textSecondary,
               fontSize: 15,
               fontWeight: FontWeight.w600,
@@ -387,13 +387,13 @@ class _LedgerSection extends ConsumerWidget {
 
     return ledger.when(
       loading: () => const MocoSkeleton(height: 120),
-      error: (_, __) => const Text(
+      error: (_, __) =>  Text(
         'Could not load recent activity.',
         style: TextStyle(color: MocoColors.textMuted),
       ),
       data: (page) {
         if (page.entries.isEmpty) {
-          return const Text(
+          return  Text(
             'No activity yet.',
             style: TextStyle(color: MocoColors.textMuted),
           );
@@ -405,7 +405,7 @@ class _LedgerSection extends ConsumerWidget {
               for (final entry in page.entries) ...[
                 _LedgerRow(entry: entry),
                 if (entry != page.entries.last)
-                  const Divider(height: 1, color: MocoColors.borderSubtle),
+                   Divider(height: 1, color: MocoColors.borderSubtle),
               ],
             ],
           ),
@@ -442,7 +442,7 @@ class _LedgerRow extends StatelessWidget {
           Expanded(
             child: Text(
               entry.label,
-              style: const TextStyle(color: MocoColors.textPrimary, fontSize: 13.5),
+              style:  TextStyle(color: MocoColors.textPrimary, fontSize: 13.5),
             ),
           ),
           Text(

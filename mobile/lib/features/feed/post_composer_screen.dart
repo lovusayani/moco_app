@@ -143,8 +143,8 @@ class _PostComposerScreenState extends ConsumerState<PostComposerScreen> {
                   maxLines: 4,
                   minLines: 2,
                   maxLength: 500,
-                  style: const TextStyle(color: MocoColors.textPrimary),
-                  decoration: const InputDecoration(
+                  style:  TextStyle(color: MocoColors.textPrimary),
+                  decoration:  InputDecoration(
                     hintText: 'Add a caption (optional)',
                     counterStyle: TextStyle(color: MocoColors.textMuted),
                   ),
@@ -237,7 +237,7 @@ class _MediaSlot extends StatelessWidget {
                   key: const Key('composer_selected_name'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style:  TextStyle(
                     color: MocoColors.textPrimary,
                     fontSize: 14.5,
                     fontWeight: FontWeight.w600,
@@ -246,7 +246,7 @@ class _MediaSlot extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   _sizeLabel(state.bytes!.length),
-                  style: const TextStyle(
+                  style:  TextStyle(
                     color: MocoColors.textMuted,
                     fontSize: 12.5,
                   ),
@@ -258,7 +258,7 @@ class _MediaSlot extends StatelessWidget {
             IconButton(
               key: const Key('composer_clear_media'),
               onPressed: onClear,
-              icon: const Icon(
+              icon:  Icon(
                 Icons.close_rounded,
                 color: MocoColors.textMuted,
               ),
@@ -303,7 +303,7 @@ class _PickTile extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style: const TextStyle(
+                  style:  TextStyle(
                     color: MocoColors.textPrimary,
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
@@ -312,7 +312,7 @@ class _PickTile extends StatelessWidget {
                 if (subtitle != null)
                   Text(
                     subtitle!,
-                    style: const TextStyle(
+                    style:  TextStyle(
                       color: MocoColors.textMuted,
                       fontSize: 12.5,
                     ),
@@ -320,7 +320,7 @@ class _PickTile extends StatelessWidget {
               ],
             ),
           ),
-          const Icon(
+           Icon(
             Icons.chevron_right_rounded,
             color: MocoColors.textMuted,
           ),
@@ -349,7 +349,7 @@ class _Progress extends StatelessWidget {
           uploading
               ? 'Uploading… ${(state.uploadProgress * 100).round()}%'
               : 'Publishing…',
-          style: const TextStyle(
+          style:  TextStyle(
             color: MocoColors.textSecondary,
             fontSize: 13,
           ),
@@ -388,7 +388,7 @@ class _ErrorBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(
+           Icon(
             Icons.error_outline_rounded,
             color: MocoColors.danger,
             size: 20,
@@ -397,7 +397,7 @@ class _ErrorBanner extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(
+              style:  TextStyle(
                 color: MocoColors.textPrimary,
                 fontSize: 13.5,
               ),

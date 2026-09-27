@@ -99,7 +99,7 @@ class _OutgoingCallScreenState extends ConsumerState<OutgoingCallScreen> {
                   const SizedBox(height: MocoSpacing.xl),
                   Text(
                     session.counterpartyName ?? 'Calling…',
-                    style: const TextStyle(
+                    style:  TextStyle(
                       color: MocoColors.textPrimary,
                       fontSize: 24,
                       fontWeight: FontWeight.w700,
@@ -109,7 +109,7 @@ class _OutgoingCallScreenState extends ConsumerState<OutgoingCallScreen> {
                   Text(
                     key: const Key('outgoing_call_status'),
                     _statusLabel(session.phase),
-                    style: const TextStyle(
+                    style:  TextStyle(
                       color: MocoColors.textMuted,
                       fontSize: 15,
                     ),
@@ -119,7 +119,7 @@ class _OutgoingCallScreenState extends ConsumerState<OutgoingCallScreen> {
                     Text(
                       '${session.callType == CallType.video ? 'Video' : 'Audio'} '
                       '· ${session.ratePerMinute}/min',
-                      style: const TextStyle(
+                      style:  TextStyle(
                         color: MocoColors.textSecondary,
                         fontSize: 13,
                       ),

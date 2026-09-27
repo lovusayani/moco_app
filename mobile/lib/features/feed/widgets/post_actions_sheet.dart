@@ -135,7 +135,7 @@ class _PostActionsSheet extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Padding(
+               Padding(
                 padding: EdgeInsets.all(MocoSpacing.lg),
                 child: Text(
                   'Why are you reporting this?',

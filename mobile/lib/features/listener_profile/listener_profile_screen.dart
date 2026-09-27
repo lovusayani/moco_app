@@ -152,7 +152,7 @@ class _ProfileBody extends ConsumerWidget {
                     const SizedBox(height: MocoSpacing.sm),
                     Text(
                       listener.bio!.trim(),
-                      style: const TextStyle(
+                      style:  TextStyle(
                         color: MocoColors.textSecondary,
                         fontSize: 14.5,
                         height: 1.55,
@@ -203,7 +203,7 @@ class _ProfileBody extends ConsumerWidget {
                       ),
                       error: (_, __) => const SizedBox.shrink(),
                       data: (items) => items.isEmpty
-                          ? const Align(
+                          ?  Align(
                               alignment: Alignment.centerLeft,
                               child: Text(
                                 'No similar listeners online right now.',
@@ -239,7 +239,7 @@ class _ProfileBody extends ConsumerWidget {
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           textAlign: TextAlign.center,
-                                          style: const TextStyle(
+                                          style:  TextStyle(
                                             color: MocoColors.textSecondary,
                                             fontSize: 12,
                                           ),
@@ -401,7 +401,7 @@ class _Hero extends ConsumerWidget {
                 child: Text(
                   listener.name,
                   key: const Key('profile_hero_name'),
-                  style: const TextStyle(
+                  style:  TextStyle(
                     color: MocoColors.textPrimary,
                     fontSize: 26,
                     fontWeight: FontWeight.w700,
@@ -534,7 +534,7 @@ class _Stat extends StatelessWidget {
       children: [
         Text(
           value,
-          style: const TextStyle(
+          style:  TextStyle(
             color: MocoColors.textPrimary,
             fontSize: 20,
             fontWeight: FontWeight.w700,
@@ -545,7 +545,7 @@ class _Stat extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.center,
-          style: const TextStyle(color: MocoColors.textMuted, fontSize: 12),
+          style:  TextStyle(color: MocoColors.textMuted, fontSize: 12),
         ),
       ],
     );
@@ -568,7 +568,7 @@ class _CompactHeader extends StatelessWidget {
       ),
       decoration: BoxDecoration(
         color: MocoColors.backgroundPrimary.withValues(alpha: 0.92),
-        border: const Border(
+        border:  Border(
           bottom: BorderSide(color: MocoColors.borderSubtle),
         ),
       ),
@@ -585,7 +585,7 @@ class _CompactHeader extends StatelessWidget {
               listener.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style:  TextStyle(
                 color: MocoColors.textPrimary,
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -747,7 +747,7 @@ class _CallBar extends ConsumerWidget {
       ),
       decoration: BoxDecoration(
         color: MocoColors.backgroundPrimary.withValues(alpha: 0.94),
-        border: const Border(top: BorderSide(color: MocoColors.borderSubtle)),
+        border:  Border(top: BorderSide(color: MocoColors.borderSubtle)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

@@ -210,7 +210,7 @@ class MocoSecondaryButton extends StatelessWidget {
           label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
           style: OutlinedButton.styleFrom(
             foregroundColor: MocoColors.textPrimary,
-            side: const BorderSide(color: MocoColors.borderStrong),
+            side:  BorderSide(color: MocoColors.borderStrong),
             backgroundColor: MocoColors.surfaceGlass,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(MocoRadius.md),
@@ -382,7 +382,7 @@ class MocoSectionHeader extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: const TextStyle(
+                style:  TextStyle(
                   color: MocoColors.textPrimary,
                   fontSize: 17,
                   fontWeight: FontWeight.w600,
@@ -394,7 +394,7 @@ class MocoSectionHeader extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 2),
                   child: Text(
                     subtitle!,
-                    style: const TextStyle(
+                    style:  TextStyle(
                       color: MocoColors.textMuted,
                       fontSize: 13,
                     ),

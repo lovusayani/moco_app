@@ -46,7 +46,7 @@ void main() {
 
     return ProviderScope(
       overrides: [notificationsApiProvider.overrideWithValue(api)],
-      child: MaterialApp.router(theme: MocoTheme.dark, routerConfig: router),
+      child: MaterialApp.router(theme: MocoTheme.dark(), routerConfig: router),
     );
   }
 

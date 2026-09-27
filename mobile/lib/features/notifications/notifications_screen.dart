@@ -111,7 +111,7 @@ class _Body extends StatelessWidget {
           key: const Key('notifications_list'),
           padding: const EdgeInsets.symmetric(vertical: MocoSpacing.sm),
           itemCount: state.notifications.length + (state.hasMore ? 1 : 0),
-          separatorBuilder: (_, __) => const Divider(height: 1, indent: 68, color: MocoColors.borderSubtle),
+          separatorBuilder: (_, __) =>  Divider(height: 1, indent: 68, color: MocoColors.borderSubtle),
           itemBuilder: (context, index) {
             if (index >= state.notifications.length) {
               return const Padding(
@@ -133,7 +133,7 @@ class _Body extends StatelessWidget {
                 color: MocoColors.danger.withValues(alpha: 0.2),
                 alignment: Alignment.centerRight,
                 padding: const EdgeInsets.symmetric(horizontal: MocoSpacing.lg),
-                child: const Icon(Icons.delete_outline_rounded, color: MocoColors.danger),
+                child:  Icon(Icons.delete_outline_rounded, color: MocoColors.danger),
               ),
               onDismissed: (_) => controller.delete(notification.id),
               child: _NotificationRow(
@@ -215,13 +215,13 @@ class _NotificationRow extends StatelessWidget {
                         notification.body!,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: MocoColors.textSecondary, fontSize: 13),
+                        style:  TextStyle(color: MocoColors.textSecondary, fontSize: 13),
                       ),
                     ],
                     const SizedBox(height: 4),
                     Text(
                       formatRelativeTime(notification.createdAt),
-                      style: const TextStyle(color: MocoColors.textMuted, fontSize: 11.5),
+                      style:  TextStyle(color: MocoColors.textMuted, fontSize: 11.5),
                     ),
                   ],
                 ),

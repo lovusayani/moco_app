@@ -85,7 +85,7 @@ void main() {
         ),
       ],
       child: MaterialApp(
-        theme: MocoTheme.dark,
+        theme: MocoTheme.dark(),
         home: const PostComposerScreen(),
       ),
     );

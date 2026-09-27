@@ -88,7 +88,7 @@ class _ActiveAudioCallScreenState extends ConsumerState<ActiveAudioCallScreen> {
                   const SizedBox(height: MocoSpacing.xl),
                   Text(
                     session.counterpartyName ?? 'Moco',
-                    style: const TextStyle(
+                    style:  TextStyle(
                       color: MocoColors.textPrimary,
                       fontSize: 24,
                       fontWeight: FontWeight.w700,
@@ -98,7 +98,7 @@ class _ActiveAudioCallScreenState extends ConsumerState<ActiveAudioCallScreen> {
                   Text(
                     key: const Key('active_call_timer'),
                     _elapsed(session.startedAt),
-                    style: const TextStyle(
+                    style:  TextStyle(
                       color: MocoColors.textSecondary,
                       fontSize: 16,
                       fontFeatures: [FontFeature.tabularFigures()],
@@ -271,7 +271,7 @@ class _StatusBar extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: const TextStyle(color: MocoColors.textMuted, fontSize: 12.5),
+        style:  TextStyle(color: MocoColors.textMuted, fontSize: 12.5),
       ),
     );
   }
@@ -369,7 +369,7 @@ class _PermissionBanner extends StatelessWidget {
           Text(
             message,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: MocoColors.danger, fontSize: 12.5),
+            style:  TextStyle(color: MocoColors.danger, fontSize: 12.5),
           ),
           if (status.isPermanentlyDenied) ...[
             const SizedBox(height: MocoSpacing.xs),
@@ -426,7 +426,7 @@ class _ControlButton extends StatelessWidget {
           ),
         ),
         const SizedBox(height: MocoSpacing.xs),
-        Text(label, style: const TextStyle(color: MocoColors.textMuted, fontSize: 12)),
+        Text(label, style:  TextStyle(color: MocoColors.textMuted, fontSize: 12)),
       ],
     );
   }

@@ -271,7 +271,7 @@ class _VideoMessage extends StatelessWidget {
               const SizedBox(height: MocoSpacing.md),
               Text(
                 label!,
-                style: const TextStyle(
+                style:  TextStyle(
                   color: MocoColors.textMuted,
                   fontSize: 13.5,
                 ),

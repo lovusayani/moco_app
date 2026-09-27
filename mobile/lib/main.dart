@@ -9,13 +9,14 @@ import 'core/routing/app_router.dart';
 import 'core/storage/secure_store.dart';
 import 'core/theme/moco_colors.dart';
 import 'core/theme/moco_theme.dart';
+import 'features/settings/app_settings_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Let the app's own gradient show through the system bars.
   SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
+     SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
       systemNavigationBarColor: MocoColors.backgroundElevated,
@@ -70,8 +71,31 @@ class _MocoAppState extends ConsumerState<MocoApp> with WidgetsBindingObserver {
   }
 
   @override
+  void didChangePlatformBrightness() {
+    // Only matters when following System — but rebuilding unconditionally is
+    // harmless, and this is the one hook the platform gives us for "the OS
+    // theme changed while the app was already open".
+    setState(() {});
+  }
+
+  /// Resolves the user's [ThemeMode] preference to a concrete [Brightness],
+  /// then stamps it onto [MocoColors] before anything below reads it. This is
+  /// the one line that makes System mode actually follow the OS: every other
+  /// screen just reads `MocoColors.*` directly, never `Theme.of(context)`.
+  Brightness _resolveBrightness(ThemeMode mode) => switch (mode) {
+    ThemeMode.light => Brightness.light,
+    ThemeMode.dark => Brightness.dark,
+    ThemeMode.system =>
+      WidgetsBinding.instance.platformDispatcher.platformBrightness,
+  };
+
+  @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authControllerProvider);
+    final themeMode = ref.watch(themeModeProvider);
+    final fontChoice = ref.watch(fontChoiceProvider);
+
+    MocoColors.setBrightness(_resolveBrightness(themeMode));
 
     // The socket follows the session: connected while signed in, torn down on
     // sign-out. Kept here so exactly one instance exists for the whole app.
@@ -93,7 +117,9 @@ class _MocoAppState extends ConsumerState<MocoApp> with WidgetsBindingObserver {
     if (auth.status == AuthStatus.initializing) {
       return MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: MocoTheme.dark,
+        theme: MocoTheme.light(font: fontChoice),
+        darkTheme: MocoTheme.dark(font: fontChoice),
+        themeMode: themeMode,
         home: const _BootstrapScreen(),
       );
     }
@@ -101,8 +127,9 @@ class _MocoAppState extends ConsumerState<MocoApp> with WidgetsBindingObserver {
     return MaterialApp.router(
       title: 'Moco',
       debugShowCheckedModeBanner: false,
-      theme: MocoTheme.dark,
-      themeMode: ThemeMode.dark,
+      theme: MocoTheme.light(font: fontChoice),
+      darkTheme: MocoTheme.dark(font: fontChoice),
+      themeMode: themeMode,
       routerConfig: ref.watch(routerProvider),
     );
   }
@@ -116,7 +143,7 @@ class _BootstrapScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return  Scaffold(
       backgroundColor: MocoColors.backgroundPrimary,
       body: Center(
         child: SizedBox(

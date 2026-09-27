@@ -142,7 +142,7 @@ class _NoopAuthApi implements AuthApi {
 Widget wrapWidget(Widget child, {List<Override> overrides = const []}) {
   return ProviderScope(
     overrides: overrides,
-    child: MaterialApp(theme: MocoTheme.dark, home: child),
+    child: MaterialApp(theme: MocoTheme.dark(), home: child),
   );
 }
 
@@ -156,7 +156,7 @@ Widget wrapShellScreen(Widget child, {List<Override> overrides = const []}) {
   return ProviderScope(
     overrides: overrides,
     child: MaterialApp(
-      theme: MocoTheme.dark,
+      theme: MocoTheme.dark(),
       home: Scaffold(body: child),
     ),
   );
@@ -185,6 +185,6 @@ Widget wrapRoutedScreen(
 
   return ProviderScope(
     overrides: overrides,
-    child: MaterialApp.router(theme: MocoTheme.dark, routerConfig: router),
+    child: MaterialApp.router(theme: MocoTheme.dark(), routerConfig: router),
   );
 }

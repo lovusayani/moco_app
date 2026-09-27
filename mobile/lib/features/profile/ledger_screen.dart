@@ -157,7 +157,7 @@ class _LedgerRow extends StatelessWidget {
               children: [
                 Text(
                   row.label,
-                  style: const TextStyle(
+                  style:  TextStyle(
                     color: MocoColors.textPrimary,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -166,7 +166,7 @@ class _LedgerRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   formatRelativeTime(row.createdAt),
-                  style: const TextStyle(color: MocoColors.textMuted, fontSize: 12),
+                  style:  TextStyle(color: MocoColors.textMuted, fontSize: 12),
                 ),
               ],
             ),

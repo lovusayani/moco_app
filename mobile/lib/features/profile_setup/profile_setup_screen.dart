@@ -109,7 +109,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: MocoSpacing.xl),
-                const Text(
+                 Text(
                   'Set up your profile',
                   style: TextStyle(
                     color: MocoColors.textPrimary,
@@ -119,7 +119,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                   ),
                 ),
                 const SizedBox(height: MocoSpacing.sm),
-                const Text(
+                 Text(
                   'This is how other people will see you.',
                   style: TextStyle(
                     color: MocoColors.textSecondary,
@@ -134,7 +134,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                   key: const Key('profile_name_field'),
                   controller: _nameController,
                   maxLength: 40,
-                  style: const TextStyle(color: MocoColors.textPrimary),
+                  style:  TextStyle(color: MocoColors.textPrimary),
                   decoration: InputDecoration(
                     hintText: 'e.g. Rahul',
                     counterText: '',
@@ -190,7 +190,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                   Text(
                     _error!,
                     key: const Key('profile_error'),
-                    style: const TextStyle(
+                    style:  TextStyle(
                       color: MocoColors.danger,
                       fontSize: 13.5,
                     ),
@@ -222,7 +222,7 @@ class _FieldLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: const TextStyle(
+      style:  TextStyle(
         color: MocoColors.textSecondary,
         fontSize: 13,
         fontWeight: FontWeight.w600,
@@ -266,7 +266,7 @@ class _ListenerApplication extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: MocoSpacing.md),
-              const Expanded(
+               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -301,7 +301,7 @@ class _ListenerApplication extends StatelessWidget {
             curve: Curves.easeOut,
             alignment: Alignment.topCenter,
             child: expanded
-                ? const Padding(
+                ?  Padding(
                     padding: EdgeInsets.only(top: MocoSpacing.md),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,

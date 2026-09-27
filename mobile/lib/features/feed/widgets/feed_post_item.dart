@@ -105,7 +105,7 @@ class _Media extends StatelessWidget {
       height: double.infinity,
       memCacheWidth: (size.width * dpr).round(),
       fadeInDuration: const Duration(milliseconds: 180),
-      placeholder: (_, __) => const ColoredBox(
+      placeholder: (_, __) =>  ColoredBox(
         color: MocoColors.backgroundPrimary,
         child: Center(
           child: SizedBox(
@@ -133,7 +133,7 @@ class _MediaUnavailable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const ColoredBox(
+    return  ColoredBox(
       color: MocoColors.backgroundPrimary,
       child: Center(
         child: Column(
@@ -188,7 +188,7 @@ class _Overlay extends StatelessWidget {
                   key: const Key('feed_post_more'),
                   onPressed: onMoreTap,
                   visualDensity: VisualDensity.compact,
-                  icon: const Icon(
+                  icon:  Icon(
                     Icons.more_horiz_rounded,
                     color: MocoColors.textPrimary,
                   ),
@@ -203,7 +203,7 @@ class _Overlay extends StatelessWidget {
               key: const Key('feed_post_caption'),
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style:  TextStyle(
                 color: MocoColors.textPrimary,
                 fontSize: 14.5,
                 height: 1.4,
@@ -252,7 +252,7 @@ class _AuthorRow extends StatelessWidget {
                       author.displayName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style:  TextStyle(
                         color: MocoColors.textPrimary,
                         fontSize: 15.5,
                         fontWeight: FontWeight.w700,
@@ -270,7 +270,7 @@ class _AuthorRow extends StatelessWidget {
               ),
               Text(
                 formatRelativeTime(post.createdAt),
-                style: const TextStyle(
+                style:  TextStyle(
                   color: MocoColors.textSecondary,
                   fontSize: 12,
                   shadows: [Shadow(color: Color(0x99000000), blurRadius: 6)],

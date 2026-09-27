@@ -123,7 +123,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: MocoSpacing.xxl),
                 Text(
                   _step == _Step.phone ? 'Welcome to Moco' : 'Enter the code',
-                  style: const TextStyle(
+                  style:  TextStyle(
                     color: MocoColors.textPrimary,
                     fontSize: 28,
                     fontWeight: FontWeight.w700,
@@ -135,7 +135,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   _step == _Step.phone
                       ? 'We will text you a code to sign in.'
                       : 'Sent to $_e164',
-                  style: const TextStyle(
+                  style:  TextStyle(
                     color: MocoColors.textSecondary,
                     fontSize: 15,
                   ),
@@ -184,7 +184,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             _error = null;
                             _codeController.clear();
                           }),
-                    child: const Text(
+                    child:  Text(
                       'Use a different number',
                       style: TextStyle(color: MocoColors.textMuted),
                     ),
@@ -203,7 +203,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       padding: const EdgeInsets.symmetric(horizontal: MocoSpacing.lg),
       child: Row(
         children: [
-          const Text(
+           Text(
             _dialCode,
             style: TextStyle(
               color: MocoColors.textPrimary,
@@ -223,7 +223,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               maxLength: 10,
               onChanged: (_) => setState(() {}),
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              style: const TextStyle(
+              style:  TextStyle(
                 color: MocoColors.textPrimary,
                 fontSize: 17,
                 letterSpacing: 1.2,
@@ -254,7 +254,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         textAlign: TextAlign.center,
         onChanged: (_) => setState(() {}),
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: const TextStyle(
+        style:  TextStyle(
           color: MocoColors.textPrimary,
           fontSize: 26,
           fontWeight: FontWeight.w600,
@@ -289,7 +289,7 @@ class _ErrorBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(
+           Icon(
             Icons.error_outline_rounded,
             color: MocoColors.danger,
             size: 19,
@@ -298,7 +298,7 @@ class _ErrorBanner extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(color: MocoColors.danger, fontSize: 13.5),
+              style:  TextStyle(color: MocoColors.danger, fontSize: 13.5),
             ),
           ),
         ],

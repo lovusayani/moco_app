@@ -121,7 +121,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
+                 Text(
                   'Name',
                   style: TextStyle(color: MocoColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w600),
                 ),
@@ -130,14 +130,14 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   key: const Key('edit_profile_name'),
                   controller: _nameController,
                   enabled: !_busy,
-                  style: const TextStyle(color: MocoColors.textPrimary),
+                  style:  TextStyle(color: MocoColors.textPrimary),
                   decoration: InputDecoration(
                     hintText: 'Your name',
                     errorText: _nameError,
                   ),
                 ),
                 const SizedBox(height: MocoSpacing.xl),
-                const Text(
+                 Text(
                   'Language',
                   style: TextStyle(color: MocoColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w600),
                 ),
@@ -156,7 +156,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                       .toList(),
                 ),
                 const SizedBox(height: MocoSpacing.xl),
-                const Text(
+                 Text(
                   'Gender',
                   style: TextStyle(color: MocoColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w600),
                 ),
@@ -183,7 +183,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                               Text(
                                 'Apply to become a listener',
                                 style: TextStyle(
                                   color: MocoColors.textPrimary,
@@ -192,7 +192,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                                 ),
                               ),
                               const SizedBox(height: 2),
-                              const Text(
+                               Text(
                                 'Verification is required before you can go online.',
                                 style: TextStyle(color: MocoColors.textMuted, fontSize: 12.5),
                               ),
@@ -214,7 +214,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   Text(
                     _error!,
                     key: const Key('edit_profile_error'),
-                    style: const TextStyle(color: MocoColors.danger, fontSize: 13),
+                    style:  TextStyle(color: MocoColors.danger, fontSize: 13),
                   ),
                 ],
                 const SizedBox(height: MocoSpacing.xl),

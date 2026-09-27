@@ -93,7 +93,7 @@ void main() {
             listenersApiProvider.overrideWithValue(listenersApi),
             payoutsApiProvider.overrideWithValue(payoutsApi),
           ],
-          child: MaterialApp.router(theme: MocoTheme.dark, routerConfig: router),
+          child: MaterialApp.router(theme: MocoTheme.dark(), routerConfig: router),
         );
       },
     );

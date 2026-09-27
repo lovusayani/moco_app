@@ -91,7 +91,7 @@ void main() {
         feedApiProvider.overrideWithValue(api),
         feedVideoPlaybackFactoryProvider.overrideWithValue(playback.call),
       ],
-      child: MaterialApp.router(theme: MocoTheme.dark, routerConfig: router),
+      child: MaterialApp.router(theme: MocoTheme.dark(), routerConfig: router),
     );
   }
 

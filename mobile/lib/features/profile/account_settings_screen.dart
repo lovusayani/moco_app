@@ -30,9 +30,9 @@ class AccountSettingsScreen extends ConsumerWidget {
                 MocoGlassCard(
                   child: Row(
                     children: [
-                      const Icon(Icons.phone_outlined, color: MocoColors.textMuted, size: 20),
+                       Icon(Icons.phone_outlined, color: MocoColors.textMuted, size: 20),
                       const SizedBox(width: MocoSpacing.md),
-                      Text(phone, style: const TextStyle(color: MocoColors.textSecondary, fontSize: 14)),
+                      Text(phone, style:  TextStyle(color: MocoColors.textSecondary, fontSize: 14)),
                     ],
                   ),
                 ),
@@ -44,11 +44,11 @@ class AccountSettingsScreen extends ConsumerWidget {
                 onPressed: () => _confirmSignOut(context, ref),
               ),
               const SizedBox(height: MocoSpacing.xxl),
-              const Divider(color: MocoColors.borderSubtle),
+               Divider(color: MocoColors.borderSubtle),
               const SizedBox(height: MocoSpacing.lg),
               Text(
                 'Danger zone',
-                style: const TextStyle(
+                style:  TextStyle(
                   color: MocoColors.danger,
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
@@ -106,7 +106,7 @@ class AccountSettingsScreen extends ConsumerWidget {
           TextButton(
             key: const Key('confirm_delete_account'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Delete', style: TextStyle(color: MocoColors.danger)),
+            child:  Text('Delete', style: TextStyle(color: MocoColors.danger)),
           ),
         ],
       ),

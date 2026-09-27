@@ -11,6 +11,7 @@ import '../../core/theme/moco_theme.dart';
 import '../../core/widgets/moco_states.dart';
 import '../../core/widgets/moco_surfaces.dart';
 import '../notifications/notifications_controller.dart';
+import '../settings/app_settings_controller.dart';
 import 'discovery_controller.dart';
 import 'widgets/listener_card.dart';
 
@@ -54,6 +55,7 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
     final state = ref.watch(discoveryControllerProvider);
     final controller = ref.read(discoveryControllerProvider.notifier);
     final user = ref.watch(authControllerProvider).user;
+    final columns = ref.watch(discoveryColumnsProvider);
 
     return SafeArea(
       bottom: false,
@@ -93,7 +95,7 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                               // MocoSectionHeader, which every other screen
                               // also uses and must stay in the app's normal
                               // typeface.
-                              const Flexible(
+                               Flexible(
                                 child: Text(
                                   'Discover',
                                   maxLines: 1,
@@ -148,13 +150,13 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                           key: const Key('discovery_search_field'),
                           controller: _searchController,
                           onChanged: controller.setSearchQuery,
-                          style: const TextStyle(
+                          style:  TextStyle(
                             color: MocoColors.textPrimary,
                             fontSize: 15,
                           ),
                           textInputAction: TextInputAction.search,
                           onSubmitted: controller.submitSearch,
-                          decoration: const InputDecoration(
+                          decoration:  InputDecoration(
                             hintText: 'Search listeners',
                             prefixIcon: Icon(
                               Icons.search_rounded,
@@ -176,7 +178,7 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
               ),
             ),
             if (state.isLoading)
-              const _LoadingGrid()
+              _LoadingGrid(columns: columns)
             else if (state.error != null)
               SliverFillRemaining(
                 hasScrollBody: false,
@@ -220,6 +222,7 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                 listeners: state.listeners,
                 showVideoRate: state.mode == CallMode.video,
                 firstCallFree: user?.freeTrialAvailable ?? false,
+                columns: columns,
               ),
             if (state.isLoadingMore)
               const SliverToBoxAdapter(
@@ -242,16 +245,36 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
   }
 }
 
+/// Maps the user's Discovery-layout preference to a genuinely different card
+/// treatment per density — see [ListenerCardDensity] — not the same card
+/// squeezed into a narrower column.
+ListenerCardDensity _densityFor(int columns) => switch (columns) {
+  1 => ListenerCardDensity.large,
+  2 => ListenerCardDensity.medium,
+  _ => ListenerCardDensity.compact,
+};
+
+/// The 1-column large card is a horizontal row (short and wide); 2-column is
+/// a taller vertical card with more breathing room; 3-column is the
+/// approved reference's compact card.
+double _aspectRatioFor(int columns) => switch (columns) {
+  1 => 2.6,
+  2 => 0.78,
+  _ => 0.62,
+};
+
 class _ListenerGrid extends StatelessWidget {
   const _ListenerGrid({
     required this.listeners,
     required this.showVideoRate,
     required this.firstCallFree,
+    required this.columns,
   });
 
   final List listeners;
   final bool showVideoRate;
   final bool firstCallFree;
+  final int columns;
 
   @override
   Widget build(BuildContext context) {
@@ -260,11 +283,11 @@ class _ListenerGrid extends StatelessWidget {
         horizontal: MocoSpacing.screenPadding,
       ),
       sliver: SliverGrid(
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: columns,
           mainAxisSpacing: MocoSpacing.sm,
           crossAxisSpacing: MocoSpacing.sm,
-          childAspectRatio: 0.62,
+          childAspectRatio: _aspectRatioFor(columns),
         ),
         delegate: SliverChildBuilderDelegate((context, index) {
           final listener = listeners[index];
@@ -273,6 +296,7 @@ class _ListenerGrid extends StatelessWidget {
             listener: listener,
             showVideoRate: showVideoRate,
             firstCallFree: firstCallFree,
+            density: _densityFor(columns),
             onTap: () => context.push(Routes.listenerPath(listener.id as int)),
           );
         }, childCount: listeners.length),
@@ -282,7 +306,9 @@ class _ListenerGrid extends StatelessWidget {
 }
 
 class _LoadingGrid extends StatelessWidget {
-  const _LoadingGrid();
+  const _LoadingGrid({required this.columns});
+
+  final int columns;
 
   @override
   Widget build(BuildContext context) {
@@ -291,11 +317,11 @@ class _LoadingGrid extends StatelessWidget {
         horizontal: MocoSpacing.screenPadding,
       ),
       sliver: SliverGrid(
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: columns,
           mainAxisSpacing: MocoSpacing.sm,
           crossAxisSpacing: MocoSpacing.sm,
-          childAspectRatio: 0.62,
+          childAspectRatio: _aspectRatioFor(columns),
         ),
         delegate: SliverChildBuilderDelegate(
           (context, index) => const MocoGlassCard(
@@ -420,7 +446,7 @@ class _CoinBalanceChip extends StatelessWidget {
           const SizedBox(width: 5),
           Text(
             '$balance',
-            style: const TextStyle(
+            style:  TextStyle(
               color: MocoColors.textPrimary,
               fontSize: 12.5,
               fontWeight: FontWeight.w600,
@@ -520,7 +546,7 @@ class _NotificationsBell extends ConsumerWidget {
               key: const Key('discovery_notifications_badge'),
               width: 9,
               height: 9,
-              decoration: const BoxDecoration(
+              decoration:  BoxDecoration(
                 color: MocoColors.danger,
                 shape: BoxShape.circle,
               ),

@@ -108,7 +108,7 @@ class MocoErrorState extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style:  TextStyle(
                 color: MocoColors.textPrimary,
                 fontSize: 17,
                 fontWeight: FontWeight.w600,
@@ -118,7 +118,7 @@ class MocoErrorState extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style:  TextStyle(
                 color: MocoColors.textMuted,
                 fontSize: 14,
                 height: 1.45,
@@ -168,7 +168,7 @@ class MocoEmptyState extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style:  TextStyle(
                 color: MocoColors.textPrimary,
                 fontSize: 17,
                 fontWeight: FontWeight.w600,
@@ -178,7 +178,7 @@ class MocoEmptyState extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style:  TextStyle(
                 color: MocoColors.textMuted,
                 fontSize: 14,
                 height: 1.45,
@@ -224,7 +224,7 @@ class MocoPlaceholderState extends StatelessWidget {
               const SizedBox(height: MocoSpacing.md),
               Text(
                 feature,
-                style: const TextStyle(
+                style:  TextStyle(
                   color: MocoColors.textPrimary,
                   fontSize: 17,
                   fontWeight: FontWeight.w600,
@@ -234,7 +234,7 @@ class MocoPlaceholderState extends StatelessWidget {
               Text(
                 'Arrives in $phase.',
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style:  TextStyle(
                   color: MocoColors.textMuted,
                   fontSize: 14,
                 ),

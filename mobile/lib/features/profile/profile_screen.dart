@@ -45,7 +45,7 @@ class ProfileScreen extends ConsumerWidget {
           MocoSpacing.xxl,
         ),
         children: [
-          const Text(
+           Text(
             'Profile',
             style: TextStyle(
               color: MocoColors.textPrimary,
@@ -72,6 +72,13 @@ class ProfileScreen extends ConsumerWidget {
             icon: Icons.settings_outlined,
             label: 'Account settings',
             onTap: () => context.push(Routes.accountSettings),
+          ),
+          const SizedBox(height: MocoSpacing.sm),
+          _NavRow(
+            key: const Key('profile_app_settings_row'),
+            icon: Icons.tune_rounded,
+            label: 'App settings',
+            onTap: () => context.push(Routes.appSettings),
           ),
           if (!user.canBeListener) ...[
             const SizedBox(height: MocoSpacing.sm),
@@ -143,7 +150,7 @@ class _IdentityCard extends ConsumerWidget {
                       : 'Moco user',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style:  TextStyle(
                     color: MocoColors.textPrimary,
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -152,7 +159,7 @@ class _IdentityCard extends ConsumerWidget {
                 const SizedBox(height: 4),
                 Text(
                   user.phone,
-                  style: const TextStyle(color: MocoColors.textMuted, fontSize: 13),
+                  style:  TextStyle(color: MocoColors.textMuted, fontSize: 13),
                 ),
               ],
             ),
@@ -160,7 +167,7 @@ class _IdentityCard extends ConsumerWidget {
           IconButton(
             key: const Key('profile_edit_button'),
             onPressed: () => context.push(Routes.editProfile),
-            icon: const Icon(Icons.edit_outlined, color: MocoColors.textSecondary),
+            icon:  Icon(Icons.edit_outlined, color: MocoColors.textSecondary),
             tooltip: 'Edit profile',
           ),
         ],
@@ -324,7 +331,7 @@ class _ListenerSectionsState extends ConsumerState<_ListenerSections> {
         else if (state.earningsError != null && state.earnings == null)
           Text(
             ApiErrorMapper.from(state.earningsError!).message,
-            style: const TextStyle(color: MocoColors.danger, fontSize: 13),
+            style:  TextStyle(color: MocoColors.danger, fontSize: 13),
           )
         else if (state.earnings != null)
           _EarningsCard(earnings: state.earnings!),
@@ -396,7 +403,7 @@ class _AvailabilityCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   isOnline ? 'You are online' : 'You are offline',
-                  style: const TextStyle(
+                  style:  TextStyle(
                     color: MocoColors.textPrimary,
                     fontSize: 14.5,
                     fontWeight: FontWeight.w600,
@@ -415,7 +422,7 @@ class _AvailabilityCard extends StatelessWidget {
             const SizedBox(height: MocoSpacing.sm),
             Text(
               ApiErrorMapper.from(error!).message,
-              style: const TextStyle(color: MocoColors.danger, fontSize: 12.5),
+              style:  TextStyle(color: MocoColors.danger, fontSize: 12.5),
             ),
           ],
         ],
@@ -463,7 +470,7 @@ class _EarningsFigure extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 2),
-          Text(label, style: const TextStyle(color: MocoColors.textMuted, fontSize: 12)),
+          Text(label, style:  TextStyle(color: MocoColors.textMuted, fontSize: 12)),
         ],
       ),
     );
@@ -496,7 +503,7 @@ class _NavRow extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(
+              style:  TextStyle(
                 color: MocoColors.textPrimary,
                 fontSize: 14.5,
                 fontWeight: FontWeight.w600,
@@ -504,10 +511,10 @@ class _NavRow extends StatelessWidget {
             ),
           ),
           if (trailing != null) ...[
-            Text(trailing!, style: const TextStyle(color: MocoColors.textMuted, fontSize: 13)),
+            Text(trailing!, style:  TextStyle(color: MocoColors.textMuted, fontSize: 13)),
             const SizedBox(width: MocoSpacing.sm),
           ],
-          const Icon(Icons.chevron_right_rounded, color: MocoColors.textMuted),
+           Icon(Icons.chevron_right_rounded, color: MocoColors.textMuted),
         ],
       ),
     );

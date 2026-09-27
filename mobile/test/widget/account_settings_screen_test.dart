@@ -35,7 +35,7 @@ void main() {
     addTearDown(container.dispose);
     return UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(theme: MocoTheme.dark, home: const AccountSettingsScreen()),
+      child: MaterialApp(theme: MocoTheme.dark(), home: const AccountSettingsScreen()),
     );
   }
 

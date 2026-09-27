@@ -3,14 +3,21 @@ import 'package:moco/features/app_shell/app_shell.dart';
 
 void main() {
   group('AppShellTab', () {
-    test('exposes the five destinations in the designed order', () {
+    test('exposes the five destinations in the approved final order', () {
       expect(AppShellTab.values.map((t) => t.label).toList(), [
         'Discover',
-        'Feed',
-        'Chats',
         'Wallet',
+        'Feed',
+        'Chat',
         'Profile',
       ]);
+    });
+
+    test('Feed is the center tab and Chat sits beside Profile', () {
+      final values = AppShellTab.values;
+      expect(values[values.length ~/ 2], AppShellTab.feed);
+      expect(values[values.length - 2], AppShellTab.chats);
+      expect(values.last, AppShellTab.profile);
     });
 
     test('all tabs are real; none are placeholders', () {

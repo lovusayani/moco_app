@@ -228,7 +228,7 @@ class _FeedLoading extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        const ColoredBox(color: MocoColors.backgroundPrimary),
+         ColoredBox(color: MocoColors.backgroundPrimary),
         Positioned(
           left: MocoSpacing.screenPadding,
           right: MocoSpacing.screenPadding,

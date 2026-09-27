@@ -175,7 +175,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                   ),
                   child: Text(
                     ApiErrorMapper.from(state.sendError!).message,
-                    style: const TextStyle(color: MocoColors.danger, fontSize: 12.5),
+                    style:  TextStyle(color: MocoColors.danger, fontSize: 12.5),
                   ),
                 ),
             ],
@@ -243,7 +243,7 @@ class _ThreadHeader extends ConsumerWidget {
             horizontal: MocoSpacing.sm,
             vertical: MocoSpacing.sm,
           ),
-          decoration: const BoxDecoration(
+          decoration:  BoxDecoration(
             color: Color(0x22140A14),
             border: Border(bottom: BorderSide(color: MocoColors.borderSubtle)),
           ),
@@ -251,7 +251,7 @@ class _ThreadHeader extends ConsumerWidget {
             children: [
               IconButton(
                 key: const Key('chat_thread_back'),
-                icon: const Icon(Icons.arrow_back_rounded, color: MocoColors.textPrimary),
+                icon:  Icon(Icons.arrow_back_rounded, color: MocoColors.textPrimary),
                 onPressed: () => context.pop(),
               ),
               MocoAvatar(name: name, imageUrl: avatarUrl, size: 38),
@@ -261,7 +261,7 @@ class _ThreadHeader extends ConsumerWidget {
                   name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style:  TextStyle(
                     color: MocoColors.textPrimary,
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
@@ -270,19 +270,19 @@ class _ThreadHeader extends ConsumerWidget {
               ),
               IconButton(
                 key: const Key('chat_thread_call_audio'),
-                icon: const Icon(Icons.call_rounded, color: MocoColors.textPrimary),
+                icon:  Icon(Icons.call_rounded, color: MocoColors.textPrimary),
                 tooltip: 'Audio call',
                 onPressed: () => _call(context, ref, CallType.audio),
               ),
               IconButton(
                 key: const Key('chat_thread_call_video'),
-                icon: const Icon(Icons.videocam_rounded, color: MocoColors.textPrimary),
+                icon:  Icon(Icons.videocam_rounded, color: MocoColors.textPrimary),
                 tooltip: 'Video call',
                 onPressed: () => _call(context, ref, CallType.video),
               ),
               IconButton(
                 key: const Key('chat_thread_more'),
-                icon: const Icon(Icons.more_vert_rounded, color: MocoColors.textPrimary),
+                icon:  Icon(Icons.more_vert_rounded, color: MocoColors.textPrimary),
                 tooltip: 'Report or block',
                 onPressed: () => showSafetyActionsSheet(
                   context: context,
@@ -368,7 +368,7 @@ class _Body extends ConsumerWidget {
                   ),
                   child: Text(
                     formatDateSeparator(group.day),
-                    style: const TextStyle(color: MocoColors.textMuted, fontSize: 11.5),
+                    style:  TextStyle(color: MocoColors.textMuted, fontSize: 11.5),
                   ),
                 ),
               ),
@@ -515,7 +515,7 @@ class _MessageBubble extends ConsumerWidget {
             padding: const EdgeInsets.only(top: 2),
             child: Text(
               formatClockTime(message.createdAt),
-              style: const TextStyle(color: MocoColors.textMuted, fontSize: 10.5),
+              style:  TextStyle(color: MocoColors.textMuted, fontSize: 10.5),
             ),
           ),
         ],
@@ -540,7 +540,7 @@ class _ImageContent extends StatelessWidget {
               height: 200,
               color: MocoColors.surfaceGlassStrong,
               alignment: Alignment.center,
-              child: const Icon(Icons.broken_image_outlined, color: MocoColors.textMuted),
+              child:  Icon(Icons.broken_image_outlined, color: MocoColors.textMuted),
             )
           : CachedNetworkImage(
               imageUrl: url,
@@ -556,7 +556,7 @@ class _ImageContent extends StatelessWidget {
                 height: 220,
                 color: MocoColors.surfaceGlassStrong,
                 alignment: Alignment.center,
-                child: const Icon(Icons.broken_image_outlined, color: MocoColors.textMuted),
+                child:  Icon(Icons.broken_image_outlined, color: MocoColors.textMuted),
               ),
             ),
     );
@@ -605,7 +605,7 @@ class _Composer extends StatelessWidget {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.image_outlined, color: MocoColors.textSecondary),
+                :  Icon(Icons.image_outlined, color: MocoColors.textSecondary),
           ),
           Expanded(
             child: Container(
@@ -622,8 +622,8 @@ class _Composer extends StatelessWidget {
                 minLines: 1,
                 maxLines: 5,
                 textCapitalization: TextCapitalization.sentences,
-                style: const TextStyle(color: MocoColors.textPrimary, fontSize: 14.5),
-                decoration: const InputDecoration(
+                style:  TextStyle(color: MocoColors.textPrimary, fontSize: 14.5),
+                decoration:  InputDecoration(
                   hintText: 'Message',
                   hintStyle: TextStyle(color: MocoColors.textMuted),
                   border: InputBorder.none,

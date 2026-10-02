@@ -542,7 +542,12 @@ const VIEWS = [];
 const view = (id, label, group, render, countKey) => VIEWS.push({ id, label, group, render, countKey });
 const main = document.getElementById('main');
 
+// Sidebar order (and grouping) is fixed here, independent of the order views
+// are registered in below.
+const NAV_ORDER = ['overview', 'users', 'listeners', 'kyc', 'content', 'calls', 'wallet', 'payouts', 'reports', 'audit', 'system'];
+
 function renderNav() {
+  VIEWS.sort((a, b) => NAV_ORDER.indexOf(a.id) - NAV_ORDER.indexOf(b.id));
   let html = '';
   let group = null;
   for (const v of VIEWS) {
@@ -1067,7 +1072,7 @@ view('kyc', 'KYC', 'Operate', (el) => {
   });
 }, 'kyc');
 
-view('reports', 'Reports', 'Moderate', (el) => {
+view('reports', 'Reports', 'Safety', (el) => {
   el.innerHTML = head('Reports', 'Unresolved first by default. Every moderation action requires a note and is audit-logged.') + '<div id="t"></div>';
   dataTable(el.querySelector('#t'), {
     endpoint: '/admin/reports',
@@ -1093,40 +1098,6 @@ view('reports', 'Reports', 'Moderate', (el) => {
   });
 }, 'reports');
 
-view('payouts', 'Payouts', 'Money', (el) => {
-  el.innerHTML = head('Withdrawals', 'Approving queues the payout worker. No real money moves from this console.', '<button class="btn-ghost btn-sm" data-r>Refresh</button>') + '<div class="dt" id="p"></div>';
-  const load = async () => {
-    const box = el.querySelector('#p');
-    try {
-      const { pending } = await api('/admin/payouts');
-      box.innerHTML = `<div class="dt-scroll">${miniTable([
-        { label: '#', render: (p) => p.id },
-        { label: 'Creator', render: (p) => `${esc(p.display_name || '—')}<span class="sub mono">${esc(p.phone)}</span>` },
-        { label: 'Amount', num: true, render: (p) => rupees(p.amount) },
-        { label: 'Balance', num: true, render: (p) => rupees(p.earnings_balance) },
-        { label: 'UPI', render: (p) => `<span class="mono">${esc(p.upi_id || '—')}</span>` },
-        { label: 'Requested', render: (p) => when(p.created_at) },
-        { label: '', render: (p) => `<button class="btn-ok btn-sm" data-ap="${p.id}">Approve</button> <button class="btn-danger btn-sm" data-rj="${p.id}">Reject</button>` },
-      ], pending, 'No withdrawals waiting.')}</div>`;
-      const decide = (id, approve) => async () => {
-        const ok = await dialog({
-          title: approve ? `Approve payout #${id}?` : `Reject payout #${id}?`,
-          fields: [{ name: 'note', label: approve ? 'Note' : 'Reason (sent to the creator)', type: 'textarea', required: !approve }],
-          confirmLabel: approve ? 'Approve' : 'Reject',
-          danger: !approve,
-          onSubmit: (v) => api(`/admin/payouts/${id}`, { method: 'POST', body: { approve, note: v.note || undefined } }),
-        });
-        if (ok) { toast('Payout updated'); refreshCounts(); load(); }
-      };
-      box.querySelectorAll('[data-ap]').forEach((b) => b.addEventListener('click', decide(b.dataset.ap, true)));
-      box.querySelectorAll('[data-rj]').forEach((b) => b.addEventListener('click', decide(b.dataset.rj, false)));
-    } catch (err) {
-      box.innerHTML = empty('!', err.message);
-    }
-  };
-  el.querySelector('[data-r]').addEventListener('click', load);
-  load();
-}, 'payouts');
 
 view('audit', 'Audit log', 'System', (el) => {
   el.innerHTML = head('Audit log', 'Append-only — the database refuses updates and deletes. Every sensitive admin action lands here.') + '<div id="t"></div>';
@@ -1167,25 +1138,387 @@ view('audit', 'Audit log', 'System', (el) => {
   });
 });
 
-view('system', 'System / Reconcile', 'System', (el) => {
-  el.innerHTML = head('System & reconciliation', 'Every wallet balance must equal the sum of its ledger.', '<button class="btn-ghost btn-sm" data-r>Re-check</button>') +
-    '<div class="section-title">Wallet ↔ ledger reconciliation</div><div id="rec"><div class="empty">Checking…</div></div>';
-  const load = async () => {
-    const box = el.querySelector('#rec');
+
+/* ---------- Operations: shared openers ---------- */
+
+const LEDGER_REASONS = [['topup', 'Top-up'], ['call_debit', 'Call charge'], ['refund', 'Refund'], ['bonus', 'Bonus'], ['admin_adjustment', 'Admin adjustment']];
+const reasonBadge = (r) => badge(r, { topup: 'green', call_debit: 'grey', refund: 'blue', bonus: 'amber', admin_adjustment: 'rose', call_credit: 'green', payout: 'amber' }[r] || 'grey');
+
+function openWallet(userId) {
+  // The wallet view picks its target up from here when it renders.
+  window.__walletTarget = String(userId);
+  if (location.hash === '#/wallet') route();
+  else go('wallet');
+}
+
+function openCall(id) {
+  drawer.open(`Call #${id}`, async (body) => {
+    const c = await api(`/admin/calls/${id}`);
+    body.innerHTML = `
+      <div class="panel"><h3>Call (read-only)</h3>${kv([
+        ['Type / status', `${badge(c.type)} ${badge(c.status)}`],
+        ['Caller', `<a href="#" data-user="${c.caller_id}">${esc(c.caller_name || '—')} #${c.caller_id}</a> <span class="sub mono">${esc(c.caller_phone)}</span>`],
+        ['Listener', `<a href="#" data-listener="${c.listener_id}">${esc(c.listener_name || '—')} #${c.listener_id}</a> <span class="sub mono">${esc(c.listener_phone)}</span>`],
+        ['Created', esc(fmtDate(c.created_at))],
+        ['Started / ended', `${esc(fmtDate(c.started_at))} → ${esc(fmtDate(c.ended_at))}`],
+        ['Duration', duration(c.started_at, c.ended_at)],
+        ['End reason', esc(c.end_reason || '—')],
+        ['Rate (coins/min)', `${num(c.rate_per_minute)} · listener share ${num(c.listener_rate_per_minute)}`],
+        ['Free seconds granted', num(c.free_seconds_granted)],
+        ['Billed minutes', num(c.billed_minutes)],
+        ['Caller spent', coins(c.coins_spent)],
+        ['Listener earned', rupees(c.listener_earned)],
+      ])}</div>
+      <div class="panel"><h3>Billing ticks (${c.ticks.length})</h3>${miniTable([
+        { label: 'Minute', render: (t) => t.minute_index },
+        { label: 'Coins debited', num: true, render: (t) => coins(t.coins_debited) },
+        { label: 'Listener share', num: true, render: (t) => rupees(t.listener_share) },
+        { label: 'Platform share', num: true, render: (t) => num(t.platform_share) },
+        { label: 'When', render: (t) => esc(fmtDate(t.created_at)) },
+      ], c.ticks, 'No billed minutes (free trial or unanswered).')}</div>
+      <div class="panel"><h3>Reports from this call</h3>${miniTable([
+        { label: '#', render: (r) => `<a href="#" data-report="${r.id}">${r.id}</a>` },
+        { label: 'Reporter', render: (r) => esc(r.reporter_name || '—') },
+        { label: 'Reason', render: (r) => esc(r.reason) },
+        { label: 'Status', render: (r) => badge(r.status) },
+      ], c.reports, 'None.')}</div>`;
+    body.querySelectorAll('[data-user]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openUser(a.dataset.user); }));
+    body.querySelectorAll('[data-listener]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openListener(a.dataset.listener); }));
+    body.querySelectorAll('[data-report]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openReport(a.dataset.report); }));
+  });
+}
+
+function postPreview(p, big = false) {
+  if (!p.mediaUrl) return `<div class="ph" style="${big ? 'height:240px' : 'width:64px;height:64px'};border-radius:8px;display:grid;place-items:center;color:var(--text-faint);font-size:11px;border:1px solid var(--border)">no media</div>`;
+  if (p.media_type === 'video') {
+    return `<video src="${esc(p.mediaUrl)}" ${big ? 'controls style="max-width:100%;max-height:420px;border-radius:10px"' : 'muted preload="metadata" class="thumb" style="width:64px;height:64px"'}></video>`;
+  }
+  return `<img src="${esc(p.mediaUrl)}" alt="" ${big ? 'style="max-width:100%;max-height:420px;border-radius:10px;display:block"' : 'class="thumb" style="width:64px;height:64px"'} loading="lazy">`;
+}
+
+/* ---------- Content ---------- */
+
+view('content', 'Content / Posts', 'Activity', (el) => {
+  el.innerHTML = head('Content / Posts', 'Feed posts. Removing hides a post but keeps its media so it can be restored; posts their author deleted cannot be restored. Every action needs a reason and is audit-logged.') + '<div id="t"></div>';
+  const table = dataTable(el.querySelector('#t'), {
+    endpoint: '/admin/posts',
+    search: 'Caption, author, phone or #id…',
+    sort: 'created',
+    dateRange: true,
+    filters: [
+      { key: 'status', label: 'Status', options: [['active', 'Live'], ['removed', 'Removed']] },
+      { key: 'type', label: 'Type', options: [['image', 'Image'], ['video', 'Video']] },
+    ],
+    columns: [
+      { label: 'Preview', render: (p) => postPreview(p) },
+      { label: '#', render: (p) => p.id },
+      { label: 'Author', sort: 'author', render: (p) => `<a href="#" data-author="${p.author_id}">${esc(p.author_name || '—')}</a> ${p.author_status !== 'active' ? badge(p.author_status) : ''}<span class="sub mono">${esc(p.author_phone)}</span>` },
+      { label: 'Type', render: (p) => badge(p.media_type) },
+      { label: 'Caption', render: (p) => `<span style="display:inline-block;max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.caption || '—')}</span>` },
+      { label: 'Author reports', sort: 'reports', num: true, render: (p) => num(p.author_reports) },
+      { label: 'Status', render: (p) => (p.status === 'removed' ? `${badge('removed')}<span class="sub">${p.removed_by_admin ? 'by admin' : 'by author'}</span>` : badge('active')) },
+      { label: 'Posted', sort: 'created', render: (p) => when(p.created_at) },
+    ],
+    onRow: (p) => openPost(p, () => table.reload()),
+    afterLoad: (rows, tbody) => {
+      tbody.querySelectorAll('[data-author]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openUser(a.dataset.author); }));
+    },
+  });
+});
+
+function openPost(p, onChange) {
+  drawer.open(`Post #${p.id}`, async (body) => {
+    body.innerHTML = `
+      <div class="drawer-actions">
+        ${p.status === 'active' ? '<button class="btn-danger btn-sm" data-act="remove">Remove post</button>' : ''}
+        ${p.restorable ? '<button class="btn-ok btn-sm" data-act="restore">Restore post</button>' : ''}
+        <button class="btn-ghost btn-sm" data-act="author">Open author</button>
+      </div>
+      <div class="panel">${postPreview(p, true)}</div>
+      <div class="panel"><h3>Post</h3>${kv([
+        ['Status', badge(p.status)],
+        ['Type', badge(p.media_type)],
+        ['Caption', esc(p.caption || '—')],
+        ['Author', `${esc(p.author_name || '—')} #${p.author_id} <span class="sub mono">${esc(p.author_phone)}</span>`],
+        ['Reports against author', num(p.author_reports)],
+        ['Posted', esc(fmtDate(p.created_at))],
+        p.status === 'removed' ? ['Removed', p.removed_by_admin ? `${esc(fmtDate(p.removed_at))} by <span class="mono">${esc(p.removed_by_phone || '—')}</span>` : 'deleted by the author'] : null,
+        p.removal_reason ? ['Removal reason', esc(p.removal_reason)] : null,
+      ])}</div>`;
+    const act = (action) => async () => {
+      const done = await dialog({
+        title: action === 'remove' ? `Remove post #${p.id}?` : `Restore post #${p.id}?`,
+        message: action === 'remove' ? 'It disappears from the feed immediately. Its media is kept so it can be restored.' : 'It returns to the feed.',
+        fields: [{ name: 'reason', label: 'Reason', type: 'textarea', required: true }],
+        confirmLabel: action === 'remove' ? 'Remove' : 'Restore',
+        danger: action === 'remove',
+        onSubmit: (v) => api(`/admin/posts/${p.id}`, { method: 'POST', body: { action, reason: v.reason } }),
+      });
+      if (done) { toast(action === 'remove' ? 'Post removed' : 'Post restored'); drawer.close(); onChange?.(); }
+    };
+    body.querySelector('[data-act=remove]')?.addEventListener('click', act('remove'));
+    body.querySelector('[data-act=restore]')?.addEventListener('click', act('restore'));
+    body.querySelector('[data-act=author]').addEventListener('click', () => openUser(p.author_id));
+  });
+}
+
+/* ---------- Calls ---------- */
+
+view('calls', 'Calls', 'Activity', (el) => {
+  el.innerHTML = head('Calls', 'Read-only call and billing history. Nothing here edits historical billing.') + '<div id="t"></div>';
+  dataTable(el.querySelector('#t'), {
+    endpoint: '/admin/calls',
+    search: 'Caller/listener name, phone or call #…',
+    sort: 'created',
+    dateRange: true,
+    filters: [
+      { key: 'type', label: 'Type', options: [['audio', 'Audio'], ['video', 'Video']] },
+      { key: 'status', label: 'Status', options: [['ended', 'Ended'], ['active', 'Live'], ['ringing', 'Ringing'], ['failed', 'Failed']] },
+      { key: 'endReason', label: 'End reason', options: async () => (await api('/admin/calls/meta')).endReasons.map((r) => [r, r]) },
+    ],
+    columns: [
+      { label: '#', render: (c) => c.id },
+      { label: 'Caller', render: (c) => `${esc(c.caller_name || '—')}<span class="sub mono">${esc(c.caller_phone)}</span>` },
+      { label: 'Listener', render: (c) => `${esc(c.listener_name || '—')}<span class="sub mono">${esc(c.listener_phone)}</span>` },
+      { label: 'Type', render: (c) => badge(c.type) },
+      { label: 'Started', sort: 'created', render: (c) => `<span title="${esc(fmtDate(c.started_at || c.created_at))}">${esc(fmtDate(c.started_at || c.created_at))}</span>` },
+      { label: 'Duration', sort: 'duration', num: true, render: (c) => duration(c.started_at, c.ended_at) },
+      { label: 'Billed min', sort: 'minutes', num: true, render: (c) => num(c.billed_minutes) },
+      { label: 'Caller spent', sort: 'coins', num: true, render: (c) => coins(c.coins_spent) },
+      { label: 'Listener earned', sort: 'earned', num: true, render: (c) => rupees(c.listener_earned) },
+      { label: 'End reason', render: (c) => esc(c.end_reason || '—') },
+      { label: 'Status', render: (c) => badge(c.status === 'active' ? 'live' : c.status) },
+    ],
+    onRow: (c) => openCall(c.id),
+  });
+});
+
+/* ---------- Wallet / Ledger ---------- */
+
+view('wallet', 'Wallet / Ledger', 'Money', (el) => {
+  el.innerHTML = head('Wallet / Ledger', 'Look up a user’s coin wallet and complete ledger. Adjustments append a new ledger row (never edit old ones) and are audit-logged.') + `
+    <div class="panel" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
+      <div style="flex:1;min-width:240px"><label for="wq">Find user</label><input id="wq" type="search" placeholder="Name, phone or #id…"></div>
+      <div id="wmatches" style="flex-basis:100%"></div>
+    </div>
+    <div id="wbody">${empty('₹', 'Search for a user to see their wallet.')}</div>`;
+
+  const matches = el.querySelector('#wmatches');
+  let t;
+  el.querySelector('#wq').addEventListener('input', (e) => {
+    clearTimeout(t);
+    const q = e.target.value.trim();
+    t = setTimeout(async () => {
+      if (!q) { matches.innerHTML = ''; return; }
+      const res = await api(`/admin/users${qs({ q, pageSize: 8 })}`);
+      matches.innerHTML = res.items.length
+        ? res.items.map((u) => `<button class="btn-ghost btn-sm" data-pick="${u.id}" style="margin:2px">${esc(u.name || '—')} · <span class="mono">${esc(u.phone)}</span> · #${u.id}</button>`).join('')
+        : '<span class="sub">No matching users.</span>';
+      matches.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => load(b.dataset.pick)));
+    }, 300);
+  });
+
+  async function load(userId) {
+    matches.innerHTML = '';
+    const box = el.querySelector('#wbody');
+    box.innerHTML = '<div class="empty">Loading…</div>';
     try {
-      const r = await api('/admin/reconcile');
-      box.innerHTML = r.balanced
-        ? `<div class="panel">${badge('ok')} Every wallet matches its ledger.</div>`
-        : `<div class="panel">${badge('mismatch', 'red')} ${r.discrepancies.length} wallet(s) disagree with their ledger.</div>${miniTable([
-            { label: 'User', render: (d) => `<a href="#" data-user="${d.user_id}">#${d.user_id}</a>` },
-            { label: 'Wallet', num: true, render: (d) => coins(d.coin_balance) },
-            { label: 'Ledger sum', num: true, render: (d) => coins(d.ledger_total) },
-          ], r.discrepancies)}`;
-      box.querySelectorAll('[data-user]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openUser(a.dataset.user); }));
+      const w = await api(`/admin/wallet/${userId}`);
+      box.innerHTML = `
+        <div class="stat-grid">
+          <div class="stat"><div class="stat-label">User</div><div class="stat-value" style="font-size:16px"><a href="#" data-user="${w.user.id}">${esc(w.user.name || '—')} #${w.user.id}</a></div><span class="sub mono">${esc(w.user.phone)}</span></div>
+          <div class="stat"><div class="stat-label">Coin balance</div><div class="stat-value money">${num(w.coinBalance)}</div></div>
+          <div class="stat ${w.balanced ? '' : 'attn'}"><div class="stat-label">Ledger check</div><div class="stat-value" style="font-size:15px">${w.balanced ? badge('balanced', 'green') : badge(`mismatch (${num(w.ledgerTotal)})`, 'red')}</div></div>
+          ${w.byReason.map((r) => `<div class="stat"><div class="stat-label">${esc(r.reason.replace(/_/g, ' '))} (${r.entries})</div><div class="stat-value" style="font-size:17px">${signed(r.total)}</div></div>`).join('')}
+          ${w.listener ? `<div class="stat"><div class="stat-label">Listener earnings</div><div class="stat-value money" style="font-size:17px">₹${num(w.listener.earningsBalance)}</div><span class="sub">lifetime ₹${num(w.listener.lifetimeEarnings)}</span></div>` : ''}
+        </div>
+        <div class="view-head" style="margin-top:18px"><div class="section-title" style="margin:0">Coin ledger</div>
+          <div class="view-actions">${w.user.status !== 'deleted' ? '<button class="btn-primary inline" data-adjust>Adjust balance</button>' : ''}</div></div>
+        <div id="lt"></div>
+        ${w.listener ? '<div class="section-title">Listener earnings ledger</div><div id="et"></div>' : ''}`;
+      box.querySelector('[data-user]').addEventListener('click', (e) => { e.preventDefault(); openUser(w.user.id); });
+      const ledger = dataTable(box.querySelector('#lt'), {
+        endpoint: `/admin/ledger/${userId}`,
+        search: 'Reference or entry #…',
+        sort: 'created',
+        dateRange: true,
+        pageSize: 10,
+        filters: [{ key: 'reason', label: 'Type', options: LEDGER_REASONS }],
+        columns: [
+          { label: '#', render: (r) => r.id },
+          { label: 'When', sort: 'created', render: (r) => esc(fmtDate(r.created_at)) },
+          { label: 'Type', render: (r) => reasonBadge(r.reason) },
+          { label: 'Change', sort: 'delta', num: true, render: (r) => signed(r.delta) },
+          { label: 'Balance after', num: true, render: (r) => coins(r.balance_after) },
+          { label: 'Reference', render: (r) => refLink(r.reason, r.ref_id) },
+        ],
+        afterLoad: (rows, tbody) => wireRefs(tbody),
+      });
+      if (w.listener) {
+        dataTable(box.querySelector('#et'), {
+          endpoint: `/admin/earnings/${userId}`,
+          search: false,
+          sort: 'created',
+          dateRange: true,
+          pageSize: 10,
+          filters: [{ key: 'reason', label: 'Type', options: [['call_credit', 'Call credit'], ['payout', 'Payout']] }],
+          columns: [
+            { label: '#', render: (r) => r.id },
+            { label: 'When', sort: 'created', render: (r) => esc(fmtDate(r.created_at)) },
+            { label: 'Type', render: (r) => reasonBadge(r.reason) },
+            { label: 'Change', sort: 'delta', num: true, render: (r) => signed(r.delta) },
+            { label: 'Balance after', num: true, render: (r) => rupees(r.balance_after) },
+            { label: 'Reference', render: (r) => refLink(r.reason, r.ref_id) },
+          ],
+          afterLoad: (rows, tbody) => wireRefs(tbody),
+        });
+      }
+      box.querySelector('[data-adjust]')?.addEventListener('click', async () => {
+        const res = await dialog({
+          title: `Adjust ${w.user.name || 'user'}'s coins`,
+          message: `Current balance: <b>${num(w.coinBalance)}</b> coins. Use a negative number to deduct. This appends a new ledger entry and is audit-logged; it never edits existing entries.`,
+          fields: [
+            { name: 'amount', label: 'Amount (coins, + or −)', type: 'number', required: true, placeholder: 'e.g. 50 or -20' },
+            { name: 'reason', label: 'Reason (min 5 characters)', type: 'textarea', required: true },
+          ],
+          confirmLabel: 'Apply adjustment',
+          onSubmit: (v) => {
+            const amount = Number(v.amount);
+            if (!Number.isInteger(amount) || amount === 0) throw new Error('Enter a whole, non-zero number of coins.');
+            return api(`/admin/wallet/${userId}/adjust`, { method: 'POST', body: { amount, reason: v.reason } });
+          },
+        });
+        if (res) { toast(`Adjusted: new balance ${num(res.balanceAfter)}`); load(userId); }
+      });
+      void ledger;
     } catch (err) {
       box.innerHTML = empty('!', err.message);
     }
-  };
+  }
+
+  if (window.__walletTarget) { const id = window.__walletTarget; window.__walletTarget = null; load(id); }
+});
+
+function refLink(reason, ref) {
+  if (!ref) return '—';
+  if (reason === 'call_debit' || reason === 'call_credit' || reason === 'refund') {
+    const id = String(ref).replace(/\D/g, '');
+    return id ? `<a href="#" data-call="${id}" class="mono">call #${id}</a>` : `<span class="mono">${esc(ref)}</span>`;
+  }
+  if (reason === 'admin_adjustment') return `<span class="mono">${esc(ref)}</span> ${badge('audited', 'rose')}`;
+  if (reason === 'payout') return `<span class="mono">payout #${esc(ref)}</span>`;
+  return `<span class="mono">${esc(ref)}</span>`;
+}
+function wireRefs(root) {
+  root.querySelectorAll('[data-call]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openCall(a.dataset.call); }));
+}
+
+/* ---------- Payouts ---------- */
+
+view('payouts', 'Payouts', 'Money', (el) => {
+  el.innerHTML = head('Payouts', 'No payout provider is integrated: "paid" means approved and debited from earnings by the worker — no money is transferred by Moco. After paying outside Moco, record the transfer reference.') + '<div id="t"></div>';
+  const table = dataTable(el.querySelector('#t'), {
+    endpoint: '/admin/payouts',
+    search: 'Creator, phone, UPI or reference…',
+    initial: { status: 'requested' },
+    dateRange: true,
+    filters: [{ key: 'status', label: 'Status', options: [['requested', 'Pending'], ['approved', 'Approved'], ['paid', 'Paid (recorded)'], ['rejected', 'Rejected'], ['all', 'Everything']] }],
+    columns: [
+      { label: '#', render: (p) => p.id },
+      { label: 'Creator', render: (p) => `<a href="#" data-l="${p.listener_id}">${esc(p.display_name || '—')}</a><span class="sub mono">${esc(p.phone)}</span>` },
+      { label: 'Amount', sort: 'amount', num: true, render: (p) => rupees(p.amount) },
+      { label: 'Earnings bal.', num: true, render: (p) => rupees(p.earnings_balance) },
+      { label: 'UPI', render: (p) => `<span class="mono">${esc(p.upi_id || '—')}</span>` },
+      { label: 'Requested', sort: 'created', render: (p) => when(p.created_at) },
+      { label: 'Status', render: (p) => `${badge(p.status)}${p.status === 'paid' ? '<span class="sub">recorded · not transferred by Moco</span>' : ''}` },
+      { label: 'Reviewed', render: (p) => (p.reviewed_at ? `${when(p.reviewed_at)}<span class="sub mono">${esc(p.reviewed_by_phone || '')}</span>` : '—') },
+      { label: 'Reference / note', sort: 'processed', render: (p) => `${p.upi_ref ? `<span class="mono">${esc(p.upi_ref)}</span>` : '—'}${p.note ? `<span class="sub">${esc(p.note)}</span>` : ''}` },
+      { label: '', render: (p) => (p.status === 'requested'
+        ? `<button class="btn-ok btn-sm" data-ap="${p.id}">Approve</button> <button class="btn-danger btn-sm" data-rj="${p.id}">Reject</button>`
+        : p.status === 'paid' && !p.upi_ref ? `<button class="btn-ghost btn-sm" data-ref="${p.id}">Record reference</button>` : '') },
+    ],
+    afterLoad: (rows, tbody) => {
+      const decide = (id, approve) => async () => {
+        const ok = await dialog({
+          title: approve ? `Approve payout #${id}?` : `Reject payout #${id}?`,
+          message: approve ? 'The worker will debit the creator’s earnings and mark it paid. It does NOT send money — pay outside Moco and record the reference.' : 'The creator is notified with your reason.',
+          fields: [{ name: 'note', label: approve ? 'Note' : 'Reason (sent to the creator)', type: 'textarea', required: !approve }],
+          confirmLabel: approve ? 'Approve' : 'Reject',
+          danger: !approve,
+          onSubmit: (v) => api(`/admin/payouts/${id}`, { method: 'POST', body: { approve, note: v.note || undefined } }),
+        });
+        if (ok) { toast('Payout updated'); refreshCounts(); table.reload(); }
+      };
+      tbody.querySelectorAll('[data-ap]').forEach((b) => b.addEventListener('click', decide(b.dataset.ap, true)));
+      tbody.querySelectorAll('[data-rj]').forEach((b) => b.addEventListener('click', decide(b.dataset.rj, false)));
+      tbody.querySelectorAll('[data-ref]').forEach((b) => b.addEventListener('click', async () => {
+        const ok = await dialog({
+          title: `Record transfer reference for payout #${b.dataset.ref}`,
+          message: 'Documents a transfer you made outside Moco (e.g. a UPI transaction id). It does not move money.',
+          fields: [{ name: 'upiRef', label: 'Transfer reference', required: true }, { name: 'note', label: 'Note', type: 'textarea' }],
+          confirmLabel: 'Save reference',
+          onSubmit: (v) => api(`/admin/payouts/${b.dataset.ref}/reference`, { method: 'POST', body: { upiRef: v.upiRef, note: v.note || undefined } }),
+        });
+        if (ok) { toast('Reference recorded'); table.reload(); }
+      }));
+      tbody.querySelectorAll('[data-l]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openListener(a.dataset.l); }));
+    },
+  });
+}, 'payouts');
+
+/* ---------- System ---------- */
+
+view('system', 'System / Reconcile', 'System', (el) => {
+  el.innerHTML = head('System', 'Live dependency health and money reconciliation. No hosts, keys or credentials are ever shown.', '<button class="btn-ghost btn-sm" data-r>Re-check</button>') +
+    '<div class="section-title">Health</div><div class="health-grid" id="hl"><div class="empty">Checking…</div></div>' +
+    '<div class="section-title">Queues</div><div id="qs"></div>' +
+    '<div class="section-title">Coin wallets ↔ coin ledger</div><div id="rec"></div>' +
+    '<div class="section-title">Listener earnings ↔ earnings ledger</div><div id="rec2"></div>';
+
+  const card = (title, ok, detail) => `<div class="health"><div class="h-title">${esc(title)} ${badge(ok ? 'ok' : 'down')}</div><div class="h-detail">${detail}</div></div>`;
+
+  async function load() {
+    try {
+      const h = await api('/admin/system/health');
+      const db = h.database;
+      el.querySelector('#hl').innerHTML = [
+        card('API', h.api.ok, `up ${Math.floor(h.api.uptimeSeconds / 60)} min · ${esc(h.api.node)} · ${esc(h.api.env)}`),
+        card('Database', db.ok, db.ok ? `${db.latencyMs} ms · migrations ${db.migrations.applied}/${db.migrations.files}${db.migrations.pending.length ? ` · ${badge('pending: ' + db.migrations.pending.join(', '), 'amber')}` : ''} · pool ${db.pool.total} (${db.pool.idle} idle)` : esc(db.error)),
+        card('Redis', h.redis.ok, h.redis.ok ? `${h.redis.latencyMs} ms` : esc(h.redis.error)),
+        card('Storage', h.storage.ok, h.storage.ok ? `${h.storage.latencyMs} ms · ${h.storage.buckets.map((b) => `${esc(b.name)} ${b.private ? badge('private', 'green') : badge('PUBLIC', 'red')}`).join(' ')}` : esc(h.storage.error || 'not configured')),
+        card('Tick worker (billing)', h.tickWorker.ok, h.tickWorker.ok ? `last heartbeat ${h.tickWorker.ageSeconds}s ago` : esc(h.tickWorker.error)),
+      ].join('');
+      el.querySelector('#qs').innerHTML = h.queues.ok
+        ? `<div class="panel">${miniTable([
+            { label: 'Queue', render: (r) => esc(r.name) },
+            { label: 'Waiting', num: true, render: (r) => num(r.waiting) },
+            { label: 'Active', num: true, render: (r) => num(r.active) },
+            { label: 'Delayed', num: true, render: (r) => num(r.delayed) },
+            { label: 'Failed', num: true, render: (r) => (r.failed ? `<span class="neg">${num(r.failed)}</span>` : '0') },
+          ], ['tick', 'payout', 'notification'].map((n) => ({ name: n, ...h.queues[n] })))}</div>`
+        : `<div class="panel">${badge('down')} ${esc(h.queues.error)}</div>`;
+    } catch (err) {
+      el.querySelector('#hl').innerHTML = empty('!', err.message);
+    }
+    const rec = async (sel, path, label) => {
+      const box = el.querySelector(sel);
+      try {
+        const r = await api(path);
+        box.innerHTML = r.balanced
+          ? `<div class="panel">${badge('ok')} Every ${label} matches its ledger.</div>`
+          : `<div class="panel">${badge('mismatch', 'red')} ${r.discrepancies.length} ${label}(s) disagree with their ledger.${miniTable([
+              { label: 'User', render: (d) => `<a href="#" data-user="${d.user_id}">#${d.user_id}</a>` },
+              { label: 'Balance', num: true, render: (d) => num(d.coin_balance ?? d.earnings_balance) },
+              { label: 'Ledger sum', num: true, render: (d) => num(d.ledger_total) },
+            ], r.discrepancies)}</div>`;
+        box.querySelectorAll('[data-user]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openUser(a.dataset.user); }));
+      } catch (err) {
+        box.innerHTML = empty('!', err.message);
+      }
+    };
+    rec('#rec', '/admin/reconcile', 'wallet');
+    rec('#rec2', '/admin/reconcile/earnings', 'earnings balance');
+  }
   el.querySelector('[data-r]').addEventListener('click', load);
   load();
 });

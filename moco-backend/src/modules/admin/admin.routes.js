@@ -1,16 +1,10 @@
 'use strict';
 
 const express = require('express');
-const { z } = require('zod');
-const { query, withTransaction } = require('../../config/db');
-const { payoutQueue } = require('../../workers/queues');
-const notifications = require('../notifications/notifications.service');
-const { validate } = require('../../middleware/validate');
+const { query } = require('../../config/db');
 const { asyncHandler } = require('../../middleware/error');
 const { authenticate, requireAdmin } = require('../../middleware/auth');
-const { badRequest } = require('../../utils/errors');
-const { PAYOUT_STATUS, listenerEligibleSql } = require('../../utils/constants');
-const audit = require('./audit.service');
+const { listenerEligibleSql } = require('../../utils/constants');
 
 /**
  * /api/admin — every route below, including every mounted module, sits
@@ -27,75 +21,7 @@ router.get('/me', (req, res) => {
 router.use(require('./users.admin'));
 router.use(require('./listeners.admin'));
 router.use(require('./reports.admin'));
-
-/** Payout queue and approval. Approval enqueues the worker that actually pays. */
-router.get(
-  '/payouts',
-  asyncHandler(async (req, res) => {
-    const { rows } = await query(
-      `SELECT p.id, p.listener_id, p.amount, p.status, p.created_at,
-              u.display_name, u.phone, lp.upi_id, lp.earnings_balance
-         FROM payouts p
-         JOIN users u ON u.id = p.listener_id
-         JOIN listener_profiles lp ON lp.user_id = p.listener_id
-        WHERE p.status = $1
-        ORDER BY p.created_at ASC LIMIT 100`,
-      [PAYOUT_STATUS.REQUESTED],
-    );
-    res.json({ pending: rows });
-  }),
-);
-
-router.post(
-  '/payouts/:id',
-  validate(z.object({ id: z.coerce.number().int().positive() }), 'params'),
-  validate(z.object({ approve: z.boolean(), note: z.string().max(500).optional() })),
-  asyncHandler(async (req, res) => {
-    const payout = await withTransaction(async (client) => {
-      const { rows } = await client.query(
-        `UPDATE payouts SET status = $2, note = $3
-          WHERE id = $1 AND status = $4
-          RETURNING *`,
-        [
-          req.params.id,
-          req.body.approve ? PAYOUT_STATUS.APPROVED : PAYOUT_STATUS.REJECTED,
-          req.body.note ?? null,
-          PAYOUT_STATUS.REQUESTED,
-        ],
-      );
-
-      if (rows.length === 0) {
-        throw badRequest('not_pending', 'This payout is not awaiting approval');
-      }
-      await audit.record(client, {
-        admin: req.user,
-        action: req.body.approve ? 'payout.approve' : 'payout.reject',
-        targetType: 'payout',
-        targetId: rows[0].id,
-        reason: req.body.note,
-        metadata: { listenerId: rows[0].listener_id, amount: Number(rows[0].amount) },
-      });
-      return rows[0];
-    });
-
-    // The worker does the debit; approving only authorises it.
-    if (req.body.approve) {
-      await payoutQueue.add('payout', { payoutId: payout.id }, { jobId: `payout-${payout.id}` });
-    }
-
-    await notifications.create({
-      userId: payout.listener_id,
-      type: req.body.approve ? 'payout_approved' : 'payout_rejected',
-      title: req.body.approve ? 'Withdrawal approved' : 'Withdrawal rejected',
-      body: req.body.approve
-        ? `Your withdrawal of ₹${payout.amount} is on its way.`
-        : req.body.note || `Your withdrawal of ₹${payout.amount} was rejected.`,
-      data: { payoutId: payout.id },
-    });
-
-    res.json({ payoutId: payout.id, status: payout.status });
-  }),
-);
+router.use(require('./operations.admin'));
 
 /** Platform metrics for the admin dashboard. */
 router.get(

@@ -68,6 +68,9 @@ const REDIS = Object.freeze({
   /** Live call state outlives the call itself just long enough to settle it. */
   callStateTtlSeconds: 6 * 60 * 60,
   presenceTtlSeconds: 90,
+  /** Worker liveness for the admin health page (refreshed every 15s). */
+  workerHeartbeatKey: (name) => `worker:${name}:heartbeat`,
+  workerHeartbeatTtlSeconds: 45,
 });
 
 // BullMQ rejects ':' in queue names (it uses ':' as its own key separator).
@@ -100,6 +103,7 @@ const LEDGER_REASON = Object.freeze({
   CALL_DEBIT: 'call_debit',
   REFUND: 'refund',
   BONUS: 'bonus',
+  ADMIN_ADJUSTMENT: 'admin_adjustment',
 });
 const EARNING_REASON = Object.freeze({ CALL_CREDIT: 'call_credit', PAYOUT: 'payout' });
 const KYC_STATUS = Object.freeze({

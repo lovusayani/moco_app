@@ -94,6 +94,11 @@ async function createViewUrl(path, options) {
   });
 }
 
+/** Batch signing for admin lists — one Storage request per page. */
+async function createViewUrls(paths) {
+  return storage.createViewUrls(FEED_MEDIA.bucket, paths, { expiresInSeconds: FEED_MEDIA.viewUrlSeconds });
+}
+
 /**
  * Best-effort removal of a deleted post's object. Called after the row is
  * already soft-deleted, so a storage failure here leaves an orphaned object
@@ -113,6 +118,7 @@ module.exports = {
   isConfigured,
   createUploadUrl,
   createViewUrl,
+  createViewUrls,
   statObject,
   remove,
   pathBelongsToUser,

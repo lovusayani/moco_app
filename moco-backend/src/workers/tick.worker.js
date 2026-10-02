@@ -8,6 +8,7 @@ const { scheduleTick } = require('./queues');
 const logger = require('../utils/logger');
 const {
   BULL_QUEUES,
+  REDIS,
   TICK_INTERVAL_SECONDS,
   CALL_END_REASON,
   coinsPerMinute,
@@ -130,9 +131,21 @@ function start() {
     billing.sweepStaleCalls().catch((err) => logger.error({ err }, 'sweep failed'));
   }, TICK_INTERVAL_SECONDS * 1000);
 
+  // Liveness signal for the admin system-health page: a short-TTL key that
+  // only exists while this process is running. A stale or missing key means
+  // calls are not being billed.
+  const beat = () =>
+    connection
+      .set(REDIS.workerHeartbeatKey('tick'), String(Date.now()), 'EX', REDIS.workerHeartbeatTtlSeconds)
+      .catch((err) => logger.warn({ err }, 'tick heartbeat failed'));
+  beat();
+  const heartbeat = setInterval(beat, 15_000);
+
   const shutdown = async () => {
     logger.info('tick worker shutting down');
     clearInterval(sweeper);
+    clearInterval(heartbeat);
+    await connection.del(REDIS.workerHeartbeatKey('tick')).catch(() => {});
     // Let in-flight ticks finish so no minute is billed without its chain.
     await worker.close();
     process.exit(0);

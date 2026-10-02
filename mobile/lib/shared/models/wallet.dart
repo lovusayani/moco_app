@@ -65,6 +65,7 @@ class LedgerEntry {
     'call_debit' => 'Call',
     'refund' => 'Refund',
     'bonus' => 'Bonus',
+    'admin_adjustment' => 'Balance adjustment',
     _ => reason,
   };
 }

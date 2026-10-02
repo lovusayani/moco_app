@@ -1246,6 +1246,81 @@ async function adminSmoke({ callerToken, reportedListenerId }) {
     rewriteRefused = true;
   }
   check('the audit log refuses UPDATE at the database level', rewriteRefused);
+
+  const OPS_ROUTES = ['/admin/posts', '/admin/calls', `/admin/wallet/${admin.user.id}`, `/admin/ledger/${admin.user.id}`,
+    '/admin/payouts', '/admin/system/health'];
+  const opsDenied = await Promise.all(OPS_ROUTES.map((p) => call('GET', p, { token: callerToken })));
+  check('every operations route rejects a non-admin (403)', opsDenied.every((r) => r.status === 403),
+    opsDenied.map((r, i) => `${OPS_ROUTES[i]}:${r.status}`));
+
+  console.log('== Admin: content ==');
+  const posts = await call('GET', '/admin/posts?status=active&pageSize=5', { token: A });
+  check('content list returns posts with signed previews',
+    posts.status === 200 && posts.body.items.every((p) => p.status === 'active' && ('mediaUrl' in p)), posts.body.total);
+  const post = posts.body.items?.[0];
+  if (post) {
+    const noReason = await call('POST', `/admin/posts/${post.id}`, { token: A, body: { action: 'remove' } });
+    check('removing a post without a reason is refused', noReason.status === 400, noReason.body);
+    const removed = await call('POST', `/admin/posts/${post.id}`, { token: A, body: { action: 'remove', reason: 'smoke moderation' } });
+    const feedAfter = await call('GET', '/feed?limit=50', { token: callerToken });
+    check('a removed post disappears from the public feed',
+      removed.body.status === 'removed' && !(feedAfter.body.posts || feedAfter.body.items || []).some((p) => p.id === post.id), removed.body);
+    const restored = await call('POST', `/admin/posts/${post.id}`, { token: A, body: { action: 'restore', reason: 'smoke restore' } });
+    check('an admin-removed post can be restored', restored.body.status === 'active', restored.body);
+  } else console.log('  (no live posts to moderate — skipped remove/restore)');
+
+  console.log('== Admin: calls ==');
+  const calls = await call('GET', '/admin/calls?sort=coins&dir=desc&pageSize=5', { token: A });
+  check('calls list is sorted by caller spend',
+    calls.status === 200 && calls.body.items.every((c, i, a) => i === 0 || Number(a[i - 1].coins_spent) >= Number(c.coins_spent)), calls.body.items?.map((c) => c.coins_spent));
+  if (calls.body.items?.[0]) {
+    const cd = await call('GET', `/admin/calls/${calls.body.items[0].id}`, { token: A });
+    check('call detail includes its billing ticks and hides the media channel',
+      cd.status === 200 && Array.isArray(cd.body.ticks) && !('agora_channel' in cd.body), Object.keys(cd.body));
+  }
+  const audioCalls = await call('GET', '/admin/calls?type=audio&pageSize=10', { token: A });
+  check('calls filter by type', audioCalls.body.items?.every((c) => c.type === 'audio'), audioCalls.body.total);
+
+  console.log('== Admin: wallet / ledger ==');
+  const target = created.body.id;
+  const before = await call('GET', `/admin/wallet/${target}`, { token: A });
+  const credit = await call('POST', `/admin/wallet/${target}/adjust`, { token: A, body: { amount: 25, reason: 'smoke goodwill credit' } });
+  const overdraft = await call('POST', `/admin/wallet/${target}/adjust`, { token: A, body: { amount: -1000, reason: 'smoke overdraft attempt' } });
+  const debit = await call('POST', `/admin/wallet/${target}/adjust`, { token: A, body: { amount: -10, reason: 'smoke correction' } });
+  check('admin can credit and debit coins; an overdraft is refused',
+    credit.status === 201 && credit.body.balanceAfter === before.body.coinBalance + 25 &&
+      overdraft.status === 402 && debit.status === 201 && debit.body.balanceAfter === before.body.coinBalance + 15,
+    { credit: credit.body, overdraft: overdraft.body, debit: debit.body });
+  const noReasonAdj = await call('POST', `/admin/wallet/${target}/adjust`, { token: A, body: { amount: 5 } });
+  check('an adjustment without a reason is refused', noReasonAdj.status === 400, noReasonAdj.body);
+  const ledger = await call('GET', `/admin/ledger/${target}?reason=admin_adjustment`, { token: A });
+  check('adjustments are new append-only ledger rows tied to their audit entry',
+    ledger.body.items?.length === 2 && ledger.body.items.every((l) => /^admin_adj:\d+$/.test(l.ref_id)), ledger.body.items);
+  const auditForAdj = await pool.query("SELECT count(*)::int AS n FROM admin_audit_log WHERE action = 'wallet.adjust' AND target_id = $1", [String(target)]);
+  check('each successful adjustment is audit-logged (the refused one is not)', auditForAdj.rows[0].n === 2, auditForAdj.rows[0]);
+  const after = await call('GET', `/admin/wallet/${target}`, { token: A });
+  check('the wallet still reconciles with its ledger after adjustments', after.body.balanced === true && after.body.coinBalance === before.body.coinBalance + 15, after.body);
+
+  console.log('== Admin: payouts ==');
+  const payouts = await call('GET', '/admin/payouts?status=all&pageSize=10', { token: A });
+  check('payouts list (all statuses) returns a page envelope', payouts.status === 200 && Array.isArray(payouts.body.items), payouts.body.total);
+  const refOnMissing = await call('POST', '/admin/payouts/999999999/reference', { token: A, body: { upiRef: 'UTR123456' } });
+  check('a transfer reference can only be recorded on a paid payout', refOnMissing.status === 400, refOnMissing.body);
+  const rejectNoNote = await call('POST', '/admin/payouts/999999999', { token: A, body: { approve: false } });
+  check('rejecting a payout without a reason is refused', rejectNoNote.status === 400, rejectNoNote.body);
+
+  console.log('== Admin: system ==');
+  const health = await call('GET', '/admin/system/health', { token: A });
+  const healthText = JSON.stringify(health.body);
+  check('system health reports API, database, Redis and storage as healthy',
+    health.status === 200 && health.body.api.ok && health.body.database.ok && health.body.redis.ok && health.body.storage.ok &&
+      health.body.database.migrations.pending.length === 0, health.body);
+  check('system health reports the tick worker heartbeat', health.body.tickWorker?.ok === true, health.body.tickWorker);
+  check('system health exposes no secrets or hosts',
+    !/supabase\.co|upstash|password|service_role|postgres(ql)?:\/\//i.test(healthText) &&
+      !healthText.includes(process.env.SUPABASE_SERVICE_ROLE_KEY || '~none~'), 'health payload');
+  const earningsRec = await call('GET', '/admin/reconcile/earnings', { token: A });
+  check('earnings reconciliation responds', earningsRec.status === 200 && typeof earningsRec.body.balanced === 'boolean', earningsRec.body);
 }
 
 main().catch(async (err) => {

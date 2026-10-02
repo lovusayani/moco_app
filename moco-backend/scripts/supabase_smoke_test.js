@@ -1097,9 +1097,155 @@ async function main() {
     p7History.body,
   );
 
+  await adminSmoke({ callerToken: token, reportedListenerId: listener.id });
+
   console.log(`\n${passed} passed, ${failed} failed`);
   await closeDb();
   process.exit(failed > 0 ? 1 : 0);
+}
+
+/**
+ * Admin console API. Sessions here are minted with the server's own
+ * signToken() for accounts resolved through the real identity path
+ * (findOrCreateUser) — equivalent to an OTP sign-in, but without spending
+ * the per-IP OTP budget the rest of this script already uses.
+ */
+async function adminSmoke({ callerToken, reportedListenerId }) {
+  console.log('== Admin: authorization ==');
+  const { signToken } = require('../src/middleware/auth');
+  const { findOrCreateUser } = require('../src/modules/auth/auth.service');
+  const sessionFor = async (phone) => {
+    const { user } = await findOrCreateUser(phone);
+    return { user, token: signToken(user) };
+  };
+
+  const ADMIN_ROUTES = ['/admin/me', '/admin/users', '/admin/listeners', '/admin/kyc', '/admin/reports',
+    '/admin/audit', '/admin/stats', '/admin/reconcile'];
+  const anon = await Promise.all(ADMIN_ROUTES.map((p) => call('GET', p)));
+  check('every admin route rejects unauthenticated requests (401)', anon.every((r) => r.status === 401),
+    anon.map((r, i) => `${ADMIN_ROUTES[i]}:${r.status}`));
+  const nonAdmin = await Promise.all(ADMIN_ROUTES.map((p) => call('GET', p, { token: callerToken })));
+  check('every admin route rejects a signed-in non-admin (403)', nonAdmin.every((r) => r.status === 403),
+    nonAdmin.map((r, i) => `${ADMIN_ROUTES[i]}:${r.status}`));
+  const nonAdminWrite = await call('POST', '/admin/users', { token: callerToken, body: { phone: '+919000000001' } });
+  check('admin mutations reject a non-admin (403)', nonAdminWrite.status === 403, nonAdminWrite.body);
+
+  const adminPhone = (process.env.ADMIN_PHONES || '').split(',')[0]?.trim();
+  if (!adminPhone) {
+    console.log('  ADMIN_PHONES not set — skipping admin functional checks');
+    return;
+  }
+  const admin = await sessionFor(adminPhone);
+  const A = admin.token;
+  const me = await call('GET', '/admin/me', { token: A });
+  check('an ADMIN_PHONES account is accepted', me.status === 200 && me.body.isAdmin === true, me.body);
+
+  console.log('== Admin: users ==');
+  const page = await call('GET', '/admin/users?pageSize=5&sort=balance&dir=desc', { token: A });
+  check('users list returns a page envelope',
+    page.status === 200 && Array.isArray(page.body.items) && page.body.items.length <= 5 &&
+      Number.isInteger(page.body.total) && page.body.totalPages >= 1, page.body);
+  check('users list honours sort by balance (desc)',
+    page.body.items.every((u, i, a) => i === 0 || a[i - 1].coinBalance >= u.coinBalance), page.body.items?.map((u) => u.coinBalance));
+  const badSort = await call('GET', '/admin/users?sort=password', { token: A });
+  check('a non-whitelisted sort key is refused', badSort.status === 400, badSort.body);
+
+  const newPhone = freshTestPhone().replace(/\d{2}$/, '71');
+  const created = await call('POST', '/admin/users', { token: A, body: { phone: newPhone, displayName: 'Admin Made', reason: 'smoke' } });
+  check('admin can create a user (OTP identity, no password)', created.status === 201 && created.body.id > 0, created.body);
+  const dup = await call('POST', '/admin/users', { token: A, body: { phone: newPhone } });
+  check('creating a duplicate phone is refused', dup.status === 409, dup.body);
+  const found = await call('GET', `/admin/users?q=${encodeURIComponent(newPhone)}`, { token: A });
+  check('users search finds the new account by phone', found.body.items?.length === 1 && found.body.items[0].id === created.body.id, found.body);
+
+  const noReason = await call('POST', `/admin/users/${created.body.id}/status`, { token: A, body: { status: 'suspended' } });
+  check('suspending without a reason is refused', noReason.status === 400, noReason.body);
+  const suspend = await call('POST', `/admin/users/${created.body.id}/status`, { token: A, body: { status: 'suspended', reason: 'smoke suspend' } });
+  const restore = await call('POST', `/admin/users/${created.body.id}/status`, { token: A, body: { status: 'active', reason: 'smoke restore' } });
+  check('admin can suspend and restore an account', suspend.status === 200 && restore.status === 200 && restore.body.status === 'active', { suspend: suspend.body, restore: restore.body });
+  const selfSuspend = await call('POST', `/admin/users/${admin.user.id}/status`, { token: A, body: { status: 'suspended', reason: 'nope' } });
+  check('an admin cannot suspend their own account', selfSuspend.status === 400, selfSuspend.body);
+  const detail = await call('GET', `/admin/users/${created.body.id}`, { token: A });
+  check('user detail includes wallet, ledger, calls, reports and admin history',
+    detail.status === 200 && detail.body.wallet && Array.isArray(detail.body.ledger) && Array.isArray(detail.body.calls) &&
+      Array.isArray(detail.body.reports) && detail.body.history.map((h) => h.action).join(',') === 'user.restore,user.suspend,user.create',
+    detail.body.history);
+
+  console.log('== Admin: creators / listeners ==');
+  const active = await call('GET', '/admin/listeners?eligible=true&pageSize=100', { token: A });
+  check('listener list filters to active creators',
+    active.status === 200 && active.body.items.length > 0 && active.body.items.every((l) => l.eligible && l.photoCount >= 3), active.body.total);
+  const ldetail = await call('GET', `/admin/listeners/${reportedListenerId}`, { token: A });
+  check('listener detail returns signed photo URLs, KYC and stats (admin only)',
+    ldetail.status === 200 && ldetail.body.photos.length >= 3 && ldetail.body.photos.every((p) => p.url) &&
+      ldetail.body.kyc && ldetail.body.callStats, { photos: ldetail.body.photos?.length });
+
+  const creatorPhone = freshTestPhone().replace(/\d{2}$/, '72');
+  const creator = await call('POST', '/admin/listeners', { token: A, body: { phone: creatorPhone, displayName: 'Draft Creator', languages: ['en', 'hi'] } });
+  check('admin can create a creator, which starts as a draft',
+    creator.status === 201 && creator.body.applicationStatus === 'draft' &&
+      JSON.stringify(creator.body.blockers) === JSON.stringify(['photos', 'kyc']), creator.body);
+  const approveDraft = await call('POST', `/admin/kyc/${creator.body.id}`, { token: A, body: { approve: true } });
+  check('a draft creator cannot be approved (eligibility is not bypassed)',
+    approveDraft.status === 400 && (approveDraft.body.error?.details?.blockers || []).includes('photos'), approveDraft.body);
+
+  console.log('== Admin: KYC review ==');
+  const applicant = await sessionFor(freshTestPhone().replace(/\d{2}$/, '73'));
+  await call('PATCH', '/users/me', { token: applicant.token, body: { displayName: 'Queue Applicant' } });
+  await call('POST', '/users/me/become-listener', { token: applicant.token });
+  await addListenerPhotos(applicant.token, 3);
+  const submitted = await call('POST', '/listeners/kyc', {
+    token: applicant.token,
+    body: { fullName: 'Queue Applicant', docUrl: 'https://example.com/id.jpg', upiId: 'queue@upi' },
+  });
+  check('an applicant with 3 photos submits KYC', submitted.body.kycStatus === 'pending', submitted.body);
+  const queue = await call('GET', `/admin/kyc?q=${encodeURIComponent(applicant.user.phone)}`, { token: A });
+  const entry = queue.body.items?.[0];
+  check('the KYC queue shows the applicant with photos and no approval blockers',
+    entry?.id === applicant.user.id && entry.photos.length === 3 && entry.photos.every((p) => p.url) &&
+      entry.approvalBlockers.length === 0 && !!entry.submittedAt, entry);
+  const approve = await call('POST', `/admin/kyc/${applicant.user.id}`, { token: A, body: { approve: true, note: 'docs ok' } });
+  check('admin approves a complete application', approve.status === 200 && approve.body.kycStatus === 'approved', approve.body);
+  const applicantMe = await call('GET', '/users/me', { token: applicant.token });
+  check('the approved applicant is now eligible (no blockers)', JSON.stringify(applicantMe.body.listener?.blockers) === '[]', applicantMe.body.listener);
+  const rejectNoReason = await call('POST', `/admin/kyc/${applicant.user.id}`, { token: A, body: { approve: false } });
+  check('rejecting without a reason is refused', rejectNoReason.status === 400, rejectNoReason.body);
+  const revoke = await call('POST', `/admin/kyc/${applicant.user.id}`, { token: A, body: { approve: false, reason: 'smoke revoke' } });
+  const reviewed = await pool.query('SELECT kyc_status, kyc_reviewed_by, kyc_review_note, is_online FROM listener_profiles WHERE user_id = $1', [applicant.user.id]);
+  check('rejection records reviewer, reason and takes the creator offline',
+    revoke.status === 200 && reviewed.rows[0].kyc_status === 'rejected' && Number(reviewed.rows[0].kyc_reviewed_by) === Number(admin.user.id) &&
+      reviewed.rows[0].kyc_review_note === 'smoke revoke' && reviewed.rows[0].is_online === false, reviewed.rows[0]);
+
+  console.log('== Admin: reports ==');
+  const reports = await call('GET', `/admin/reports?status=unresolved&reported=${reportedListenerId}`, { token: A });
+  const report = reports.body.items?.[0];
+  check('reports list filters by status and reported user', reports.status === 200 && report?.reported_id === reportedListenerId, reports.body);
+  if (report) {
+    const noNote = await call('POST', `/admin/reports/${report.id}`, { token: A, body: { action: 'resolve' } });
+    check('resolving a report without a note is refused', noNote.status === 400, noNote.body);
+    const review = await call('POST', `/admin/reports/${report.id}`, { token: A, body: { action: 'review' } });
+    const resolve = await call('POST', `/admin/reports/${report.id}`, { token: A, body: { action: 'resolve', note: 'smoke: handled' } });
+    check('report moves to reviewing, then actioned', review.body.status === 'reviewing' && resolve.body.status === 'actioned', { review: review.body, resolve: resolve.body });
+    const again = await call('POST', `/admin/reports/${report.id}`, { token: A, body: { action: 'dismiss', note: 'twice' } });
+    check('a resolved report cannot be resolved again', again.status === 400, again.body);
+    const rdetail = await call('GET', `/admin/reports/${report.id}`, { token: A });
+    check('report detail carries its action history and resolution',
+      rdetail.body.history?.map((h) => h.action).join(',') === 'report.resolve,report.review' &&
+        rdetail.body.resolution_note === 'smoke: handled', rdetail.body.history);
+  }
+
+  console.log('== Admin: audit log ==');
+  const auditPage = await call('GET', `/admin/audit?action=kyc.approve&targetId=${applicant.user.id}`, { token: A });
+  check('audit log is filterable by action and target', auditPage.body.items?.length === 1 && auditPage.body.items[0].admin_phone === adminPhone, auditPage.body);
+  const auditMeta = await call('GET', '/admin/audit/meta', { token: A });
+  check('audit meta lists recorded actions', auditMeta.status === 200 && auditMeta.body.actions.includes('user.create'), auditMeta.body);
+  let rewriteRefused = false;
+  try {
+    await pool.query("UPDATE admin_audit_log SET reason = 'tampered' WHERE id = $1", [auditPage.body.items?.[0]?.id ?? 0]);
+  } catch {
+    rewriteRefused = true;
+  }
+  check('the audit log refuses UPDATE at the database level', rewriteRefused);
 }
 
 main().catch(async (err) => {

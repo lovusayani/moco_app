@@ -5,116 +5,28 @@ const { z } = require('zod');
 const { query, withTransaction } = require('../../config/db');
 const { payoutQueue } = require('../../workers/queues');
 const notifications = require('../notifications/notifications.service');
-const listenerStorage = require('../../integrations/listener.storage');
 const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
 const { authenticate, requireAdmin } = require('../../middleware/auth');
-const { notFound, badRequest } = require('../../utils/errors');
-const { KYC_STATUS, PAYOUT_STATUS, LISTENER_PHOTOS } = require('../../utils/constants');
-const logger = require('../../utils/logger');
+const { badRequest } = require('../../utils/errors');
+const { PAYOUT_STATUS, listenerEligibleSql } = require('../../utils/constants');
+const audit = require('./audit.service');
 
+/**
+ * /api/admin — every route below, including every mounted module, sits
+ * behind authenticate + requireAdmin (server-side ADMIN_PHONES allow-list).
+ * Hiding a button in the console is never the access control.
+ */
 const router = express.Router();
 router.use(authenticate, requireAdmin);
 
-/** Signed, short-lived URLs for one listener's photos — admin review only.
- * The bucket is private; these are never served by any public endpoint. */
-async function listenerPhotosFor(userId) {
-  const { rows } = await query(
-    `SELECT id, storage_path, mime_type, size_bytes, created_at FROM listener_photos
-      WHERE listener_id = $1 ORDER BY created_at, id`,
-    [userId],
-  );
-  return Promise.all(
-    rows.map(async (row) => ({
-      id: row.id,
-      url: await listenerStorage.createViewUrl(row.storage_path),
-      mimeType: row.mime_type,
-      sizeBytes: row.size_bytes,
-      createdAt: row.created_at,
-    })),
-  );
-}
+router.get('/me', (req, res) => {
+  res.json({ id: req.user.id, phone: req.user.phone, name: req.user.display_name, isAdmin: true });
+});
 
-/** KYC queue. Each entry carries its photos so the reviewer sees everything
- * the decision depends on in one place. */
-router.get(
-  '/kyc',
-  asyncHandler(async (req, res) => {
-    const { rows } = await query(
-      `SELECT lp.user_id, lp.kyc_name, lp.kyc_doc_url, lp.upi_id, lp.updated_at,
-              lp.photo_count, u.phone, u.display_name
-         FROM listener_profiles lp JOIN users u ON u.id = lp.user_id
-        WHERE lp.kyc_status = $1
-        ORDER BY lp.updated_at ASC LIMIT 100`,
-      [KYC_STATUS.PENDING],
-    );
-    const pending = await Promise.all(
-      rows.map(async (row) => ({
-        ...row,
-        minPhotos: LISTENER_PHOTOS.minCount,
-        photos: await listenerPhotosFor(row.user_id),
-      })),
-    );
-    res.json({ pending });
-  }),
-);
-
-/** Any listener's photos, for review outside the pending queue. */
-router.get(
-  '/listeners/:userId/photos',
-  validate(z.object({ userId: z.coerce.number().int().positive() }), 'params'),
-  asyncHandler(async (req, res) => {
-    const photos = await listenerPhotosFor(req.params.userId);
-    res.json({ userId: req.params.userId, photos, minPhotos: LISTENER_PHOTOS.minCount });
-  }),
-);
-
-router.post(
-  '/kyc/:userId',
-  validate(z.object({ userId: z.coerce.number().int().positive() }), 'params'),
-  validate(z.object({ approve: z.boolean(), note: z.string().max(500).optional() })),
-  asyncHandler(async (req, res) => {
-    const nextStatus = req.body.approve ? KYC_STATUS.APPROVED : KYC_STATUS.REJECTED;
-
-    // Approval cannot bypass the photo rule: the photo check and the status
-    // change are one statement, so a photo deleted concurrently cannot slip
-    // an incomplete listener through. Rejection is always allowed.
-    const { rows } = await query(
-      `UPDATE listener_profiles SET kyc_status = $2, updated_at = now()
-        WHERE user_id = $1
-          AND ($2 <> '${KYC_STATUS.APPROVED}' OR photo_count >= ${LISTENER_PHOTOS.minCount})
-        RETURNING user_id, kyc_status`,
-      [req.params.userId, nextStatus],
-    );
-
-    if (rows.length === 0) {
-      const { rows: exists } = await query(
-        'SELECT photo_count FROM listener_profiles WHERE user_id = $1',
-        [req.params.userId],
-      );
-      if (!exists[0]) throw notFound('Listener profile');
-      throw badRequest(
-        'photos_required',
-        `This listener has ${exists[0].photo_count} of the ${LISTENER_PHOTOS.minCount} required photos`,
-      );
-    }
-
-    await notifications.create({
-      userId: rows[0].user_id,
-      type: req.body.approve ? 'kyc_approved' : 'kyc_rejected',
-      title: req.body.approve ? 'You are verified!' : 'Verification was not approved',
-      body: req.body.approve
-        ? 'You can now go online and take calls.'
-        : req.body.note || 'Please review your details and try again.',
-    });
-
-    logger.info(
-      { adminId: req.user.id, userId: req.params.userId, status: nextStatus },
-      'kyc reviewed',
-    );
-    res.json({ userId: rows[0].user_id, kycStatus: rows[0].kyc_status });
-  }),
-);
+router.use(require('./users.admin'));
+router.use(require('./listeners.admin'));
+router.use(require('./reports.admin'));
 
 /** Payout queue and approval. Approval enqueues the worker that actually pays. */
 router.get(
@@ -155,6 +67,14 @@ router.post(
       if (rows.length === 0) {
         throw badRequest('not_pending', 'This payout is not awaiting approval');
       }
+      await audit.record(client, {
+        admin: req.user,
+        action: req.body.approve ? 'payout.approve' : 'payout.reject',
+        targetType: 'payout',
+        targetId: rows[0].id,
+        reason: req.body.note,
+        metadata: { listenerId: rows[0].listener_id, amount: Number(rows[0].amount) },
+      });
       return rows[0];
     });
 
@@ -173,68 +93,7 @@ router.post(
       data: { payoutId: payout.id },
     });
 
-    logger.info({ adminId: req.user.id, payoutId: payout.id, approved: req.body.approve }, 'payout reviewed');
     res.json({ payoutId: payout.id, status: payout.status });
-  }),
-);
-
-/** Report queue and moderation actions. */
-router.get(
-  '/reports',
-  asyncHandler(async (req, res) => {
-    const { rows } = await query(
-      `SELECT r.id, r.reason, r.details, r.status, r.created_at, r.call_id,
-              reporter.display_name AS reporter_name,
-              reported.id AS reported_id, reported.display_name AS reported_name,
-              (SELECT count(*)::int FROM reports r2 WHERE r2.reported_id = r.reported_id) AS total_reports
-         FROM reports r
-         JOIN users reporter ON reporter.id = r.reporter_id
-         JOIN users reported ON reported.id = r.reported_id
-        WHERE r.status IN ('open', 'reviewing')
-        ORDER BY total_reports DESC, r.created_at ASC LIMIT 100`,
-    );
-    res.json({ reports: rows });
-  }),
-);
-
-router.post(
-  '/reports/:id',
-  validate(z.object({ id: z.coerce.number().int().positive() }), 'params'),
-  validate(
-    z.object({
-      action: z.enum(['dismiss', 'suspend']),
-      note: z.string().max(500).optional(),
-    }),
-  ),
-  asyncHandler(async (req, res) => {
-    const result = await withTransaction(async (client) => {
-      const { rows } = await client.query(
-        `UPDATE reports SET status = $2, resolved_at = now()
-          WHERE id = $1 RETURNING reported_id, status`,
-        [req.params.id, req.body.action === 'suspend' ? 'actioned' : 'dismissed'],
-      );
-
-      if (rows.length === 0) throw notFound('Report');
-
-      if (req.body.action === 'suspend') {
-        await client.query(`UPDATE users SET status = 'suspended' WHERE id = $1`, [
-          rows[0].reported_id,
-        ]);
-        // A suspended listener must stop appearing in discovery at once.
-        await client.query(
-          `UPDATE listener_profiles SET is_online = FALSE WHERE user_id = $1`,
-          [rows[0].reported_id],
-        );
-      }
-
-      return rows[0];
-    });
-
-    logger.warn(
-      { adminId: req.user.id, reportId: req.params.id, action: req.body.action },
-      'report actioned',
-    );
-    res.json({ reportId: Number(req.params.id), status: result.status });
   }),
 );
 
@@ -245,7 +104,10 @@ router.get(
     const { rows } = await query(`
       SELECT
         (SELECT count(*)::int FROM users WHERE status = 'active') AS active_users,
+        (SELECT count(*)::int FROM users WHERE status = 'suspended') AS suspended_users,
+        (SELECT count(*)::int FROM users WHERE created_at >= date_trunc('day', now())) AS new_users_today,
         (SELECT count(*)::int FROM listener_profiles WHERE kyc_status = 'approved') AS approved_listeners,
+        (SELECT count(*)::int FROM listener_profiles lp WHERE ${listenerEligibleSql('lp')}) AS active_listeners,
         (SELECT count(*)::int FROM listener_profiles WHERE is_online) AS online_listeners,
         (SELECT count(*)::int FROM calls WHERE status = 'active') AS live_calls,
         (SELECT count(*)::int FROM calls WHERE created_at >= date_trunc('day', now())) AS calls_today,
@@ -257,7 +119,8 @@ router.get(
           WHERE reason = 'topup' AND created_at >= date_trunc('day', now())) AS coins_purchased_today,
         (SELECT count(*)::int FROM listener_profiles WHERE kyc_status = 'pending') AS pending_kyc,
         (SELECT count(*)::int FROM payouts WHERE status = 'requested') AS pending_payouts,
-        (SELECT count(*)::int FROM reports WHERE status IN ('open', 'reviewing')) AS open_reports
+        (SELECT count(*)::int FROM reports WHERE status IN ('open', 'reviewing')) AS open_reports,
+        (SELECT count(*)::int FROM admin_audit_log WHERE created_at >= date_trunc('day', now())) AS admin_actions_today
     `);
     res.json(rows[0]);
   }),

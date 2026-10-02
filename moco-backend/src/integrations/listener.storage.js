@@ -51,6 +51,12 @@ const createViewUrl = (path) =>
     expiresInSeconds: LISTENER_PHOTOS.viewUrlSeconds,
   });
 
+/** Batch signing — one Storage request for a whole page of photos. */
+const createViewUrls = (paths) =>
+  storage.createViewUrls(LISTENER_PHOTOS.bucket, paths, {
+    expiresInSeconds: LISTENER_PHOTOS.viewUrlSeconds,
+  });
+
 const statObject = (path) => storage.statObject(LISTENER_PHOTOS.bucket, path);
 
 const remove = (path) => storage.remove(LISTENER_PHOTOS.bucket, path);
@@ -62,6 +68,7 @@ module.exports = {
   mimeTypeForPath,
   createUploadUrl,
   createViewUrl,
+  createViewUrls,
   statObject,
   remove,
 };

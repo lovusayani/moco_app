@@ -73,12 +73,23 @@ function requireListener(req, res, next) {
  * Admin endpoints. Backed by an allow-list of phone numbers in env rather than
  * a role flag, so a compromised user row cannot escalate to admin.
  */
-function requireAdmin(req, res, next) {
+function isAdminPhone(phone) {
   const admins = (process.env.ADMIN_PHONES || '').split(',').map((s) => s.trim()).filter(Boolean);
-  if (!req.user || !admins.includes(req.user.phone)) {
+  return Boolean(phone) && admins.includes(phone);
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.user || !isAdminPhone(req.user.phone)) {
     return next(forbidden('Admin access required'));
   }
   return next();
 }
 
-module.exports = { authenticate, requireListener, requireAdmin, signToken, verifyToken };
+module.exports = {
+  authenticate,
+  requireListener,
+  requireAdmin,
+  isAdminPhone,
+  signToken,
+  verifyToken,
+};

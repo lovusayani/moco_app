@@ -66,6 +66,37 @@ async function createViewUrl(bucket, path, { expiresInSeconds = 3600 } = {}) {
 }
 
 /**
+ * Signed view URLs for many objects in ONE storage request — admin lists show
+ * dozens of photos/posts per page, and one HTTP call per image would make
+ * every page load an N+1 against Storage. Returns a Map path → url (paths
+ * that fail to sign are simply absent).
+ */
+async function createViewUrls(bucket, paths, { expiresInSeconds = 3600 } = {}) {
+  const unique = [...new Set(paths.filter(Boolean))];
+  if (!isConfigured() || unique.length === 0) return new Map();
+  const { data, error } = await client.storage
+    .from(bucket)
+    .createSignedUrls(unique, expiresInSeconds);
+  if (error || !Array.isArray(data)) return new Map();
+  return new Map(data.filter((d) => d.signedUrl && !d.error).map((d) => [d.path, d.signedUrl]));
+}
+
+/** Liveness of Storage itself, for the admin system-health page. Reports
+ * bucket names and privacy only — never keys or URLs. */
+async function health() {
+  if (!isConfigured()) return { ok: false, configured: false };
+  const started = Date.now();
+  const { data, error } = await client.storage.listBuckets();
+  if (error) return { ok: false, configured: true, error: error.message };
+  return {
+    ok: true,
+    configured: true,
+    latencyMs: Date.now() - started,
+    buckets: data.map((b) => ({ name: b.name, private: !b.public })),
+  };
+}
+
+/**
  * Metadata for one stored object, or null if storage isn't configured or the
  * object does not exist. This is how the backend verifies that a client which
  * claims to have uploaded something actually did, and how it enforces a size
@@ -109,4 +140,12 @@ async function remove(bucket, path) {
   }
 }
 
-module.exports = { isConfigured, createUploadUrl, createViewUrl, statObject, remove };
+module.exports = {
+  isConfigured,
+  createUploadUrl,
+  createViewUrl,
+  createViewUrls,
+  health,
+  statObject,
+  remove,
+};

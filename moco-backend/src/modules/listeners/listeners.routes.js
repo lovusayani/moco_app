@@ -431,7 +431,7 @@ router.post(
     const { rows } = await query(
       `UPDATE listener_profiles
           SET kyc_name = $2, kyc_doc_url = $3, upi_id = $4,
-              kyc_status = $5, updated_at = now()
+              kyc_status = $5, kyc_submitted_at = now(), updated_at = now()
         WHERE user_id = $1 AND kyc_status <> $6
         RETURNING kyc_status`,
       [

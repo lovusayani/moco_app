@@ -47,7 +47,28 @@ function createApp() {
    * request it makes is still authenticated and re-checked against the admin
    * allow-list server-side; serving the page grants nothing on its own.
    */
-  app.use('/admin', express.static(path.join(__dirname, '..', 'public', 'admin')));
+  //
+  // Its CSP is the global one plus exactly one origin — this project's
+  // Supabase Storage — for img/media, because KYC photos and post previews
+  // are short-lived signed URLs on that host. Nothing else is loosened, and
+  // only this page gets it.
+  const storageOrigin = (() => {
+    try {
+      const url = new URL(env.supabaseStorage.url);
+      return `${url.protocol}//${url.host}`;
+    } catch {
+      return null;
+    }
+  })();
+  const adminMediaSrc = ["'self'", 'data:', ...(storageOrigin ? [storageOrigin] : [])];
+  app.use(
+    '/admin',
+    helmet.contentSecurityPolicy({
+      useDefaults: true,
+      directives: { 'img-src': adminMediaSrc, 'media-src': adminMediaSrc },
+    }),
+    express.static(path.join(__dirname, '..', 'public', 'admin')),
+  );
 
   app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
 

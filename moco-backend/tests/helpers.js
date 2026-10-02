@@ -1,5 +1,8 @@
 'use strict';
 
+// Must run before anything below opens a connection — see tests/guard.js.
+require('./guard');
+
 const { query, withTransaction } = require('../src/config/db');
 const { redis } = require('../src/config/redis');
 const { CALL_STATUS, coinsPerMinute, listenerSharePerMinute } =

@@ -3,11 +3,17 @@
 const express = require('express');
 const { z } = require('zod');
 const { query, withTransaction } = require('../../config/db');
+const listenerStorage = require('../../integrations/listener.storage');
 const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
 const { authenticate } = require('../../middleware/auth');
 const { notFound } = require('../../utils/errors');
-const { USER_ROLE, KYC_STATUS } = require('../../utils/constants');
+const {
+  USER_ROLE,
+  KYC_STATUS,
+  LISTENER_PHOTOS,
+  listenerBlockers,
+} = require('../../utils/constants');
 
 /**
  * The canonical public shape of a user.
@@ -35,6 +41,16 @@ function serializeUser(row) {
           earningsBalance: row.earnings_balance,
           rating: Number(row.rating),
           totalCalls: row.total_calls,
+          photoCount: row.photo_count ?? 0,
+          minPhotos: LISTENER_PHOTOS.minCount,
+          maxPhotos: LISTENER_PHOTOS.maxCount,
+          // What still stands between this listener and being active, in the
+          // order to address it ('photos', then 'kyc'). Empty = eligible. The
+          // server computes this so the app never re-derives the rule.
+          blockers: listenerBlockers({
+            kycStatus: row.kyc_status,
+            photoCount: row.photo_count,
+          }),
         }
       : null,
   };
@@ -45,7 +61,8 @@ const USER_SELECT = `
   u.id, u.phone, u.display_name, u.avatar_url, u.language, u.gender, u.role,
   u.free_trial_used, u.created_at,
   COALESCE(w.coin_balance, 0) AS coin_balance,
-  lp.is_online, lp.kyc_status, lp.earnings_balance, lp.rating, lp.total_calls`;
+  lp.is_online, lp.kyc_status, lp.earnings_balance, lp.rating, lp.total_calls,
+  lp.photo_count`;
 
 const USER_JOINS = `
   FROM users u
@@ -129,7 +146,7 @@ router.post(
       const { rows } = await client.query(
         `INSERT INTO listener_profiles (user_id) VALUES ($1)
          ON CONFLICT (user_id) DO UPDATE SET updated_at = now()
-         RETURNING user_id, kyc_status, audio_rate, video_rate`,
+         RETURNING user_id, kyc_status, audio_rate, video_rate, photo_count`,
         [req.user.id],
       );
 
@@ -141,6 +158,12 @@ router.post(
       kycStatus: result.profile.kyc_status,
       // The client routes to the KYC screen while this is true.
       kycRequired: result.profile.kyc_status !== KYC_STATUS.APPROVED,
+      photoCount: result.profile.photo_count,
+      minPhotos: LISTENER_PHOTOS.minCount,
+      blockers: listenerBlockers({
+        kycStatus: result.profile.kyc_status,
+        photoCount: result.profile.photo_count,
+      }),
     });
   }),
 );
@@ -168,7 +191,7 @@ router.post(
 router.delete(
   '/me',
   asyncHandler(async (req, res) => {
-    await withTransaction(async (client) => {
+    const photoPaths = await withTransaction(async (client) => {
       await client.query(
         `UPDATE users
             SET status = 'deleted', display_name = NULL, avatar_url = NULL,
@@ -181,7 +204,17 @@ router.delete(
                 kyc_name = NULL, upi_id = NULL WHERE user_id = $1`,
         [req.user.id],
       );
+      // Listener photos are personal data like the fields above — remove the
+      // rows here, and the stored objects after commit.
+      const { rows } = await client.query(
+        'DELETE FROM listener_photos WHERE listener_id = $1 RETURNING storage_path',
+        [req.user.id],
+      );
+      return rows.map((row) => row.storage_path);
     });
+    // Best-effort: an object left behind is a storage cost, never a visible
+    // photo — nothing references it any more.
+    await Promise.all(photoPaths.map((path) => listenerStorage.remove(path)));
     res.json({ ok: true });
   }),
 );

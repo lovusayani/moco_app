@@ -200,6 +200,45 @@ function feedMaxBytesFor(mediaType) {
 }
 
 /**
+ * Listener profile photos. `minCount` is half of the listener eligibility
+ * rule (the other half is approved KYC) — see LISTENER_ELIGIBLE_SQL. The
+ * 3 in migration 008's partial index must match it.
+ */
+const LISTENER_PHOTOS = Object.freeze({
+  bucket: 'listener-media',
+  minCount: 3,
+  maxCount: 6,
+  allowedMimeTypes: Object.freeze(['image/jpeg', 'image/png', 'image/webp']),
+  maxBytes: 8 * 1024 * 1024,
+  viewUrlSeconds: 3600,
+});
+
+/**
+ * The single definition of "an active listener": KYC approved AND at least
+ * LISTENER_PHOTOS.minCount photos. Every gate that decides whether someone is
+ * discoverable, viewable, followable, can go online, or can be called uses
+ * this, so the rule cannot be applied in one place and forgotten in another.
+ * Interpolated (not parameterised) because both values are server constants,
+ * never request input.
+ */
+function listenerEligibleSql(alias = 'lp') {
+  return `(${alias}.kyc_status = '${KYC_STATUS.APPROVED}' AND ${alias}.photo_count >= ${LISTENER_PHOTOS.minCount})`;
+}
+
+/**
+ * What still stands between a listener and being active, in the order they
+ * should address it. Empty means eligible. Shared by /users/me (so the app
+ * can show exactly what is missing) and the online toggle (so the refusal
+ * names the same blocker the app shows).
+ */
+function listenerBlockers({ kycStatus, photoCount }) {
+  const blockers = [];
+  if ((photoCount ?? 0) < LISTENER_PHOTOS.minCount) blockers.push('photos');
+  if (kycStatus !== KYC_STATUS.APPROVED) blockers.push('kyc');
+  return blockers;
+}
+
+/**
  * Rate for a call type, as an object. Throws rather than returning a default:
  * a bad call type must never silently bill at the wrong rate.
  */
@@ -273,6 +312,9 @@ module.exports = {
   FEED_MEDIA_MIME_TYPES,
   postMediaTypeForMime,
   feedMaxBytesFor,
+  LISTENER_PHOTOS,
+  listenerEligibleSql,
+  listenerBlockers,
   rateFor,
   coinsPerMinute,
   listenerSharePerMinute,

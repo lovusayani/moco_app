@@ -82,6 +82,32 @@ async function uploadToSignedUrl({ uploadUrl, token, mimeType, bytes }) {
   return { status: response.status, text: await response.text() };
 }
 
+/**
+ * Adds `count` real listener photos through the full product path: upload
+ * authorization → PUT to Supabase Storage → registration. Returns the last
+ * registration response (which carries the current photo list and count).
+ */
+async function addListenerPhotos(token, count) {
+  let last = null;
+  for (let i = 0; i < count; i += 1) {
+    const auth = await call('POST', '/listeners/me/photos/upload-url', {
+      token,
+      body: { mimeType: 'image/png' },
+    });
+    if (auth.status !== 200) return auth;
+    const put = await uploadToSignedUrl({
+      uploadUrl: auth.body.uploadUrl,
+      token: auth.body.token,
+      mimeType: 'image/png',
+      bytes: TINY_PNG,
+    });
+    if (put.status >= 300) return { status: put.status, body: { raw: put.text } };
+    last = await call('POST', '/listeners/me/photos', { token, body: { path: auth.body.path } });
+    if (last.status !== 201) return last;
+  }
+  return last;
+}
+
 async function login(phone) {
   const req = await call('POST', '/auth/otp/request', { body: { phone } });
   check(`otp request (${phone})`, req.status === 200 && req.body.sent === true, req.body);
@@ -573,22 +599,72 @@ async function main() {
     p5OnlineBeforeKyc.body,
   );
 
-  const p5Kyc = await call('POST', '/listeners/kyc', {
+  const kycBody = {
+    fullName: 'Smoke Tester',
+    docUrl: 'https://example.com/doc.jpg',
+    upiId: 'smoketest@upi',
+  };
+
+  const p5KycNoPhotos = await call('POST', '/listeners/kyc', { token: p5Token, body: kycBody });
+  check(
+    'KYC cannot be submitted before the minimum photos are uploaded',
+    p5KycNoPhotos.status === 400 && p5KycNoPhotos.body.error?.code === 'photos_required',
+    p5KycNoPhotos.body,
+  );
+
+  const p5BadMime = await call('POST', '/listeners/me/photos/upload-url', {
     token: p5Token,
-    body: {
-      fullName: 'Smoke Tester',
-      docUrl: 'https://example.com/doc.jpg',
-      upiId: 'smoketest@upi',
-    },
+    body: { mimeType: 'video/mp4' },
+  });
+  check('listener photo upload refuses a non-image MIME type', p5BadMime.status === 400, p5BadMime.body);
+
+  const p5ForeignPath = await call('POST', '/listeners/me/photos', {
+    token: p5Token,
+    body: { path: `${callerId}/1_${'a'.repeat(32)}.png` },
   });
   check(
-    'KYC submission moves status to pending',
+    "registering a photo path minted for someone else is forbidden",
+    p5ForeignPath.status === 403,
+    p5ForeignPath.body,
+  );
+
+  const p5NotUploaded = await call('POST', '/listeners/me/photos', {
+    token: p5Token,
+    body: { path: `${p5UserId}/1_${'b'.repeat(32)}.png` },
+  });
+  check(
+    'registering a path that was never uploaded is refused',
+    p5NotUploaded.status === 400 && p5NotUploaded.body.error?.code === 'media_not_uploaded',
+    p5NotUploaded.body,
+  );
+
+  const p5Photos = await addListenerPhotos(p5Token, 3);
+  check(
+    'three photos upload and register through signed storage URLs',
+    p5Photos?.status === 201 &&
+      p5Photos.body.count === 3 &&
+      p5Photos.body.minCount === 3 &&
+      p5Photos.body.photos.every((p) => typeof p.url === 'string' && p.url.length > 0),
+    p5Photos?.body,
+  );
+
+  const p5MeWithPhotos = await call('GET', '/users/me', { token: p5Token });
+  check(
+    '/users/me reports photo progress and the remaining blocker (kyc)',
+    p5MeWithPhotos.body.listener?.photoCount === 3 &&
+      JSON.stringify(p5MeWithPhotos.body.listener?.blockers) === JSON.stringify(['kyc']),
+    p5MeWithPhotos.body.listener,
+  );
+
+  const p5Kyc = await call('POST', '/listeners/kyc', { token: p5Token, body: kycBody });
+  check(
+    'KYC submission moves status to pending once photos are in',
     p5Kyc.status === 200 && p5Kyc.body.kycStatus === 'pending',
     p5Kyc.body,
   );
 
-  // Approve directly via the DB, the same shortcut the admin console's action
-  // ultimately performs — there is no public "approve yourself" endpoint.
+  // Approve directly via the DB (the admin route itself is covered in the
+  // admin section) — there is no public "approve yourself" endpoint.
   await pool.query(`UPDATE listener_profiles SET kyc_status = 'approved' WHERE user_id = $1`, [
     p5UserId,
   ]);
@@ -598,9 +674,52 @@ async function main() {
     body: { isOnline: true },
   });
   check(
-    'an approved listener can go online',
+    'an approved listener with 3 photos can go online',
     p5GoOnline.status === 200 && p5GoOnline.body.isOnline === true,
     p5GoOnline.body,
+  );
+
+  const p5DeleteBelowMin = await call(
+    'DELETE',
+    `/listeners/me/photos/${p5Photos?.body?.photos?.[0]?.id ?? 0}`,
+    { token: p5Token },
+  );
+  check(
+    'a verified listener cannot drop below the minimum photos',
+    p5DeleteBelowMin.status === 400 && p5DeleteBelowMin.body.error?.code === 'photos_minimum',
+    p5DeleteBelowMin.body,
+  );
+
+  // An approved listener WITHOUT photos (e.g. approved before the rule) is not
+  // eligible: not discoverable, cannot go online.
+  const p5Legacy = await login(freshTestPhone());
+  await call('POST', '/users/me/become-listener', { token: p5Legacy.token });
+  await pool.query(`UPDATE listener_profiles SET kyc_status = 'approved' WHERE user_id = $1`, [
+    p5Legacy.user.id,
+  ]);
+  const p5LegacyOnline = await call('PATCH', '/listeners/status', {
+    token: p5Legacy.token,
+    body: { isOnline: true },
+  });
+  check(
+    'an approved listener with fewer than 3 photos cannot go online',
+    p5LegacyOnline.status === 400 && p5LegacyOnline.body.error?.code === 'photos_required',
+    p5LegacyOnline.body,
+  );
+  const p5LegacyProfile = await call('GET', `/listeners/${p5Legacy.user.id}`, { token });
+  check(
+    'an approved listener without photos is not publicly viewable',
+    p5LegacyProfile.status === 404,
+    p5LegacyProfile.body,
+  );
+  const p5LegacyCall = await call('POST', '/calls/initiate', {
+    token,
+    body: { listenerId: p5Legacy.user.id, type: 'audio' },
+  });
+  check(
+    'an ineligible listener cannot receive a paid call',
+    p5LegacyCall.status >= 400 && p5LegacyCall.status < 500,
+    p5LegacyCall.body,
   );
 
   const p5GoOffline = await call('PATCH', '/listeners/status', {
@@ -712,6 +831,7 @@ async function main() {
   // listener, submit KYC, approve directly (there is no public
   // self-approve endpoint), same as the Phase 5 section above.
   await call('POST', '/users/me/become-listener', { token: p6Token });
+  await addListenerPhotos(p6Token, 3);
   await call('POST', '/listeners/kyc', {
     token: p6Token,
     body: {

@@ -2,14 +2,21 @@
 
 const express = require('express');
 const { z } = require('zod');
-const { query } = require('../../config/db');
+const { query, withTransaction } = require('../../config/db');
 const presence = require('../../realtime/presence');
+const listenerStorage = require('../../integrations/listener.storage');
 const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
 const { authenticate, requireListener } = require('../../middleware/auth');
 const { rateLimit } = require('../../middleware/rateLimit');
-const { notFound, badRequest } = require('../../utils/errors');
-const { KYC_STATUS } = require('../../utils/constants');
+const { notFound, badRequest, forbidden } = require('../../utils/errors');
+const {
+  KYC_STATUS,
+  LISTENER_PHOTOS,
+  listenerEligibleSql,
+} = require('../../utils/constants');
+
+const ELIGIBLE = listenerEligibleSql('lp');
 
 const router = express.Router();
 
@@ -28,9 +35,10 @@ const discoverySchema = z.object({
 /**
  * Discovery grid.
  *
- * Only KYC-approved listeners are ever returned — an unverified listener is
- * not discoverable no matter what else they set. Blocked users are filtered
- * out in the same query so neither side sees the other.
+ * Only eligible listeners — KYC approved AND at least the minimum number of
+ * photos — are ever returned; anyone else is not discoverable no matter what
+ * else they set. Blocked users are filtered out in the same query so neither
+ * side sees the other.
  */
 router.get(
   '/',
@@ -50,7 +58,7 @@ router.get(
               (lp.kyc_status = $1) AS verified
          FROM listener_profiles lp
          JOIN users u ON u.id = lp.user_id
-        WHERE lp.kyc_status = $1
+        WHERE ${ELIGIBLE}
           AND u.status = 'active'
           AND u.id <> $2
           AND ($3::text IS NULL OR $3 = ANY(lp.languages))
@@ -117,6 +125,166 @@ router.get(
   }),
 );
 
+/**
+ * Listener profile photos (own). Defined before `/:id` so `me` is never read
+ * as a listener id.
+ *
+ * Upload flow mirrors feed media: request an upload URL (MIME validated here,
+ * path minted here) → PUT bytes straight to Supabase Storage → register the
+ * path. Registration re-checks everything rather than trusting the client:
+ * ownership of the path, the type implied by the minted extension, that the
+ * object actually exists, its real size, and the per-listener maximum.
+ */
+async function serializePhotos(listenerId) {
+  const { rows } = await query(
+    `SELECT id, storage_path, created_at FROM listener_photos
+      WHERE listener_id = $1 ORDER BY created_at, id`,
+    [listenerId],
+  );
+  const photos = await Promise.all(
+    rows.map(async (row) => ({
+      id: row.id,
+      url: await listenerStorage.createViewUrl(row.storage_path),
+      createdAt: row.created_at,
+    })),
+  );
+  return {
+    photos,
+    count: photos.length,
+    minCount: LISTENER_PHOTOS.minCount,
+    maxCount: LISTENER_PHOTOS.maxCount,
+  };
+}
+
+router.get(
+  '/me/photos',
+  authenticate,
+  requireListener,
+  asyncHandler(async (req, res) => {
+    res.json(await serializePhotos(req.user.id));
+  }),
+);
+
+router.post(
+  '/me/photos/upload-url',
+  authenticate,
+  requireListener,
+  rateLimit({ windowSeconds: 3600, max: 30, keyPrefix: 'listener_photo_upload' }),
+  validate(z.object({ mimeType: z.enum(LISTENER_PHOTOS.allowedMimeTypes) })),
+  asyncHandler(async (req, res) => {
+    const { rows } = await query(
+      'SELECT photo_count FROM listener_profiles WHERE user_id = $1',
+      [req.user.id],
+    );
+    if (!rows[0]) throw notFound('Listener profile');
+    if (rows[0].photo_count >= LISTENER_PHOTOS.maxCount) {
+      throw badRequest('photo_limit', `You can have at most ${LISTENER_PHOTOS.maxCount} photos`);
+    }
+    if (!listenerStorage.isConfigured()) {
+      throw badRequest('storage_not_configured', 'Photo uploads are not available right now');
+    }
+
+    const { path, uploadUrl, token } = await listenerStorage.createUploadUrl({
+      userId: req.user.id,
+      mimeType: req.body.mimeType,
+    });
+    res.json({ path, uploadUrl, token, maxBytes: LISTENER_PHOTOS.maxBytes });
+  }),
+);
+
+router.post(
+  '/me/photos',
+  authenticate,
+  requireListener,
+  rateLimit({ windowSeconds: 3600, max: 30, keyPrefix: 'listener_photo_create' }),
+  validate(z.object({ path: z.string().min(1).max(400) })),
+  asyncHandler(async (req, res) => {
+    const { path } = req.body;
+
+    // Authorization before anything else — and before the storage check, so
+    // configuration state can never widen access.
+    if (!listenerStorage.pathBelongsToUser(path, req.user.id)) {
+      throw forbidden('This photo does not belong to you');
+    }
+    const mimeType = listenerStorage.mimeTypeForPath(path);
+    if (!mimeType) throw badRequest('unsupported_media', 'Only JPEG, PNG or WebP photos are allowed');
+    if (!listenerStorage.isConfigured()) {
+      throw badRequest('storage_not_configured', 'Photo uploads are not available right now');
+    }
+
+    const object = await listenerStorage.statObject(path);
+    if (!object) {
+      throw badRequest('media_not_uploaded', 'The upload did not finish. Please try again.');
+    }
+    if (object.sizeBytes !== null && object.sizeBytes > LISTENER_PHOTOS.maxBytes) {
+      await listenerStorage.remove(path);
+      throw badRequest('media_too_large', 'That photo is too large');
+    }
+
+    await withTransaction(async (client) => {
+      // Lock the profile row so two concurrent registrations cannot both pass
+      // the max-count check.
+      const { rows } = await client.query(
+        'SELECT photo_count FROM listener_profiles WHERE user_id = $1 FOR UPDATE',
+        [req.user.id],
+      );
+      if (!rows[0]) throw notFound('Listener profile');
+      if (rows[0].photo_count >= LISTENER_PHOTOS.maxCount) {
+        throw badRequest('photo_limit', `You can have at most ${LISTENER_PHOTOS.maxCount} photos`);
+      }
+      // UNIQUE(storage_path): a double-tapped save is a no-op, not a duplicate.
+      await client.query(
+        `INSERT INTO listener_photos (listener_id, storage_path, mime_type, size_bytes)
+         VALUES ($1, $2, $3, $4) ON CONFLICT (storage_path) DO NOTHING`,
+        [req.user.id, path, mimeType, object.sizeBytes],
+      );
+    });
+
+    res.status(201).json(await serializePhotos(req.user.id));
+  }),
+);
+
+router.delete(
+  '/me/photos/:photoId',
+  authenticate,
+  requireListener,
+  validate(z.object({ photoId: z.coerce.number().int().positive() }), 'params'),
+  asyncHandler(async (req, res) => {
+    const removedPath = await withTransaction(async (client) => {
+      const { rows: profile } = await client.query(
+        'SELECT kyc_status, photo_count FROM listener_profiles WHERE user_id = $1 FOR UPDATE',
+        [req.user.id],
+      );
+      if (!profile[0]) throw notFound('Listener profile');
+
+      const { rows: photo } = await client.query(
+        'SELECT storage_path FROM listener_photos WHERE id = $1 AND listener_id = $2',
+        [req.params.photoId, req.user.id],
+      );
+      if (!photo[0]) throw notFound('Photo');
+
+      // An approved listener must stay complete: removing a photo that would
+      // drop them below the minimum would silently delist them, so require
+      // adding a replacement first.
+      if (
+        profile[0].kyc_status === KYC_STATUS.APPROVED &&
+        profile[0].photo_count <= LISTENER_PHOTOS.minCount
+      ) {
+        throw badRequest(
+          'photos_minimum',
+          `Verified listeners need at least ${LISTENER_PHOTOS.minCount} photos. Add another before removing this one.`,
+        );
+      }
+
+      await client.query('DELETE FROM listener_photos WHERE id = $1', [req.params.photoId]);
+      return photo[0].storage_path;
+    });
+
+    await listenerStorage.remove(removedPath);
+    res.json(await serializePhotos(req.user.id));
+  }),
+);
+
 router.get(
   '/:id',
   authenticate,
@@ -140,7 +308,7 @@ router.get(
                 WHERE r.listener_id = lp.user_id AND r.kind = 'follow') AS follower_count
          FROM listener_profiles lp
          JOIN users u ON u.id = lp.user_id
-        WHERE lp.user_id = $1 AND lp.kyc_status = $2 AND u.status = 'active'`,
+        WHERE lp.user_id = $1 AND ${ELIGIBLE} AND u.status = 'active'`,
       [req.params.id, KYC_STATUS.APPROVED, req.user.id],
     );
 
@@ -179,15 +347,26 @@ router.patch(
   validate(z.object({ isOnline: z.boolean() })),
   asyncHandler(async (req, res) => {
     const { rows } = await query(
-      'SELECT kyc_status, is_busy FROM listener_profiles WHERE user_id = $1',
+      'SELECT kyc_status, photo_count, is_busy FROM listener_profiles WHERE user_id = $1',
       [req.user.id],
     );
 
     const profile = rows[0];
     if (!profile) throw notFound('Listener profile');
 
-    if (req.body.isOnline && profile.kyc_status !== KYC_STATUS.APPROVED) {
-      throw badRequest('kyc_required', 'Complete verification before going online');
+    // Going offline is always allowed; going online requires full eligibility.
+    // KYC is reported first because verification itself already requires the
+    // photos — an unverified listener's next step is verification.
+    if (req.body.isOnline) {
+      if (profile.kyc_status !== KYC_STATUS.APPROVED) {
+        throw badRequest('kyc_required', 'Complete verification before going online');
+      }
+      if (profile.photo_count < LISTENER_PHOTOS.minCount) {
+        throw badRequest(
+          'photos_required',
+          `Add at least ${LISTENER_PHOTOS.minCount} profile photos before going online`,
+        );
+      }
     }
 
     await presence.setOnline(req.user.id, req.body.isOnline);
@@ -220,7 +399,11 @@ router.patch(
   }),
 );
 
-/** KYC submission. Approval is a manual admin action. */
+/**
+ * KYC submission — submitting the listener application for review. Approval
+ * is a manual admin action. An application is not complete without the
+ * minimum photos, so it cannot be submitted before they are uploaded.
+ */
 router.post(
   '/kyc',
   authenticate,
@@ -233,6 +416,18 @@ router.post(
     }),
   ),
   asyncHandler(async (req, res) => {
+    const { rows: current } = await query(
+      'SELECT photo_count FROM listener_profiles WHERE user_id = $1',
+      [req.user.id],
+    );
+    if (!current[0]) throw notFound('Listener profile');
+    if (current[0].photo_count < LISTENER_PHOTOS.minCount) {
+      throw badRequest(
+        'photos_required',
+        `Add at least ${LISTENER_PHOTOS.minCount} profile photos before submitting for verification`,
+      );
+    }
+
     const { rows } = await query(
       `UPDATE listener_profiles
           SET kyc_name = $2, kyc_doc_url = $3, upi_id = $4,
@@ -287,12 +482,12 @@ router.put(
       throw badRequest('self_relation', 'You cannot do that to your own profile');
     }
 
-    // Only approved listeners can be followed or favourited — otherwise a user
+    // Only eligible listeners can be followed or favourited — otherwise a user
     // could accumulate relations to accounts they can never actually see.
     const { rows: exists } = await query(
       `SELECT 1 FROM listener_profiles lp JOIN users u ON u.id = lp.user_id
-        WHERE lp.user_id = $1 AND lp.kyc_status = $2 AND u.status = 'active'`,
-      [id, KYC_STATUS.APPROVED],
+        WHERE lp.user_id = $1 AND ${ELIGIBLE} AND u.status = 'active'`,
+      [id],
     );
     if (!exists[0]) throw notFound('Listener');
 

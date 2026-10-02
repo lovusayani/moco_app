@@ -12,11 +12,11 @@ const logger = require('../../utils/logger');
 const {
   CALL_STATUS,
   CALL_END_REASON,
-  KYC_STATUS,
   TICK_INTERVAL_SECONDS,
   FREE_TRIAL_SECONDS,
   coinsPerMinute,
   listenerSharePerMinute,
+  listenerEligibleSql,
 } = require('../../utils/constants');
 const { badRequest, notFound, conflict, insufficientBalance, forbidden } =
   require('../../utils/errors');
@@ -61,13 +61,16 @@ async function initiate({ caller, listenerId, callType }) {
 
   const call = await withTransaction(async (client) => {
     // Claim the listener. The WHERE clause is the lock: only one caller can
-    // flip is_busy from false to true.
+    // flip is_busy from false to true. Eligibility (approved KYC AND minimum
+    // photos) is part of the same predicate, so an ineligible listener can
+    // never be claimed for a paid call even if is_online were somehow stale.
     const { rows: claimed } = await client.query(
-      `UPDATE listener_profiles
+      `UPDATE listener_profiles lp
           SET is_busy = TRUE, updated_at = now()
-        WHERE user_id = $1 AND is_online = TRUE AND is_busy = FALSE AND kyc_status = $2
-        RETURNING user_id, audio_rate, video_rate`,
-      [listenerId, KYC_STATUS.APPROVED],
+        WHERE lp.user_id = $1 AND lp.is_online = TRUE AND lp.is_busy = FALSE
+          AND ${listenerEligibleSql('lp')}
+        RETURNING lp.user_id, lp.audio_rate, lp.video_rate`,
+      [listenerId],
     );
 
     if (claimed.length === 0) {

@@ -5,29 +5,67 @@ const { z } = require('zod');
 const { query, withTransaction } = require('../../config/db');
 const { payoutQueue } = require('../../workers/queues');
 const notifications = require('../notifications/notifications.service');
+const listenerStorage = require('../../integrations/listener.storage');
 const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
 const { authenticate, requireAdmin } = require('../../middleware/auth');
 const { notFound, badRequest } = require('../../utils/errors');
-const { KYC_STATUS, PAYOUT_STATUS } = require('../../utils/constants');
+const { KYC_STATUS, PAYOUT_STATUS, LISTENER_PHOTOS } = require('../../utils/constants');
 const logger = require('../../utils/logger');
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
 
-/** KYC queue. */
+/** Signed, short-lived URLs for one listener's photos — admin review only.
+ * The bucket is private; these are never served by any public endpoint. */
+async function listenerPhotosFor(userId) {
+  const { rows } = await query(
+    `SELECT id, storage_path, mime_type, size_bytes, created_at FROM listener_photos
+      WHERE listener_id = $1 ORDER BY created_at, id`,
+    [userId],
+  );
+  return Promise.all(
+    rows.map(async (row) => ({
+      id: row.id,
+      url: await listenerStorage.createViewUrl(row.storage_path),
+      mimeType: row.mime_type,
+      sizeBytes: row.size_bytes,
+      createdAt: row.created_at,
+    })),
+  );
+}
+
+/** KYC queue. Each entry carries its photos so the reviewer sees everything
+ * the decision depends on in one place. */
 router.get(
   '/kyc',
   asyncHandler(async (req, res) => {
     const { rows } = await query(
       `SELECT lp.user_id, lp.kyc_name, lp.kyc_doc_url, lp.upi_id, lp.updated_at,
-              u.phone, u.display_name
+              lp.photo_count, u.phone, u.display_name
          FROM listener_profiles lp JOIN users u ON u.id = lp.user_id
         WHERE lp.kyc_status = $1
         ORDER BY lp.updated_at ASC LIMIT 100`,
       [KYC_STATUS.PENDING],
     );
-    res.json({ pending: rows });
+    const pending = await Promise.all(
+      rows.map(async (row) => ({
+        ...row,
+        minPhotos: LISTENER_PHOTOS.minCount,
+        photos: await listenerPhotosFor(row.user_id),
+      })),
+    );
+    res.json({ pending });
+  }),
+);
+
+/** Any listener's photos, for review outside the pending queue. */
+router.get(
+  '/listeners/:userId/photos',
+  validate(z.object({ userId: z.coerce.number().int().positive() }), 'params'),
+  asyncHandler(async (req, res) => {
+    const photos = await listenerPhotosFor(req.params.userId);
+    res.json({ userId: req.params.userId, photos, minPhotos: LISTENER_PHOTOS.minCount });
   }),
 );
 
@@ -38,13 +76,28 @@ router.post(
   asyncHandler(async (req, res) => {
     const nextStatus = req.body.approve ? KYC_STATUS.APPROVED : KYC_STATUS.REJECTED;
 
+    // Approval cannot bypass the photo rule: the photo check and the status
+    // change are one statement, so a photo deleted concurrently cannot slip
+    // an incomplete listener through. Rejection is always allowed.
     const { rows } = await query(
       `UPDATE listener_profiles SET kyc_status = $2, updated_at = now()
-        WHERE user_id = $1 RETURNING user_id, kyc_status`,
+        WHERE user_id = $1
+          AND ($2 <> '${KYC_STATUS.APPROVED}' OR photo_count >= ${LISTENER_PHOTOS.minCount})
+        RETURNING user_id, kyc_status`,
       [req.params.userId, nextStatus],
     );
 
-    if (rows.length === 0) throw notFound('Listener profile');
+    if (rows.length === 0) {
+      const { rows: exists } = await query(
+        'SELECT photo_count FROM listener_profiles WHERE user_id = $1',
+        [req.params.userId],
+      );
+      if (!exists[0]) throw notFound('Listener profile');
+      throw badRequest(
+        'photos_required',
+        `This listener has ${exists[0].photo_count} of the ${LISTENER_PHOTOS.minCount} required photos`,
+      );
+    }
 
     await notifications.create({
       userId: rows[0].user_id,

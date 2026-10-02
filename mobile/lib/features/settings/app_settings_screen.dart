@@ -7,6 +7,8 @@ import '../../core/theme/moco_theme.dart';
 import '../../core/widgets/moco_background.dart';
 import '../../core/widgets/moco_surfaces.dart';
 import 'app_settings_controller.dart';
+import '../../core/routing/app_router.dart';
+import '../../core/routing/pop_or_go.dart';
 
 /// App Settings — display-only preferences (theme, font, Discovery layout)
 /// plus a placeholder for the still-deferred app icon picker. Nothing here
@@ -23,6 +25,7 @@ class AppSettingsScreen extends ConsumerWidget {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         title: const Text('App settings'),
+        leading: deepLinkBackButton(context, Routes.profile),
       ),
       body: MocoBackground(
         child: SafeArea(

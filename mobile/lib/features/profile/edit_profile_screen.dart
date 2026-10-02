@@ -7,6 +7,8 @@ import '../../core/theme/moco_colors.dart';
 import '../../core/theme/moco_spacing.dart';
 import '../../core/widgets/moco_background.dart';
 import '../../core/widgets/moco_surfaces.dart';
+import '../../core/routing/app_router.dart';
+import '../../core/routing/pop_or_go.dart';
 
 const _languages = {'en': 'English', 'hi': 'हिंदी', 'te': 'తెలుగు'};
 const _genders = {'female': 'Female', 'male': 'Male', 'other': 'Other'};
@@ -92,7 +94,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 
       if (!mounted) return;
       setState(() => _busy = false);
-      Navigator.of(context).pop();
+      popOrGo(context, Routes.profile);
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -113,6 +115,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         title: const Text('Edit profile'),
+        leading: deepLinkBackButton(context, Routes.profile),
       ),
       body: MocoBackground(
         child: SafeArea(

@@ -565,4 +565,42 @@ void main() {
       expect(controller.state.callId, 6);
     });
   });
+
+  group('platform without calling (web)', () {
+    late CallController webController;
+
+    setUp(() {
+      webController = CallController(
+        callsApi: callsApi,
+        socket: socket,
+        agora: agora,
+        callingSupported: false,
+      );
+    });
+
+    tearDown(() => webController.dispose());
+
+    test('initiateCall never reaches the server, so no listener is claimed', () async {
+      await webController.initiateCall(listener: _listener, type: CallType.audio);
+
+      expect(webController.state.phase, CallPhase.idle);
+      verifyNever(
+        () => callsApi.initiate(listenerId: any(named: 'listenerId'), type: any(named: 'type')),
+      );
+    });
+
+    test('an incoming call is tracked but can never be accepted', () async {
+      emit('call:incoming', {
+        'callId': 5,
+        'callType': 'audio',
+        'caller': {'id': 3, 'name': 'Rahul'},
+      });
+      expect(webController.state.phase, CallPhase.incoming);
+
+      await webController.acceptCall();
+
+      verifyNever(() => callsApi.accept(any()));
+      verifyNever(() => agora.join(credentials: any(named: 'credentials'), type: any(named: 'type')));
+    });
+  });
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/api_exception.dart';
+import '../../core/payments/purchase_provider.dart';
 import '../../core/providers.dart';
 import '../../core/theme/moco_colors.dart';
 import '../../core/theme/moco_spacing.dart';
@@ -81,9 +82,12 @@ class WalletScreen extends ConsumerWidget {
                   ),
                   if (!provider.isAvailable) ...[
                     const SizedBox(height: MocoSpacing.md),
-                     Text(
-                      'Real purchases arrive with Google Play Billing. '
-                      'Coin packs are shown at their real prices already.',
+                    Text(
+                      provider is UnsupportedPlatformPurchaseProvider
+                          ? provider.reason
+                          : 'Real purchases arrive with Google Play Billing. '
+                                'Coin packs are shown at their real prices already.',
+                      key: const Key('wallet_purchase_unavailable'),
                       style: TextStyle(color: MocoColors.textMuted, fontSize: 12.5),
                     ),
                   ],

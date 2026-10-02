@@ -1,6 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
+import 'package:go_router/go_router.dart';
 
 import 'core/auth/auth_state.dart';
 import 'core/calling/call_controller.dart';
@@ -9,10 +12,19 @@ import 'core/routing/app_router.dart';
 import 'core/storage/secure_store.dart';
 import 'core/theme/moco_colors.dart';
 import 'core/theme/moco_theme.dart';
+import 'core/widgets/moco_app_frame.dart';
 import 'features/settings/app_settings_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Web: real paths (/chat/12) instead of hash URLs, and pushed screens are
+  // written to the address bar too — so a refresh or a shared link reopens
+  // the screen the user was on. Both are no-ops on Android/iOS. Path URLs
+  // need the host to serve index.html for unknown paths (see WEB.md).
+  usePathUrlStrategy();
+  GoRouter.optionURLReflectsImperativeAPIs = true;
+  final launchLocation = kIsWeb ? _webLaunchLocation() : null;
 
   // Let the app's own gradient show through the system bars.
   SystemChrome.setSystemUIOverlayStyle(
@@ -29,10 +41,22 @@ Future<void> main() async {
 
   runApp(
     ProviderScope(
-      overrides: [appPreferencesProvider.overrideWithValue(prefs)],
+      overrides: [
+        appPreferencesProvider.overrideWithValue(prefs),
+        if (launchLocation != null)
+          initialLocationProvider.overrideWithValue(launchLocation),
+      ],
       child: const MocoApp(),
     ),
   );
+}
+
+/// The in-app location the page was opened at (`/chat/12?x=1`), or null for
+/// the site root. Read before runApp — see [initialLocationProvider].
+String? _webLaunchLocation() {
+  final base = Uri.base;
+  if (base.path.isEmpty || base.path == '/') return null;
+  return base.hasQuery ? '${base.path}?${base.query}' : base.path;
 }
 
 class MocoApp extends ConsumerStatefulWidget {
@@ -120,6 +144,8 @@ class _MocoAppState extends ConsumerState<MocoApp> with WidgetsBindingObserver {
         theme: MocoTheme.light(font: fontChoice),
         darkTheme: MocoTheme.dark(font: fontChoice),
         themeMode: themeMode,
+        scrollBehavior: _scrollBehavior,
+        builder: _frame,
         home: const _BootstrapScreen(),
       );
     }
@@ -130,9 +156,21 @@ class _MocoAppState extends ConsumerState<MocoApp> with WidgetsBindingObserver {
       theme: MocoTheme.light(font: fontChoice),
       darkTheme: MocoTheme.dark(font: fontChoice),
       themeMode: themeMode,
+      scrollBehavior: _scrollBehavior,
+      builder: _frame,
       routerConfig: ref.watch(routerProvider),
     );
   }
+}
+
+/// Web only: mouse/trackpad drag scrolling for desktop browsers. Native keeps
+/// Flutter's default behaviour.
+const ScrollBehavior? _scrollBehavior = kIsWeb ? MocoWebScrollBehavior() : null;
+
+/// Web only: the centred phone-width column on wide windows (MocoAppFrame).
+Widget _frame(BuildContext context, Widget? child) {
+  final content = child ?? const SizedBox.shrink();
+  return kIsWeb ? MocoAppFrame(child: content) : content;
 }
 
 /// Neutral loading surface shown while the stored session is verified.

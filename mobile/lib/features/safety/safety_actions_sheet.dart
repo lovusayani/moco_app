@@ -22,6 +22,9 @@ Future<void> showSafetyActionsSheet({
 }) {
   return showModalBottomSheet<void>(
     context: context,
+    // Root navigator: opened from a tab (the Feed) the sheet would otherwise
+    // sit in the shell's navigator, underneath AppShell's floating nav bar.
+    useRootNavigator: true,
     backgroundColor: MocoColors.backgroundElevated,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(MocoRadius.xl)),

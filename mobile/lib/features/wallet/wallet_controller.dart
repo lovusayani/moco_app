@@ -6,6 +6,7 @@ import '../../core/config/env.dart';
 import '../../core/errors/api_exception.dart';
 import '../../core/payments/google_play_billing_client.dart';
 import '../../core/payments/purchase_provider.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/providers.dart';
 import '../../shared/models/app_config.dart';
 import '../../shared/models/wallet.dart';
@@ -108,11 +109,15 @@ final googlePlayBillingClientProvider = Provider<GooglePlayBillingClient>((ref) 
   return client;
 });
 
-/// Exactly one of these is ever offered: the mock provider only in
+/// At most one of these is ever offered: the mock provider only in
 /// development (it exercises the backend's own dev-only unsigned-webhook
-/// path), Google Play Billing everywhere else. There is no build
-/// configuration in which both — or neither — are considered available,
-/// which is what a production build cannot accidentally expose mock credits.
+/// path), Google Play Billing in every other native build. There is no build
+/// configuration in which both are considered available, which is what a
+/// production build cannot accidentally expose mock credits.
+///
+/// A non-development web build gets neither: Google Play Billing does not
+/// exist in a browser, so [UnsupportedPlatformPurchaseProvider] is returned
+/// and the billing client is never constructed.
 final purchaseProviderProvider = Provider<PurchaseProvider>((ref) {
   if (Env.isDevelopment) {
     final session = ref.watch(authControllerProvider);
@@ -120,6 +125,11 @@ final purchaseProviderProvider = Provider<PurchaseProvider>((ref) {
       ref.watch(walletApiProvider),
       session,
       isDevelopment: true,
+    );
+  }
+  if (!ref.watch(platformCapabilitiesProvider).supportsPlayBilling) {
+    return const UnsupportedPlatformPurchaseProvider(
+      PlatformCapabilities.purchasesUnavailableMessage,
     );
   }
   return GooglePlayBillingProvider(

@@ -8,6 +8,8 @@ import '../../core/theme/moco_spacing.dart';
 import '../../core/widgets/moco_background.dart';
 import '../../core/widgets/moco_surfaces.dart';
 import 'account_deletion_controller.dart';
+import '../../core/routing/app_router.dart';
+import '../../core/routing/pop_or_go.dart';
 
 /// Account settings. Deliberately small: sign out and account deletion are
 /// the only two actions here — no invented preferences system.
@@ -20,7 +22,11 @@ class AccountSettingsScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: MocoColors.backgroundPrimary,
-      appBar: AppBar(backgroundColor: Colors.transparent, title: const Text('Account settings')),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        title: const Text('Account settings'),
+        leading: deepLinkBackButton(context, Routes.profile),
+      ),
       body: MocoBackground(
         child: SafeArea(
           child: ListView(

@@ -191,6 +191,13 @@ Test flow:
    configured: tap the photo icon, pick an image from the gallery, confirm it
    appears in both devices' threads.
 
+### Web / PWA
+
+The same codebase builds as an installable PWA (`flutter build web`). Calling
+and Google Play Billing are deliberately unavailable on web. Build, local
+serving, deployment (HTTPS, same-origin nginx) and the full platform audit are
+in [`WEB.md`](WEB.md).
+
 ## Tests
 
 ```bash

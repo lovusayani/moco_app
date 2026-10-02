@@ -7,6 +7,8 @@ import '../../core/theme/moco_spacing.dart';
 import '../../core/utils/time_format.dart';
 import '../../core/widgets/moco_states.dart';
 import 'ledger_controller.dart';
+import '../../core/routing/app_router.dart';
+import '../../core/routing/pop_or_go.dart';
 
 /// One paginated ledger screen for both the coin ledger and the listener
 /// earnings ledger — same list shape (append-only, newest first, cursor
@@ -32,7 +34,11 @@ class LedgerScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: MocoColors.backgroundPrimary,
-      appBar: AppBar(backgroundColor: Colors.transparent, title: Text(title)),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        title: Text(title),
+        leading: deepLinkBackButton(context, Routes.profile),
+      ),
       body: _Body(state: state, controller: controller, currencyPrefix: currencyPrefix),
     );
   }

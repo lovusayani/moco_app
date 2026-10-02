@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../core/calling/call_controller.dart';
 import '../../core/calling/call_session.dart';
 import '../../core/errors/api_exception.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/providers.dart';
 import '../../core/routing/app_router.dart';
 import '../../core/theme/moco_colors.dart';
@@ -21,9 +22,11 @@ import '../../core/widgets/moco_states.dart';
 import '../../shared/models/call.dart';
 import '../../shared/models/chat.dart';
 import '../../shared/models/listener.dart';
+import '../chats/chats_controller.dart';
 import '../listener_profile/listener_profile_controller.dart';
 import '../safety/safety_actions_sheet.dart';
 import 'chat_thread_controller.dart';
+import '../../core/routing/pop_or_go.dart';
 
 const _quickReactions = ['❤️', '😂', '👍', '😮', '😢', '🙏'];
 
@@ -129,6 +132,18 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     final state = ref.watch(chatThreadControllerProvider(widget.counterpartyId));
     final myUserId = ref.watch(authControllerProvider).user?.id;
 
+    // Opened by URL (a web refresh or deep link) there is no Conversation
+    // passed via `extra`, so the header falls back to the inbox's copy of it.
+    final fromInbox = widget.counterpartyName == null
+        ? ref.watch(
+            chatsControllerProvider.select(
+              (s) => s.conversations
+                  .where((c) => c.counterpartyId == widget.counterpartyId)
+                  .firstOrNull,
+            ),
+          )
+        : null;
+
     ref.listen(chatThreadControllerProvider(widget.counterpartyId), (previous, next) {
       final grew = (previous?.messages.length ?? 0) < next.messages.length;
       final wasNearBottom =
@@ -146,8 +161,9 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
             children: [
               _ThreadHeader(
                 counterpartyId: widget.counterpartyId,
-                name: widget.counterpartyName ?? 'Chat',
-                avatarUrl: widget.counterpartyAvatarUrl,
+                name: widget.counterpartyName ?? fromInbox?.displayName ?? 'Chat',
+                avatarUrl:
+                    widget.counterpartyAvatarUrl ?? fromInbox?.counterpartyAvatarUrl,
               ),
               Expanded(
                 child: _Body(
@@ -199,6 +215,17 @@ class _ThreadHeader extends ConsumerWidget {
   /// the same profile endpoint the profile screen already calls. No new
   /// endpoint, no new call-initiation logic.
   Future<void> _call(BuildContext context, WidgetRef ref, CallType type) async {
+    if (!ref.read(platformCapabilitiesProvider).supportsCalling) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          key: Key('calling_unavailable_snackbar'),
+          content: Text(PlatformCapabilities.callingUnavailableMessage),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
     final busy = ref.read(
       callControllerProvider.select((s) => s.phase != CallPhase.idle || s.isBusy),
     );
@@ -252,7 +279,7 @@ class _ThreadHeader extends ConsumerWidget {
               IconButton(
                 key: const Key('chat_thread_back'),
                 icon:  Icon(Icons.arrow_back_rounded, color: MocoColors.textPrimary),
-                onPressed: () => context.pop(),
+                onPressed: () => popOrGo(context, Routes.chats),
               ),
               MocoAvatar(name: name, imageUrl: avatarUrl, size: 38),
               const SizedBox(width: MocoSpacing.sm),

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/calling/call_controller.dart';
 import '../../core/calling/call_session.dart';
 import '../../core/errors/api_exception.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/providers.dart';
 import '../../core/routing/app_router.dart';
 import '../../core/theme/moco_colors.dart';
@@ -17,6 +18,7 @@ import '../../shared/models/call.dart';
 import '../../shared/models/listener.dart';
 import '../safety/safety_actions_sheet.dart';
 import 'listener_profile_controller.dart';
+import '../../core/routing/pop_or_go.dart';
 
 /// Content tabs.
 ///
@@ -276,7 +278,7 @@ class _ProfileBody extends ConsumerWidget {
           child: MocoIconButton(
             key: const Key('listener_profile_back'),
             icon: Icons.arrow_back_rounded,
-            onPressed: () => context.pop(),
+            onPressed: () => popOrGo(context, Routes.discovery),
           ),
         ),
 
@@ -713,6 +715,17 @@ class _CallBar extends ConsumerWidget {
     WidgetRef ref,
     CallType type,
   ) async {
+    if (!ref.read(platformCapabilitiesProvider).supportsCalling) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          key: Key('calling_unavailable_snackbar'),
+          content: Text(PlatformCapabilities.callingUnavailableMessage),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
     final controller = ref.read(callControllerProvider.notifier);
     await controller.initiateCall(listener: listener, type: type);
     if (!context.mounted) return;
@@ -794,6 +807,18 @@ class _CallBar extends ConsumerWidget {
                 ),
             ],
           ),
+          // The rates stay visible on web so the profile reads the same, but
+          // the bar says up front that the call itself happens in the app.
+          if (!ref.watch(platformCapabilitiesProvider).supportsCalling)
+            Padding(
+              padding: const EdgeInsets.only(top: MocoSpacing.sm),
+              child: Text(
+                'Calls are available in the Moco Android app.',
+                key: const Key('calling_unavailable_note'),
+                textAlign: TextAlign.center,
+                style: TextStyle(color: MocoColors.textMuted, fontSize: 12),
+              ),
+            ),
         ],
       ),
     );

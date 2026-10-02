@@ -75,6 +75,27 @@ class MockPurchaseProvider implements PurchaseProvider {
   }
 }
 
+/// The purchase path on a platform that has none — the web build.
+///
+/// Google Play Billing is an Android store API and the backend only verifies
+/// Play purchase tokens, so a browser has no legitimate way to pay. Rather
+/// than fall back to something that looks like a purchase, this provider is
+/// never available and refuses outright if called anyway. It never touches
+/// `in_app_purchase`, so the plugin is not even initialised on web.
+class UnsupportedPlatformPurchaseProvider implements PurchaseProvider {
+  const UnsupportedPlatformPurchaseProvider(this.reason);
+
+  /// Shown on the wallet in place of the purchase path.
+  final String reason;
+
+  @override
+  bool get isAvailable => false;
+
+  @override
+  Future<PurchaseResult> purchase(CoinPack pack) async =>
+      PurchaseResult.failure(ApiException(kind: ApiErrorKind.unknown, message: reason));
+}
+
 /// Google Play Billing — the production purchase path.
 ///
 /// The architecture end to end: Flutter starts a purchase with Play Billing

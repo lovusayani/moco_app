@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/errors/api_exception.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/providers.dart';
 import '../../core/routing/app_router.dart';
 import '../../core/theme/moco_colors.dart';
@@ -320,6 +321,7 @@ class _ListenerSectionsState extends ConsumerState<_ListenerSections> {
             isOnline: listener?.isOnline ?? false,
             isBusy: state.isTogglingAvailability,
             error: state.availabilityError,
+            canGoOnline: ref.watch(platformCapabilitiesProvider).supportsCalling,
             onChanged: controller.setAvailability,
           ),
         ],
@@ -385,12 +387,18 @@ class _AvailabilityCard extends StatelessWidget {
     required this.isBusy,
     required this.onChanged,
     this.error,
+    this.canGoOnline = true,
   });
 
   final bool isOnline;
   final bool isBusy;
   final ApiException? error;
   final ValueChanged<bool> onChanged;
+
+  /// False where calls cannot be answered (web): going online there would
+  /// route paying callers to a device that can only show "answer elsewhere".
+  /// Going offline is always allowed.
+  final bool canGoOnline;
 
   @override
   Widget build(BuildContext context) {
@@ -413,11 +421,19 @@ class _AvailabilityCard extends StatelessWidget {
               Switch(
                 key: const Key('profile_availability_switch'),
                 value: isOnline,
-                onChanged: isBusy ? null : onChanged,
+                onChanged: isBusy || (!isOnline && !canGoOnline) ? null : onChanged,
                 activeThumbColor: MocoColors.accentPrimary,
               ),
             ],
           ),
+          if (!canGoOnline) ...[
+            const SizedBox(height: MocoSpacing.sm),
+            Text(
+              PlatformCapabilities.goOnlineUnavailableMessage,
+              key: const Key('profile_go_online_unavailable'),
+              style: TextStyle(color: MocoColors.textMuted, fontSize: 12.5),
+            ),
+          ],
           if (error != null) ...[
             const SizedBox(height: MocoSpacing.sm),
             Text(

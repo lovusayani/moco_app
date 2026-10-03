@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/errors/api_exception.dart';
 import '../../core/providers.dart';
@@ -87,14 +88,21 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       );
 
       final user = ref.read(authControllerProvider).user;
+      var becameListener = false;
       if (_applyAsListener && !(user?.canBeListener ?? false)) {
         await ref.read(usersApiProvider).becomeListener();
         await auth.refreshUser();
+        becameListener = true;
       }
 
       if (!mounted) return;
       setState(() => _busy = false);
-      popOrGo(context, Routes.profile);
+      if (becameListener) {
+        // Next step is photos + verification; Back still returns to Profile.
+        context.pushReplacement(Routes.listenerApplication);
+      } else {
+        popOrGo(context, Routes.profile);
+      }
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {

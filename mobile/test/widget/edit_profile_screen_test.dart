@@ -177,13 +177,21 @@ void main() {
       (_) async => {'role': 'both', 'kycStatus': 'unsubmitted', 'kycRequired': true},
     );
 
-    await tester.pumpWidget(await subject(startWithListenerApplication: true));
+    final overrides = await signedInOverrides(user: _user, usersApi: usersApi);
+    await tester.pumpWidget(
+      wrapRoutedScreen(
+        const EditProfileScreen(startWithListenerApplication: true),
+        overrides: overrides,
+        destination: '/profile/listener-application',
+      ),
+    );
     await tester.pump();
 
     await tester.tap(find.byKey(const Key('edit_profile_save')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pumpAndSettle();
 
     verify(() => usersApi.becomeListener()).called(1);
+    // Next step after applying is photos + verification, not back to Profile.
+    expect(find.text('destination'), findsOneWidget);
   });
 }

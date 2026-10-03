@@ -1,4 +1,5 @@
 import '../../shared/models/listener.dart';
+import '../../shared/models/listener_photos.dart';
 import 'api_client.dart';
 
 /// Everything `GET /api/listeners` accepts.
@@ -136,6 +137,63 @@ class ListenersApi {
         data: {'isOnline': isOnline},
       ),
       (data) => ListenerStatusResult.fromJson(Map<String, dynamic>.from(data as Map)),
+    );
+  }
+
+  // ---------------------------------------------------------- own photos
+
+  /// `GET /listeners/me/photos` — the signed-in listener's photos (signed URLs).
+  Future<ListenerPhotos> myPhotos() {
+    return _client.request(
+      () => _client.dio.get<dynamic>('/listeners/me/photos'),
+      (data) => ListenerPhotos.fromJson(Map<String, dynamic>.from(data as Map)),
+    );
+  }
+
+  /// `POST /listeners/me/photos/upload-url` — the backend validates the MIME
+  /// type and mints the storage path; the app never chooses one.
+  Future<ListenerPhotoUploadAuthorization> requestPhotoUploadUrl(String mimeType) {
+    return _client.request(
+      () => _client.dio.post<dynamic>(
+        '/listeners/me/photos/upload-url',
+        data: {'mimeType': mimeType},
+      ),
+      (data) => ListenerPhotoUploadAuthorization.fromJson(Map<String, dynamic>.from(data as Map)),
+    );
+  }
+
+  /// `POST /listeners/me/photos` — registers an uploaded object. The backend
+  /// re-checks ownership, existence, size and the photo limit.
+  Future<ListenerPhotos> registerPhoto(String path) {
+    return _client.request(
+      () => _client.dio.post<dynamic>('/listeners/me/photos', data: {'path': path}),
+      (data) => ListenerPhotos.fromJson(Map<String, dynamic>.from(data as Map)),
+    );
+  }
+
+  /// `DELETE /listeners/me/photos/:id` — refused (`photos_minimum`) when it
+  /// would drop a verified listener below the minimum.
+  Future<ListenerPhotos> deletePhoto(int photoId) {
+    return _client.request(
+      () => _client.dio.delete<dynamic>('/listeners/me/photos/$photoId'),
+      (data) => ListenerPhotos.fromJson(Map<String, dynamic>.from(data as Map)),
+    );
+  }
+
+  /// `POST /listeners/kyc` — submits (or, after a rejection, resubmits) the
+  /// application for review. Refused with `photos_required` until the minimum
+  /// photos exist. Returns the resulting KYC status.
+  Future<String> submitKyc({
+    required String fullName,
+    required String docUrl,
+    required String upiId,
+  }) {
+    return _client.request(
+      () => _client.dio.post<dynamic>(
+        '/listeners/kyc',
+        data: {'fullName': fullName, 'docUrl': docUrl, 'upiId': upiId},
+      ),
+      (data) => (Map<String, dynamic>.from(data as Map))['kycStatus'] as String? ?? 'pending',
     );
   }
 

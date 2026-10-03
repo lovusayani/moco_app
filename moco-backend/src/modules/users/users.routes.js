@@ -41,6 +41,12 @@ function serializeUser(row) {
           earningsBalance: row.earnings_balance,
           rating: Number(row.rating),
           totalCalls: row.total_calls,
+          kycSubmittedAt: row.kyc_submitted_at ?? null,
+          // The reviewer's reason is written for the creator only on a
+          // rejection; on an approval the same column holds an INTERNAL
+          // admin note, which must never reach the app.
+          kycRejectionReason:
+            row.kyc_status === KYC_STATUS.REJECTED ? row.kyc_review_note ?? null : null,
           photoCount: row.photo_count ?? 0,
           minPhotos: LISTENER_PHOTOS.minCount,
           maxPhotos: LISTENER_PHOTOS.maxCount,
@@ -62,7 +68,7 @@ const USER_SELECT = `
   u.free_trial_used, u.created_at,
   COALESCE(w.coin_balance, 0) AS coin_balance,
   lp.is_online, lp.kyc_status, lp.earnings_balance, lp.rating, lp.total_calls,
-  lp.photo_count`;
+  lp.photo_count, lp.kyc_submitted_at, lp.kyc_review_note`;
 
 const USER_JOINS = `
   FROM users u

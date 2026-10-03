@@ -128,6 +128,25 @@ void main() {
     expect(find.byKey(const Key('profile_availability_card')), findsNothing);
   });
 
+  testWidgets('an approved listener without enough photos gets no switch, only the reason', (tester) async {
+    const incomplete = MocoUser(
+      id: 4,
+      phone: '+919800000004',
+      displayName: 'Kavya',
+      role: 'both',
+      listener: ListenerState(kycStatus: 'approved', photoCount: 1, blockers: ['photos']),
+    );
+    await pumpReady(tester, incomplete);
+    await tester.tap(find.byKey(const Key('profile_role_listener')));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const Key('profile_availability_card')), findsNothing);
+    expect(find.byKey(const Key('listener_eligibility_card')), findsOneWidget);
+    expect(find.text('Add 2 more profile photos (1 of 3 required)'), findsOneWidget);
+    expect(find.byKey(const Key('profile_listener_application_row')), findsOneWidget);
+  });
+
   testWidgets('switching to Listening reveals listener sections, hides caller ones', (tester) async {
     await pumpReady(tester, _bothRoleUser);
 

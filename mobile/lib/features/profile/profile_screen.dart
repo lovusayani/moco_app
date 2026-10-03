@@ -12,6 +12,7 @@ import '../../core/widgets/moco_avatar.dart';
 import '../../core/widgets/moco_states.dart';
 import '../../core/widgets/moco_surfaces.dart';
 import '../../shared/models/user.dart';
+import '../listener_application/listener_application_screen.dart';
 import 'profile_controller.dart';
 
 /// Own Profile.
@@ -314,7 +315,18 @@ class _ListenerSectionsState extends ConsumerState<_ListenerSections> {
         MocoSectionHeader(title: 'Listener status'),
         const SizedBox(height: MocoSpacing.md),
         _KycStatusCard(kycStatus: listener?.kycStatus ?? 'unsubmitted'),
-        if (listener?.isApproved ?? false) ...[
+        // Not eligible: the server's own answer to "why can't I go online?"
+        // in the spot the switch would occupy.
+        if (listener != null && !listener.isEligible) ...[
+          const SizedBox(height: MocoSpacing.md),
+          ListenerEligibilityCard(
+            listener: listener,
+            onOpenApplication: () => context.push(Routes.listenerApplication),
+          ),
+        ],
+        // Only an ELIGIBLE listener (approved KYC + minimum photos) gets the
+        // switch; the backend refuses anyone else regardless.
+        if (listener?.isEligible ?? false) ...[
           const SizedBox(height: MocoSpacing.md),
           _AvailabilityCard(
             key: const Key('profile_availability_card'),
@@ -323,6 +335,15 @@ class _ListenerSectionsState extends ConsumerState<_ListenerSections> {
             error: state.availabilityError,
             canGoOnline: ref.watch(platformCapabilitiesProvider).supportsCalling,
             onChanged: controller.setAvailability,
+          ),
+        ],
+        if (listener != null) ...[
+          const SizedBox(height: MocoSpacing.sm),
+          _NavRow(
+            key: const Key('profile_listener_application_row'),
+            icon: Icons.photo_library_outlined,
+            label: 'Photos & verification',
+            onTap: () => context.push(Routes.listenerApplication),
           ),
         ],
         const SizedBox(height: MocoSpacing.xl),

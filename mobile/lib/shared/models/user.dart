@@ -10,28 +10,68 @@ class ListenerState {
     this.earningsBalance = 0,
     this.rating = 0,
     this.totalCalls = 0,
-  });
+    this.photoCount = 0,
+    this.minPhotos = 3,
+    this.maxPhotos = 6,
+    List<String>? blockers,
+    this.kycSubmittedAt,
+    this.kycRejectionReason,
+  }) // A private field cannot be a named parameter, hence the initializer.
+     // ignore: prefer_initializing_formals
+     : _blockers = blockers;
 
   final bool isOnline;
   final String kycStatus;
   final int earningsBalance;
   final double rating;
   final int totalCalls;
+  final int photoCount;
+  final int minPhotos;
+  final int maxPhotos;
+
+  /// What still stands between this listener and being active, computed BY
+  /// THE SERVER ('photos', 'kyc'). Empty means eligible. The app displays
+  /// this rather than re-deriving the rule, so the two can never disagree.
+  /// When the server didn't send any (an older server), approval decides.
+  final List<String>? _blockers;
+  List<String> get blockers =>
+      _blockers ?? (kycStatus == 'approved' ? const [] : const ['kyc']);
+  final DateTime? kycSubmittedAt;
+
+  /// The reviewer's reason, present only when [kycStatus] is 'rejected'.
+  final String? kycRejectionReason;
 
   factory ListenerState.fromJson(Map<String, dynamic> json) {
+    final blockers = json['blockers'];
     return ListenerState(
       isOnline: json['isOnline'] as bool? ?? false,
       kycStatus: json['kycStatus'] as String? ?? 'unsubmitted',
       earningsBalance: (json['earningsBalance'] as num?)?.toInt() ?? 0,
       rating: (json['rating'] as num?)?.toDouble() ?? 0,
       totalCalls: (json['totalCalls'] as num?)?.toInt() ?? 0,
+      photoCount: (json['photoCount'] as num?)?.toInt() ?? 0,
+      minPhotos: (json['minPhotos'] as num?)?.toInt() ?? 3,
+      maxPhotos: (json['maxPhotos'] as num?)?.toInt() ?? 6,
+      blockers: blockers is List
+          ? blockers.map((b) => b.toString()).toList(growable: false)
+          : null,
+      kycSubmittedAt: DateTime.tryParse(json['kycSubmittedAt'] as String? ?? ''),
+      kycRejectionReason: json['kycRejectionReason'] as String?,
     );
   }
 
-  /// Only an approved listener may go online or appear in discovery.
   bool get isApproved => kycStatus == 'approved';
   bool get isAwaitingReview => kycStatus == 'pending';
   bool get wasRejected => kycStatus == 'rejected';
+  bool get hasNotSubmitted => kycStatus == 'unsubmitted';
+
+  /// Active = approved KYC AND the minimum photos, per the server.
+  bool get isEligible => blockers.isEmpty;
+  bool get needsPhotos => photoCount < minPhotos;
+
+  /// KYC can be (re)submitted from draft or after a rejection — the same
+  /// states the backend accepts a submission from.
+  bool get canSubmitKyc => hasNotSubmitted || wasRejected;
 
   @override
   bool operator ==(Object other) =>
@@ -40,11 +80,43 @@ class ListenerState {
       other.kycStatus == kycStatus &&
       other.earningsBalance == earningsBalance &&
       other.rating == rating &&
-      other.totalCalls == totalCalls;
+      other.totalCalls == totalCalls &&
+      other.photoCount == photoCount &&
+      other.blockers.join(',') == blockers.join(',') &&
+      other.kycRejectionReason == kycRejectionReason;
 
   @override
-  int get hashCode =>
-      Object.hash(isOnline, kycStatus, earningsBalance, rating, totalCalls);
+  int get hashCode => Object.hash(
+    isOnline,
+    kycStatus,
+    earningsBalance,
+    rating,
+    totalCalls,
+    photoCount,
+    blockers.join(','),
+    kycRejectionReason,
+  );
+}
+
+/// Why a listener cannot go online, in plain words, derived from the
+/// server's [ListenerState.blockers] and KYC status. Empty when eligible.
+List<String> listenerEligibilityReasons(ListenerState l) {
+  final reasons = <String>[];
+  if (l.needsPhotos) {
+    final missing = l.minPhotos - l.photoCount;
+    reasons.add(
+      'Add $missing more profile photo${missing == 1 ? '' : 's'} '
+      '(${l.photoCount} of ${l.minPhotos} required)',
+    );
+  }
+  if (!l.isApproved) {
+    reasons.add(switch (l.kycStatus) {
+      'pending' => 'Verification is under review',
+      'rejected' => 'Verification was rejected — update and resubmit',
+      _ => 'Submit identity verification',
+    });
+  }
+  return reasons;
 }
 
 /// The signed-in user, as returned by `GET /api/users/me`.

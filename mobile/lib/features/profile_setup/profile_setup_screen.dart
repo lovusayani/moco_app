@@ -310,8 +310,8 @@ class _ListenerApplication extends StatelessWidget {
                         Text(
                           'We will create your listener profile. Before you '
                           'can go online and take calls you will need to '
-                          'complete identity verification, which a person '
-                          'reviews.',
+                          'add at least 3 profile photos and complete '
+                          'identity verification, which a person reviews.',
                           style: TextStyle(
                             color: MocoColors.textSecondary,
                             fontSize: 13.5,

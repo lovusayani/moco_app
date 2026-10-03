@@ -104,14 +104,14 @@ function duration(start, end) {
 }
 
 let toastTimer;
-function toast(message, ok = true) {
+function toast(message, ok = true, ms = 3600) {
   document.querySelector('.toast')?.remove();
   const el = document.createElement('div');
   el.className = `toast${ok ? '' : ' bad'}`;
   el.textContent = message;
   document.body.appendChild(el);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.remove(), 3600);
+  toastTimer = setTimeout(() => el.remove(), ms);
 }
 
 const empty = (mark, message) => `<div class="empty"><div class="empty-mark">${mark}</div>${esc(message)}</div>`;
@@ -244,7 +244,7 @@ function dataTable(host, cfg) {
       .map((c) => {
         const active = c.sort && st.sort === c.sort;
         const arrow = active ? `<span class="arrow">${st.dir === 'asc' ? '▲' : '▼'}</span>` : '';
-        return `<th class="${c.sort ? 'sortable' : ''} ${c.num ? 'num' : ''}" data-sort="${c.sort || ''}">${esc(c.label)}${arrow}</th>`;
+        return `<th class="${c.sort ? 'sortable' : ''} ${c.num ? 'num' : ''} ${c.pin ? 'col-pin' : ''}" data-sort="${c.sort || ''}">${esc(c.label)}${arrow}</th>`;
       })
       .join('')}</tr>`;
   }
@@ -278,7 +278,7 @@ function dataTable(host, cfg) {
       tbody.innerHTML = rows.length
         ? rows
             .map((r, i) => `<tr data-i="${i}" class="${cfg.onRow ? 'clickable' : ''}">${cfg.columns
-              .map((c) => `<td class="${c.num ? 'num' : ''}">${c.render(r)}</td>`)
+              .map((c) => `<td class="${c.num ? 'num' : ''} ${c.pin ? 'col-pin' : ''}">${c.render(r)}</td>`)
               .join('')}</tr>`)
             .join('')
         : `<tr><td colspan="${cfg.columns.length}">${empty('∅', cfg.emptyText || 'Nothing matches these filters.')}</td></tr>`;
@@ -665,7 +665,7 @@ async function deleteAccount(id, label) {
       </div>`,
     fields: [
       { name: 'reason', label: 'Reason (recorded in the audit log)', type: 'textarea', required: true },
-      { name: 'confirm', label: `Type the account id (${id}) to confirm`, required: true, placeholder: String(id) },
+      { name: 'confirm', label: `Type the account id (${id}) to confirm`, required: true },
     ],
     confirmLabel: 'Delete permanently',
     danger: true,
@@ -673,7 +673,7 @@ async function deleteAccount(id, label) {
   });
   if (result && result.status === 'deleted') {
     const files = Object.values(result.storageObjectsRemoved).reduce((a, b) => a + b, 0);
-    toast(`Account #${id} deleted — ${files} stored file(s) removed, financial history kept (audit #${result.auditId})`);
+    toast(`Account #${id} deleted — ${files} stored file(s) removed, financial history kept (audit #${result.auditId})`, true, 9000);
   }
   return result;
 }
@@ -694,7 +694,7 @@ async function deleteUpload(kind, id) {
     onSubmit: (v) => api(spec.path, { method: 'DELETE', body: { reason: v.reason } }),
   });
   if (result && result.deleted) {
-    toast(`Deleted ${spec.what} (${result.storageObjectsRemoved} file removed${result.takenOffline ? '; creator taken offline' : ''})`);
+    toast(`Deleted ${spec.what} (${result.storageObjectsRemoved} file removed${result.takenOffline ? '; creator taken offline' : ''})`, true, 9000);
   }
   return result;
 }
@@ -712,6 +712,7 @@ async function renderUploads(host, userId) {
   }
   const tile = (media, meta, kind, id) => `
     <div class="upload-tile">${media}<div class="sub">${meta}</div>
+      ${kind === 'chat' ? `<button class="btn-ghost btn-sm" data-view-chat="${id}">View photo</button>` : ''}
       <button class="btn-danger btn-sm" data-del="${kind}" data-id="${id}">Delete permanently</button></div>`;
   const posts = up.posts.map((p) => tile(postPreview(p), `Post #${p.id} · ${badge(p.media_type)} ${p.status !== 'active' ? badge(p.status) : ''}`, 'post', p.id)).join('');
   const photos = up.photos.map((p) => tile(
@@ -727,6 +728,52 @@ async function renderUploads(host, userId) {
     <div class="upload-grid">${chat || '<span class="sub">None.</span>'}</div>`;
   host.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
     if (await deleteUpload(b.dataset.del, b.dataset.id)) renderUploads(host, userId);
+  }));
+  host.querySelectorAll('[data-view-chat]').forEach((b) => b.addEventListener('click', () => openChatPhoto(b.dataset.viewChat, userId)));
+}
+
+/** Inspector for ONE chat photo: the image itself (a 5-minute signed URL;
+ * every view is audit-logged server-side), who sent it to whom, and the
+ * permanent delete. Opened only by an explicit click — chat photos are
+ * never previewed in bulk. */
+function openChatPhoto(messageId, backToUserId) {
+  drawer.open(`Chat photo · message #${messageId}`, async (body) => {
+    const m = await api(`/admin/chat-media/${messageId}`);
+    body.innerHTML = `
+      <div class="drawer-actions">
+        <button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>
+        ${backToUserId ? '<button class="btn-ghost btn-sm" data-act="back">Back to user</button>' : ''}
+      </div>
+      <div class="panel">${m.url
+        ? `<img src="${esc(m.url)}" alt="chat photo" style="max-width:100%;max-height:480px;border-radius:10px;display:block">`
+        : '<div class="empty">The stored image could not be loaded.</div>'}</div>
+      <div class="panel"><h3>Message</h3>${kv([
+        ['Sent by', `${esc(m.sender.name || '—')} #${m.sender.id}`],
+        ['Sent to', `${esc(m.recipient.name || '—')} #${m.recipient.id}`],
+        ['Conversation', `#${m.conversationId}`],
+        ['Sent', esc(fmtDate(m.createdAt))],
+        ['Note', 'Private message. This view was recorded in the audit log.'],
+      ])}</div>`;
+    body.querySelector('[data-act=delete]').addEventListener('click', async () => {
+      if (!(await deleteUpload('chat', m.id))) return;
+      if (backToUserId) openUser(backToUserId); else drawer.close();
+    });
+    body.querySelector('[data-act=back]')?.addEventListener('click', () => openUser(backToUserId));
+  });
+}
+
+/** A visible per-row Delete for account tables. Admin accounts and
+ * already-deleted ones get none (the server refuses admins regardless). */
+function rowDeleteButton(id, label, { isAdmin = false, deleted = false } = {}) {
+  if (isAdmin) return '<span class="sub">admin</span>';
+  if (deleted) return '<span class="sub">deleted</span>';
+  return `<button class="btn-danger btn-sm" data-row-del="${id}" data-label="${esc(label || `#${id}`)}" title="Permanently delete account #${id}">Delete</button>`;
+}
+
+function wireRowDeletes(tbody, onDone) {
+  tbody.querySelectorAll('[data-row-del]').forEach((b) => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (await deleteAccount(b.dataset.rowDel, b.dataset.label)) onDone();
   }));
 }
 
@@ -873,9 +920,9 @@ function openListener(id) {
         ])}</div>
       </div>
       <div class="panel"><h3>Photos (${l.photos.length})</h3>${l.photos.length
-        ? `<div class="photo-grid">${l.photos.map((p) => p.url
+        ? `<div class="photo-grid">${l.photos.map((p) => `<div class="photo-cell">${p.url
             ? `<a href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.url)}" alt="photo ${p.id}" loading="lazy"></a>`
-            : '<div class="ph"></div>').join('')}</div>`
+            : '<div class="ph"></div>'}<button class="btn-danger btn-sm" data-photo-del="${p.id}">Delete photo #${p.id}</button></div>`).join('')}</div>`
         : '<div class="empty" style="padding:14px">No photos uploaded yet.</div>'}</div>
       <div class="panel"><h3>KYC (admin only)</h3>${kv([
         ['Status', badge(k.status)],
@@ -918,6 +965,9 @@ function openListener(id) {
     body.querySelector('[data-act=approve]')?.addEventListener('click', () => reviewKyc(l, true, () => drawer.refresh()));
     body.querySelector('[data-act=reject]')?.addEventListener('click', () => reviewKyc(l, false, () => drawer.refresh()));
     body.querySelector('[data-act=user]').addEventListener('click', () => openUser(l.id));
+    body.querySelectorAll('[data-photo-del]').forEach((b) => b.addEventListener('click', async () => {
+      if (await deleteUpload('photo', b.dataset.photoDel)) drawer.refresh();
+    }));
     body.querySelector('[data-act=delete]').addEventListener('click', async () => {
       if (await deleteAccount(l.id, l.name || `creator #${l.id}`)) drawer.refresh();
     });
@@ -1057,8 +1107,10 @@ view('users', 'Users', 'Operate', (el) => {
       { label: 'Coins', sort: 'balance', num: true, render: (r) => coins(r.coinBalance) },
       { label: 'Joined', sort: 'created', render: (r) => when(r.createdAt) },
       { label: 'Last sign-in', sort: 'lastActive', render: (r) => when(r.lastActive) },
+      { label: 'Actions', pin: true, render: (r) => rowDeleteButton(r.id, r.name || r.phone, { isAdmin: r.isAdmin, deleted: r.status === 'deleted' }) },
     ],
     onRow: (r) => openUser(r.id),
+    afterLoad: (rows, tbody) => wireRowDeletes(tbody, () => table.reload()),
   });
   el.querySelector('[data-create]').addEventListener('click', async () => {
     const created = await dialog({
@@ -1118,8 +1170,10 @@ view('listeners', 'Creators / Listeners', 'Operate', (el) => {
       { label: 'Rating', sort: 'rating', num: true, render: (r) => r.rating.toFixed(1) },
       { label: 'Account', render: (r) => badge(r.accountStatus) },
       { label: 'Created', sort: 'created', render: (r) => when(r.createdAt) },
+      { label: 'Actions', pin: true, render: (r) => rowDeleteButton(r.id, r.name || `creator #${r.id}`, { deleted: r.accountStatus === 'deleted' }) },
     ],
     onRow: (r) => openListener(r.id),
+    afterLoad: (rows, tbody) => wireRowDeletes(tbody, () => table.reload()),
   });
   el.querySelector('[data-create]').addEventListener('click', async () => {
     const created = await dialog({
@@ -1330,9 +1384,14 @@ view('content', 'Content / Posts', 'Activity', (el) => {
       { label: 'Author reports', sort: 'reports', num: true, render: (p) => num(p.author_reports) },
       { label: 'Status', render: (p) => (p.status === 'removed' ? `${badge('removed')}<span class="sub">${p.removed_by_admin ? 'by admin' : 'by author'}</span>` : badge('active')) },
       { label: 'Posted', sort: 'created', render: (p) => when(p.created_at) },
+      { label: 'Actions', pin: true, render: (p) => `<button class="btn-danger btn-sm" data-post-del="${p.id}" title="Permanently delete post #${p.id} and its file">Delete</button>` },
     ],
     onRow: (p) => openPost(p, () => table.reload()),
     afterLoad: (rows, tbody) => {
+      tbody.querySelectorAll('[data-post-del]').forEach((b) => b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (await deleteUpload('post', b.dataset.postDel)) table.reload();
+      }));
       tbody.querySelectorAll('[data-author]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openUser(a.dataset.author); }));
     },
   });

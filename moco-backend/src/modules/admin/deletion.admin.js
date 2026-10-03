@@ -516,6 +516,47 @@ router.delete(
   }),
 );
 
+/**
+ * One chat photo, for an admin to inspect before acting on it. Chat photos
+ * are private messages, so every view is audit-logged and only a
+ * short-lived signed URL is returned — there is deliberately no listing
+ * endpoint that previews chat photos in bulk.
+ */
+router.get(
+  '/chat-media/:id',
+  validate(idParam, 'params'),
+  asyncHandler(async (req, res) => {
+    const { rows } = await query(
+      `SELECT m.id, m.conversation_id, m.sender_id, m.media_path, m.created_at,
+              CASE WHEN c.user_a = m.sender_id THEN c.user_b ELSE c.user_a END AS recipient_id,
+              sender.display_name AS sender_name, recipient.display_name AS recipient_name
+         FROM messages m
+         JOIN conversations c ON c.id = m.conversation_id
+         JOIN users sender ON sender.id = m.sender_id
+         JOIN users recipient ON recipient.id = CASE WHEN c.user_a = m.sender_id THEN c.user_b ELSE c.user_a END
+        WHERE m.id = $1 AND m.media_path IS NOT NULL`,
+      [req.params.id],
+    );
+    const m = rows[0];
+    if (!m) throw notFound('Chat photo');
+    await audit.record(null, {
+      admin: req.user,
+      action: 'chat_media.view',
+      targetType: 'message',
+      targetId: m.id,
+      metadata: { conversationId: m.conversation_id, senderId: m.sender_id },
+    });
+    res.json({
+      id: m.id,
+      conversationId: m.conversation_id,
+      createdAt: m.created_at,
+      sender: { id: m.sender_id, name: m.sender_name },
+      recipient: { id: m.recipient_id, name: m.recipient_name },
+      url: await storage.createViewUrl(CHAT_MEDIA.bucket, m.media_path, { expiresInSeconds: 300 }),
+    });
+  }),
+);
+
 /** Permanently deletes one chat photo message (row, reactions and stored
  * image) — for acting on a report about a private photo. */
 router.delete(

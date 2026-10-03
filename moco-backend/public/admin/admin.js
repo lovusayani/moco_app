@@ -385,7 +385,7 @@ document.addEventListener('keydown', (e) => {
  * the error is shown inside the dialog and it stays open — so a server
  * refusal (e.g. "needs 3 photos") is read in context, not lost in a toast.
  */
-function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', danger = false, onSubmit }) {
+function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', danger = false, wide = false, onSubmit }) {
   return new Promise((resolve) => {
     const root = document.getElementById('modal-root');
     const fieldHtml = fields
@@ -418,11 +418,14 @@ function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', da
 
     root.innerHTML = `
       <div class="modal-backdrop">
-        <div class="modal" role="dialog" aria-label="${esc(title)}">
-          <h3>${esc(title)}</h3>
-          ${message ? `<div class="modal-msg">${message}</div>` : ''}
-          <div class="error-msg" hidden></div>
-          <form>${fieldHtml}
+        <div class="modal${wide ? ' wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+          <form class="modal-form">
+            <div class="modal-head"><h3>${esc(title)}</h3></div>
+            <div class="modal-body">
+              ${message ? `<div class="modal-msg">${message}</div>` : ''}
+              <div class="error-msg" hidden></div>
+              ${fieldHtml}
+            </div>
             <div class="modal-actions">
               <button type="button" class="btn-ghost" data-cancel>Cancel</button>
               <button type="submit" class="${danger ? 'btn-danger' : 'btn-primary inline'}">${esc(confirmLabel)}</button>
@@ -432,6 +435,11 @@ function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', da
       </div>`;
 
     const errEl = root.querySelector('.error-msg');
+    const showError = (text) => {
+      errEl.textContent = text;
+      errEl.hidden = false;
+      errEl.scrollIntoView({ block: 'nearest' });
+    };
     const close = (value) => { root.innerHTML = ''; resolve(value); };
     root.querySelector('[data-cancel]').addEventListener('click', () => close(null));
     root.querySelector('form').addEventListener('submit', async (e) => {
@@ -447,8 +455,7 @@ function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', da
         }
         const v = values[f.name];
         if (f.required && (v === '' || (Array.isArray(v) && v.length === 0))) {
-          errEl.textContent = `${f.label} is required.`;
-          errEl.hidden = false;
+          showError(`${f.label} is required.`);
           return;
         }
       }
@@ -458,8 +465,7 @@ function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', da
         const result = onSubmit ? await onSubmit(values) : values;
         close(result ?? true);
       } catch (err) {
-        errEl.textContent = err.message;
-        errEl.hidden = false;
+        showError(err.message);
         btn.disabled = false;
       }
     });
@@ -669,6 +675,7 @@ async function deleteAccount(id, label) {
     ],
     confirmLabel: 'Delete permanently',
     danger: true,
+    wide: true,
     onSubmit: (v) => api(`/admin/users/${id}`, { method: 'DELETE', body: { reason: v.reason, confirm: v.confirm } }),
   });
   if (result && result.status === 'deleted') {

@@ -150,6 +150,10 @@ before:
 - `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`, `no-referrer`
   and `noindex`.
 
+The console's responses also carry `Cache-Control: no-transform`, which
+stops Cloudflare's proxy from injecting its Web Analytics script into the
+admin HTML (the CSP would block it anyway, but it logged a violation).
+
 `/admin` redirects to `/`, and any other unknown path returns 404. The API no
 longer serves `/admin` in production. "Include files outside the root
 directory" must stay **on**.
@@ -194,8 +198,17 @@ backend variables in moco-web or moco-admin.
 ## 3. DNS (Cloudflare zone `lovcamx.online`)
 
 Use these exact records, which are Vercel's project-specific recommendations.
-Set them to **DNS only** (grey cloud) so Vercel issues and renews the
-certificates:
+
+**As deployed (2026-10-04):** the records are **Proxied** (orange cloud), so
+browsers see Cloudflare's edge certificate. Cloudflare connects to Vercel over
+HTTPS using Vercel's own certificate for all four names (issued with
+`vercel certs issue …` once the proxied records were live; renewal also goes
+through the proxy over HTTP). Before that certificate existed, every HTTPS
+request failed with Cloudflare error **525**. If 525 ever returns, check
+`vercel certs ls` first. Switching the records to DNS only (grey cloud) is the
+simpler setup Vercel recommends.
+
+Records:
 
 | Name | Type | Value | Project |
 |---|---|---|---|

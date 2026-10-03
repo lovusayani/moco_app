@@ -1415,12 +1415,20 @@ async function deletionSmoke({ A, adminId, callerToken, sessionFor }) {
   const adj = await call('POST', `/admin/wallet/${vid}/adjust`, { token: A, body: { amount: 12, reason: 'smoke: ledger before delete' } });
   const victimPost = await post(victim.token);
   await call('PUT', `/listeners/${caller.id}/follow`, { token: victim.token });
+  // Shared chat: both sides write, and the victim reacts to the other side.
+  const otherText = await call('POST', `/chat/${vid}/messages`, { token: callerToken, body: { body: 'from the other participant' } });
+  const otherPhoto = await chatPhoto(callerToken, vid);
+  await call('POST', `/chat/${caller.id}/messages`, { token: victim.token, body: { body: 'from the account being deleted' } });
+  const victimPhoto = await chatPhoto(victim.token, caller.id);
+  await call('PUT', `/chat/messages/${otherText.body.message?.id}/reaction`, { token: victim.token, body: { emoji: '❤️' } });
+  const convId = (await pool.query('SELECT conversation_id FROM messages WHERE id = $1', [otherText.body.message?.id])).rows[0]?.conversation_id;
   const ledgerBefore = await pool.query('SELECT count(*)::int AS n FROM coin_ledger WHERE user_id = $1', [vid]);
   const auditBefore = await pool.query(
     "SELECT count(*)::int AS n FROM admin_audit_log WHERE target_type = 'user' AND target_id = $1", [String(vid)]);
   const preview = await call('GET', `/admin/users/${vid}/deletion-preview`, { token: A });
   check('the deletion preview lists what is deleted vs retained',
     preview.status === 200 && preview.body.blockers.length === 0 && preview.body.deleted.posts === 1 &&
+      preview.body.deleted.messagesSent === 2 && preview.body.retained.otherPeoplesMessages === 2 &&
       preview.body.retained.coinLedgerEntries === ledgerBefore.rows[0].n && preview.body.retained.coinBalance === 12, preview.body);
   const delUser = await call('DELETE', `/admin/users/${vid}`, { token: A, body: { reason: 'smoke: delete user', confirm: String(vid) } });
   check('admin permanently deletes a user', adj.status === 201 && delUser.status === 200 && delUser.body.status === 'deleted', delUser.body);
@@ -1434,6 +1442,19 @@ async function deletionSmoke({ A, adminId, callerToken, sessionFor }) {
             (SELECT count(*) FROM listener_relations WHERE user_id = $1)::int AS follows`, [vid]);
   check("the user's posts and follows are deleted", owned.rows[0].posts === 0 && owned.rows[0].follows === 0, owned.rows[0]);
   check("the user's post media object is removed", !(await exists(FEED_MEDIA.bucket, victimPost.path)));
+  const convMsgs = await pool.query('SELECT id, sender_id FROM messages WHERE conversation_id = $1 ORDER BY id', [convId]);
+  check('shared chat: the conversation stays, holding only the other participant\'s messages',
+    convMsgs.rowCount === 2 && convMsgs.rows.every((r) => Number(r.sender_id) === Number(caller.id)), convMsgs.rows);
+  check('shared chat: the deleted user\'s photo file is removed, the other participant\'s is kept',
+    !(await exists(CHAT_MEDIA.bucket, victimPhoto.path)) && (await exists(CHAT_MEDIA.bucket, otherPhoto.path)));
+  const victimReactions = await pool.query('SELECT count(*)::int AS n FROM message_reactions WHERE user_id = $1', [vid]);
+  check('shared chat: the deleted user\'s reactions are removed', victimReactions.rows[0].n === 0, victimReactions.rows[0]);
+  const otherInbox = await call('GET', '/chat', { token: callerToken });
+  const kept = (otherInbox.body.conversations || []).find((c) => Number(c.counterparty.id) === Number(vid));
+  check('shared chat: the other participant still sees the thread, with no name for the deleted account',
+    kept && kept.counterparty.name === null && kept.counterparty.avatarUrl === null, kept);
+  const toDeleted = await call('POST', `/chat/${vid}/messages`, { token: callerToken, body: { body: 'hello?' } });
+  check('shared chat: messaging the deleted account is refused', toDeleted.status >= 400 && toDeleted.status < 500, toDeleted.body);
   const ledgerAfter = await pool.query('SELECT count(*)::int AS n FROM coin_ledger WHERE user_id = $1', [vid]);
   const walletAfter = await call('GET', `/admin/wallet/${vid}`, { token: A });
   check('the coin ledger is retained and the wallet still reconciles',
@@ -1489,6 +1510,126 @@ async function deletionSmoke({ A, adminId, callerToken, sessionFor }) {
   const earningsRec = await call('GET', '/admin/reconcile/earnings', { token: A });
   check('earnings still reconcile after the creator deletion',
     !(earningsRec.body.discrepancies || []).some((d) => Number(d.user_id) === Number(cid)), earningsRec.body);
+
+  await deletionFailureSmoke({ A, adminId, account, post, exists });
+}
+
+/**
+ * Storage/DB failure semantics. The live server cannot be made to fail on
+ * demand, so these run the SAME app in-process on a spare port with the
+ * shared Storage client stubbed, against rows this run creates.
+ */
+async function deletionFailureSmoke({ A, adminId, account, post, exists }) {
+  console.log('== Admin: permanent deletion — failure semantics ==');
+  const http = require('http');
+  const { createApp } = require('../src/app');
+  const storage = require('../src/integrations/storage');
+  const { FEED_MEDIA, LISTENER_PHOTOS } = require('../src/utils/constants');
+  const realRemove = storage.removeStrict;
+  const server = http.createServer(createApp());
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const local = async (method, p, body) => {
+    const r = await fetch(`http://127.0.0.1:${server.address().port}/api${p}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${A}` },
+      body: JSON.stringify(body),
+    });
+    return { status: r.status, body: await r.json().catch(() => ({})) };
+  };
+  const auditCount = async (action, targetId) => (await pool.query(
+    'SELECT count(*)::int AS n FROM admin_audit_log WHERE action = $1 AND target_id = $2', [action, String(targetId)])).rows[0].n;
+
+  try {
+    const owner = await account('Failure Owner');
+
+    // (1) Storage refuses: the DB delete and its audit row roll back.
+    const p1 = await post(owner.token);
+    storage.removeStrict = async () => { throw Object.assign(new Error('simulated storage outage'), { code: 'storage_remove_failed' }); };
+    const refused = await local('DELETE', `/admin/posts/${p1.id}`, { reason: 'smoke: storage refuses' });
+    storage.removeStrict = realRemove;
+    const p1Row = await pool.query('SELECT 1 FROM posts WHERE id = $1', [p1.id]);
+    check('storage failure → 502 that says nothing was deleted',
+      refused.status === 502 && /nothing was deleted/.test(refused.body.error?.message || ''), refused.body);
+    check('storage failure → the post row, its file and the audit log are untouched',
+      p1Row.rowCount === 1 && (await exists(FEED_MEDIA.bucket, p1.path)) &&
+        (await auditCount('content.delete_permanent', p1.id)) === 0 && (await auditCount('delete.incomplete', p1.id)) === 0);
+    const retry1 = await call('DELETE', `/admin/posts/${p1.id}`, { token: A, body: { reason: 'smoke: retry after storage outage' } });
+    check('retrying after the storage failure completes the delete',
+      retry1.status === 200 && !(await exists(FEED_MEDIA.bucket, p1.path)), retry1.body);
+
+    // (2) Storage succeeds, then the DB step fails. The only DB step after
+    // the removal is COMMIT, which cannot be failed on demand against a
+    // shared database, so the real failure handler is driven directly: a
+    // real Storage removal, then a thrown database error (the rollback of
+    // the transaction itself is Postgres's guarantee). The row survives its
+    // file — reported and audited — and a retry with the file already gone
+    // still completes.
+    const p2 = await post(owner.token);
+    const { trackedDeletion } = require('../src/modules/admin/deletion.admin');
+    const adminUser = (await pool.query('SELECT id, phone FROM users WHERE id = $1', [adminId])).rows[0];
+    let halfErr = null;
+    try {
+      await trackedDeletion(
+        { user: adminUser, body: { reason: 'smoke: db fails after storage' } },
+        { targetType: 'post', targetId: p2.id },
+        async ({ remove }) => {
+          await remove(FEED_MEDIA.bucket, [p2.path]);
+          throw new Error('simulated database failure after storage');
+        },
+      );
+    } catch (err) {
+      halfErr = err;
+    }
+    const p2Row = await pool.query('SELECT 1 FROM posts WHERE id = $1', [p2.id]);
+    check('DB failure after storage → 500 that says the file was already removed',
+      halfErr?.status === 500 && halfErr.code === 'delete_incomplete' &&
+        /1 stored file\(s\) were already removed/.test(halfErr.message), halfErr?.message);
+    check('DB failure after storage → row kept, file gone, and the half-done state is audited',
+      p2Row.rowCount === 1 && !(await exists(FEED_MEDIA.bucket, p2.path)) &&
+        (await auditCount('content.delete_permanent', p2.id)) === 0 && (await auditCount('delete.incomplete', p2.id)) === 1);
+    const retry2 = await call('DELETE', `/admin/posts/${p2.id}`, { token: A, body: { reason: 'smoke: retry with file already gone' } });
+    const p2After = await pool.query('SELECT 1 FROM posts WHERE id = $1', [p2.id]);
+    check('a missing file does not block the retry (post deleted)', retry2.status === 200 && p2After.rowCount === 0, retry2.body);
+
+    // (3) Account deletion where Storage fails part-way (feed bucket done,
+    // creator-photo bucket refuses): nothing in the DB changes, the earlier
+    // removal is reported and audited, and a retry finishes everything.
+    await call('POST', '/users/me/become-listener', { token: owner.token });
+    await addListenerPhotos(owner.token, 3);
+    const ownerPost = await post(owner.token);
+    const photoPaths = (await pool.query('SELECT storage_path FROM listener_photos WHERE listener_id = $1', [owner.user.id])).rows.map((r) => r.storage_path);
+    storage.removeStrict = async (bucket, paths) => {
+      if (bucket === LISTENER_PHOTOS.bucket && paths.length) throw Object.assign(new Error('simulated photo bucket outage'), { code: 'storage_remove_failed' });
+      return realRemove(bucket, paths);
+    };
+    const partial = await local('DELETE', `/admin/users/${owner.user.id}`, { reason: 'smoke: partial storage failure', confirm: String(owner.user.id) });
+    storage.removeStrict = realRemove;
+    const ownerRow = await pool.query('SELECT status, display_name FROM users WHERE id = $1', [owner.user.id]);
+    const ownerPostRow = await pool.query('SELECT 1 FROM posts WHERE id = $1', [ownerPost.id]);
+    const photosLeft = [];
+    for (const path of photoPaths) if (await exists(LISTENER_PHOTOS.bucket, path)) photosLeft.push(path);
+    check('partial storage failure on an account → 502 naming the files already removed',
+      partial.status === 502 && /already removed/.test(partial.body.error?.message || ''), partial.body);
+    check('partial storage failure → account still active and its rows intact',
+      ownerRow.rows[0].status === 'active' && ownerRow.rows[0].display_name === 'Failure Owner' && ownerPostRow.rowCount === 1 &&
+        photosLeft.length === 3 && (await auditCount('user.delete_permanent', owner.user.id)) === 0 &&
+        (await auditCount('delete.incomplete', owner.user.id)) === 1, { row: ownerRow.rows[0], photosLeft: photosLeft.length });
+    const retry3 = await call('DELETE', `/admin/users/${owner.user.id}`, { token: A, body: { reason: 'smoke: retry account', confirm: String(owner.user.id) } });
+    const photosAfter = [];
+    for (const path of photoPaths) if (await exists(LISTENER_PHOTOS.bucket, path)) photosAfter.push(path);
+    check('retrying the account delete completes it (already-removed feed file is no obstacle)',
+      retry3.status === 200 && retry3.body.status === 'deleted' && photosAfter.length === 0 &&
+        !(await exists(FEED_MEDIA.bucket, ownerPost.path)), retry3.body);
+
+    // (4) Re-running a completed account delete is harmless.
+    const again = await call('DELETE', `/admin/users/${owner.user.id}`, { token: A, body: { reason: 'smoke: re-run', confirm: String(owner.user.id) } });
+    const ledgerOk = await call('GET', `/admin/wallet/${owner.user.id}`, { token: A });
+    check('re-running a completed account delete is idempotent',
+      again.status === 200 && again.body.status === 'deleted' && ledgerOk.body.balanced === true, again.body);
+  } finally {
+    storage.removeStrict = realRemove;
+    await new Promise((resolve) => server.close(resolve));
+  }
 }
 
 

@@ -13,6 +13,7 @@ const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
 const { isAdminPhone } = require('../../middleware/auth');
 const { AppError, notFound, badRequest, conflict } = require('../../utils/errors');
+const logger = require('../../utils/logger');
 const {
   USER_STATUS,
   CHAT_MEDIA,
@@ -38,11 +39,22 @@ const audit = require('./audit.service');
  * rows and stored objects. Accounting therefore still reconciles, and the
  * admin audit log is never touched.
  *
- * Content deletions remove the Storage object INSIDE the database
- * transaction: if Storage refuses, the row deletion rolls back and the admin
- * sees the failure, so a row never outlives its media and media never
- * outlives its row. Removing an already-missing object succeeds, so retrying
- * any of these is safe.
+ * Storage and Postgres are NOT atomic together. The ordering is:
+ *
+ *   BEGIN → lock rows → audit row → DB deletes/anonymisation
+ *         → Storage removals (strict: a refusal throws) → COMMIT
+ *
+ * - Storage refuses → the transaction rolls back: no DB change, no audit
+ *   row. Objects removed by EARLIER calls in the same request stay removed
+ *   (Storage cannot roll back), so their rows briefly point at missing
+ *   media — the response and a separate `delete.incomplete` audit entry
+ *   say exactly that.
+ * - Storage succeeds but the DB step or COMMIT fails → same: rows remain,
+ *   their objects are gone, `delete.incomplete` records it.
+ * - Either way a retry finishes the job: removing an already-missing object
+ *   is not an error, and every DB step is a plain DELETE/UPDATE that is a
+ *   no-op the second time. A missing object therefore never makes anything
+ *   undeletable.
  */
 const router = express.Router();
 
@@ -50,16 +62,62 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
 const REASON = z.string().trim().min(5, 'Give a reason of at least 5 characters').max(500);
 const BUCKETS = [FEED_MEDIA.bucket, LISTENER_PHOTOS.bucket, CHAT_MEDIA.bucket];
 
-/** A Storage failure surfaces as a clear 502 instead of a generic 500. */
-function storageFailure(err) {
-  return new AppError(502, err.code || 'storage_failed', `${err.message}. Nothing was deleted; try again.`);
-}
+/**
+ * Runs one deletion and tracks every Storage object it removes, so a failure
+ * can say honestly whether anything was already removed. `fn` receives
+ * `remove(bucket, paths)` (strict) and `sweep(bucket, prefix)`.
+ */
+async function trackedDeletion(req, { targetType, targetId }, fn) {
+  const removed = [];
+  const remove = async (bucket, paths) => {
+    let result;
+    try {
+      result = await storage.removeStrict(bucket, paths);
+    } catch (err) {
+      err.storageFailure = true;
+      throw err;
+    }
+    removed.push(...result.removed.map((p) => `${bucket}/${p}`));
+    return result;
+  };
+  const sweep = async (bucket, prefix) => {
+    let leftovers;
+    try {
+      leftovers = await storage.listPrefix(bucket, prefix);
+    } catch (err) {
+      err.storageFailure = true;
+      throw err;
+    }
+    return remove(bucket, leftovers);
+  };
 
-async function removeOrFail(bucket, paths) {
   try {
-    return await storage.removeStrict(bucket, paths);
+    return await fn({ remove, sweep, removed });
   } catch (err) {
-    throw storageFailure(err);
+    // A refusal (404, 409…) raised before any object was touched passes
+    // through unchanged.
+    if (err instanceof AppError && !err.storageFailure && removed.length === 0) throw err;
+    if (removed.length > 0) {
+      // The transaction rolled back but Storage cannot: record it outside
+      // the transaction so the half-done state is never silent.
+      await audit
+        .record(null, {
+          admin: req.user,
+          action: 'delete.incomplete',
+          targetType,
+          targetId,
+          reason: req.body?.reason,
+          metadata: { storageObjectsAlreadyRemoved: removed.length, error: err.code || err.message },
+        })
+        .catch((auditErr) => logger.error({ err: auditErr }, 'failed to audit an incomplete deletion'));
+    }
+    const what = removed.length
+      ? `${removed.length} stored file(s) were already removed, but no database change was saved`
+      : 'nothing was deleted';
+    const status = err.storageFailure ? 502 : 500;
+    const code = err.storageFailure ? err.code || 'storage_failed' : 'delete_incomplete';
+    logger.error({ err, targetType, targetId, removed: removed.length }, 'permanent delete failed');
+    throw new AppError(status, code, `Delete failed (${err.message}); ${what}. Retry to finish.`);
   }
 }
 
@@ -101,11 +159,18 @@ async function deletionSummary(run, userId) {
     `SELECT
        (SELECT count(*)::int FROM posts WHERE author_user_id = $1) AS posts,
        (SELECT count(*)::int FROM listener_photos WHERE listener_id = $1) AS photos,
-       (SELECT count(*)::int FROM conversations WHERE user_a = $1 OR user_b = $1) AS conversations,
+       (SELECT count(*)::int FROM messages WHERE sender_id = $1) AS messages_sent,
+       (SELECT count(*)::int FROM messages WHERE sender_id = $1 AND media_path IS NOT NULL) AS chat_photos_sent,
+       (SELECT count(*)::int FROM conversations c
+         WHERE (c.user_a = $1 OR c.user_b = $1)
+           AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.sender_id <> $1)
+       ) AS conversations_removed,
+       (SELECT count(*)::int FROM conversations c
+         WHERE (c.user_a = $1 OR c.user_b = $1)
+           AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.sender_id <> $1)
+       ) AS conversations_kept,
        (SELECT count(*)::int FROM messages m JOIN conversations c ON c.id = m.conversation_id
-         WHERE c.user_a = $1 OR c.user_b = $1) AS messages,
-       (SELECT count(*)::int FROM messages m JOIN conversations c ON c.id = m.conversation_id
-         WHERE (c.user_a = $1 OR c.user_b = $1) AND m.media_path IS NOT NULL) AS chat_photos,
+         WHERE (c.user_a = $1 OR c.user_b = $1) AND m.sender_id <> $1) AS counterpart_messages,
        (SELECT count(*)::int FROM message_reactions WHERE user_id = $1) AS reactions,
        (SELECT count(*)::int FROM listener_relations WHERE user_id = $1 OR listener_id = $1) AS follows_favorites,
        (SELECT count(*)::int FROM blocks WHERE blocker_id = $1 OR blocked_id = $1) AS blocks,
@@ -128,9 +193,9 @@ async function deletionSummary(run, userId) {
     deleted: {
       posts: r.posts,
       creatorPhotos: r.photos,
-      conversations: r.conversations,
-      messages: r.messages,
-      chatPhotos: r.chat_photos,
+      messagesSent: r.messages_sent,
+      chatPhotosSent: r.chat_photos_sent,
+      conversationsLeftEmpty: r.conversations_removed,
       reactions: r.reactions,
       followsAndFavorites: r.follows_favorites,
       blocks: r.blocks,
@@ -143,6 +208,8 @@ async function deletionSummary(run, userId) {
       signInEvents: r.auth_events,
     },
     retained: {
+      otherPeoplesMessages: r.counterpart_messages,
+      conversationsWithOtherPeoplesMessages: r.conversations_kept,
       coinLedgerEntries: r.coin_ledger,
       earningsLedgerEntries: r.earnings_ledger,
       calls: r.calls,
@@ -176,6 +243,13 @@ router.get(
  * Permanently deletes an account (user or creator). Body:
  * `{ reason, confirm }` where `confirm` must be the account id — a typed
  * confirmation the server checks, so no client can skip it.
+ *
+ * Chat is shared, so only this account's side of it goes: their messages
+ * (and the files of their photo messages) and their reactions. The other
+ * participant keeps their own messages and files; the conversation stays
+ * while any of those remain (it now shows a deleted counterpart, who can no
+ * longer be messaged) and is removed only when nothing of anyone else's is
+ * left in it.
  */
 router.delete(
   '/users/:id',
@@ -197,110 +271,124 @@ router.delete(
     const { rows: profile } = await query('SELECT is_online FROM listener_profiles WHERE user_id = $1', [id]);
     if (profile[0]?.is_online) await presence.setOnline(id, false);
 
-    const result = await withTransaction(async (client) => {
-      const { rows } = await client.query(
-        'SELECT id, phone, status, role FROM users WHERE id = $1 FOR UPDATE',
-        [id],
-      );
-      const user = rows[0];
-      if (!user) throw notFound('User');
-      // Re-checked under the lock: a call could have started a moment ago.
-      const blockers = await deletionBlockers(client.query.bind(client), user, req.user.id);
-      if (blockers.length) throw conflict(blockers[0].code, blockers[0].message);
+    const result = await trackedDeletion(req, { targetType: 'user', targetId: id }, ({ remove, sweep, removed }) =>
+      withTransaction(async (client) => {
+        const { rows } = await client.query(
+          'SELECT id, phone, status, role FROM users WHERE id = $1 FOR UPDATE',
+          [id],
+        );
+        const user = rows[0];
+        if (!user) throw notFound('User');
+        // Re-checked under the lock: a call could have started a moment ago.
+        const blockers = await deletionBlockers(client.query.bind(client), user, req.user.id);
+        if (blockers.length) throw conflict(blockers[0].code, blockers[0].message);
 
-      const summary = await deletionSummary(client.query.bind(client), id);
-      const paths = await client.query(
-        `SELECT
-           ARRAY(SELECT media_path FROM posts WHERE author_user_id = $1) AS feed,
-           ARRAY(SELECT storage_path FROM listener_photos WHERE listener_id = $1) AS photos,
-           ARRAY(SELECT m.media_path FROM messages m JOIN conversations c ON c.id = m.conversation_id
-                  WHERE (c.user_a = $1 OR c.user_b = $1) AND m.media_path IS NOT NULL) AS chat`,
-        [id],
-      );
-      const { feed, photos, chat } = paths.rows[0];
+        const summary = await deletionSummary(client.query.bind(client), id);
+        const paths = await client.query(
+          `SELECT
+             ARRAY(SELECT media_path FROM posts WHERE author_user_id = $1) AS feed,
+             ARRAY(SELECT storage_path FROM listener_photos WHERE listener_id = $1) AS photos,
+             ARRAY(SELECT media_path FROM messages WHERE sender_id = $1 AND media_path IS NOT NULL) AS chat`,
+          [id],
+        );
+        const { feed, photos, chat } = paths.rows[0];
 
-      // The audit entry is written first, in the same transaction: the
-      // record and the deletion commit together or not at all. No phone or
-      // name goes into it — the point is that they stop existing.
-      const auditId = await audit.record(client, {
-        admin: req.user,
-        action: 'user.delete_permanent',
-        targetType: 'user',
-        targetId: id,
-        reason: req.body.reason,
-        metadata: { previousStatus: user.status, role: user.role, ...summary },
-      });
+        // The audit entry is written first, in the same transaction: the
+        // record and the deletion commit together or not at all. No phone or
+        // name goes into it — the point is that they stop existing.
+        const auditId = await audit.record(client, {
+          admin: req.user,
+          action: 'user.delete_permanent',
+          targetType: 'user',
+          targetId: id,
+          reason: req.body.reason,
+          metadata: { previousStatus: user.status, role: user.role, ...summary },
+        });
 
-      // Owned content and relations: deleted outright.
-      await client.query('DELETE FROM posts WHERE author_user_id = $1', [id]);
-      await client.query('DELETE FROM listener_photos WHERE listener_id = $1', [id]);
-      // Messages and their reactions cascade from the conversation.
-      await client.query('DELETE FROM conversations WHERE user_a = $1 OR user_b = $1', [id]);
-      await client.query('DELETE FROM message_reactions WHERE user_id = $1', [id]);
-      await client.query('DELETE FROM listener_relations WHERE user_id = $1 OR listener_id = $1', [id]);
-      await client.query('DELETE FROM blocks WHERE blocker_id = $1 OR blocked_id = $1', [id]);
-      await client.query('DELETE FROM notifications WHERE user_id = $1', [id]);
+        // Owned content and relations: deleted outright.
+        await client.query('DELETE FROM posts WHERE author_user_id = $1', [id]);
+        await client.query('DELETE FROM listener_photos WHERE listener_id = $1', [id]);
+        // Chat: only this account's side. Reactions others left on these
+        // messages cascade with them; this account's reactions on other
+        // people's messages are removed explicitly.
+        await client.query('DELETE FROM message_reactions WHERE user_id = $1', [id]);
+        await client.query('DELETE FROM messages WHERE sender_id = $1', [id]);
+        await client.query(
+          `DELETE FROM conversations c
+            WHERE (c.user_a = $1 OR c.user_b = $1)
+              AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id)`,
+          [id],
+        );
+        // Kept conversations: their ordering should reflect what is left.
+        await client.query(
+          `UPDATE conversations c
+              SET last_message_at = (SELECT max(m.created_at) FROM messages m WHERE m.conversation_id = c.id)
+            WHERE c.user_a = $1 OR c.user_b = $1`,
+          [id],
+        );
+        await client.query('DELETE FROM listener_relations WHERE user_id = $1 OR listener_id = $1', [id]);
+        await client.query('DELETE FROM blocks WHERE blocker_id = $1 OR blocked_id = $1', [id]);
+        await client.query('DELETE FROM notifications WHERE user_id = $1', [id]);
 
-      // Records that must stay for accounting or moderation: anonymised.
-      await client.query('UPDATE call_ratings SET comment = NULL WHERE rater_id = $1', [id]);
-      await client.query(
-        `UPDATE auth_events SET phone = 'deleted_' || $1::text, ip = NULL
-          WHERE user_id = $1 OR phone = $2`,
-        [id, user.phone],
-      );
-      await client.query(
-        `UPDATE listener_profiles
-            SET is_online = FALSE, bio = NULL, kyc_name = NULL, kyc_doc_url = NULL,
-                upi_id = NULL, kyc_review_note = NULL, updated_at = now()
-          WHERE user_id = $1`,
-        [id],
-      );
-      // The tombstone. authenticate() rejects status 'deleted' on every
-      // request, so every outstanding token stops working right here.
-      await client.query(
-        `UPDATE users
-            SET status = $2, phone = 'deleted_' || id, display_name = NULL, avatar_url = NULL,
-                gender = NULL, fcm_token = NULL, updated_at = now()
-          WHERE id = $1`,
-        [id, USER_STATUS.DELETED],
-      );
+        // Records that must stay for accounting or moderation: anonymised.
+        await client.query('UPDATE call_ratings SET comment = NULL WHERE rater_id = $1', [id]);
+        await client.query(
+          `UPDATE auth_events SET phone = 'deleted_' || $1::text, ip = NULL
+            WHERE user_id = $1 OR phone = $2`,
+          [id, user.phone],
+        );
+        await client.query(
+          `UPDATE listener_profiles
+              SET is_online = FALSE, bio = NULL, kyc_name = NULL, kyc_doc_url = NULL,
+                  upi_id = NULL, kyc_review_note = NULL, updated_at = now()
+            WHERE user_id = $1`,
+          [id],
+        );
+        // The tombstone. authenticate() rejects status 'deleted' on every
+        // request, so every outstanding token stops working at COMMIT.
+        await client.query(
+          `UPDATE users
+              SET status = $2, phone = 'deleted_' || id, display_name = NULL, avatar_url = NULL,
+                  gender = NULL, fcm_token = NULL, updated_at = now()
+            WHERE id = $1`,
+          [id, USER_STATUS.DELETED],
+        );
 
-      // Stored objects, still inside the transaction: every referenced
-      // object, then anything else under this account's own folder in each
-      // bucket (uploads that were never registered). Any Storage refusal
-      // rolls everything above back.
-      const removed = { feed: [], photos: [], chat: [], unregistered: [] };
-      removed.feed = (await removeOrFail(FEED_MEDIA.bucket, feed)).removed;
-      removed.photos = (await removeOrFail(LISTENER_PHOTOS.bucket, photos)).removed;
-      removed.chat = (await removeOrFail(CHAT_MEDIA.bucket, chat)).removed;
-      for (const bucket of BUCKETS) {
-        let leftovers;
-        try {
-          leftovers = await storage.listPrefix(bucket, String(id));
-        } catch (err) {
-          throw storageFailure(err);
-        }
-        removed.unregistered.push(...(await removeOrFail(bucket, leftovers)).removed);
-      }
+        // Stored objects last, still inside the transaction: every object
+        // the deleted rows referenced, then anything else under this
+        // account's own folder in each bucket (uploads never registered).
+        const counts = {};
+        counts.feed = (await remove(FEED_MEDIA.bucket, feed)).removed.length;
+        counts.creatorPhotos = (await remove(LISTENER_PHOTOS.bucket, photos)).removed.length;
+        counts.chat = (await remove(CHAT_MEDIA.bucket, chat)).removed.length;
+        counts.unregistered = 0;
+        for (const bucket of BUCKETS) counts.unregistered += (await sweep(bucket, String(id))).removed.length;
 
-      return { auditId, summary, removed };
-    });
+        return { auditId, summary, counts, removedTotal: removed.length };
+      }),
+    );
 
     // After commit: end live sessions now rather than at the next request.
     socketServer.disconnectUser(id);
     await redis.del(REDIS.presenceKey(id)).catch(() => {});
+    // A second, best-effort sweep: the account can no longer authenticate,
+    // so this catches an upload that landed while the transaction ran.
+    let lateUploads = 0;
+    for (const bucket of BUCKETS) {
+      try {
+        const late = await storage.listPrefix(bucket, String(id));
+        lateUploads += (await storage.removeStrict(bucket, late)).removed.length;
+      } catch (err) {
+        logger.warn({ err, bucket, userId: id }, 'post-delete storage sweep failed; re-running the delete retries it');
+      }
+    }
 
     res.json({
       id,
       status: USER_STATUS.DELETED,
       auditId: result.auditId,
       ...result.summary,
-      storageObjectsRemoved: {
-        feed: result.removed.feed.length,
-        creatorPhotos: result.removed.photos.length,
-        chat: result.removed.chat.length,
-        unregistered: result.removed.unregistered.length,
-      },
+      storageObjectsRemoved: { ...result.counts, unregistered: result.counts.unregistered + lateUploads },
     });
   }),
 );
@@ -356,25 +444,27 @@ router.delete(
   validate(idParam, 'params'),
   validate(reasonBody),
   asyncHandler(async (req, res) => {
-    const result = await withTransaction(async (client) => {
-      const { rows } = await client.query(
-        'SELECT id, author_user_id, media_type, media_path, status FROM posts WHERE id = $1 FOR UPDATE',
-        [req.params.id],
-      );
-      const post = rows[0];
-      if (!post) throw notFound('Post');
-      const auditId = await audit.record(client, {
-        admin: req.user,
-        action: 'content.delete_permanent',
-        targetType: 'post',
-        targetId: post.id,
-        reason: req.body.reason,
-        metadata: { authorId: post.author_user_id, mediaType: post.media_type, previousStatus: post.status },
-      });
-      await client.query('DELETE FROM posts WHERE id = $1', [post.id]);
-      const { removed } = await removeOrFail(FEED_MEDIA.bucket, [post.media_path]);
-      return { id: post.id, auditId, storageObjectsRemoved: removed.length };
-    });
+    const result = await trackedDeletion(req, { targetType: 'post', targetId: req.params.id }, ({ remove }) =>
+      withTransaction(async (client) => {
+        const { rows } = await client.query(
+          'SELECT id, author_user_id, media_type, media_path, status FROM posts WHERE id = $1 FOR UPDATE',
+          [req.params.id],
+        );
+        const post = rows[0];
+        if (!post) throw notFound('Post');
+        const auditId = await audit.record(client, {
+          admin: req.user,
+          action: 'content.delete_permanent',
+          targetType: 'post',
+          targetId: post.id,
+          reason: req.body.reason,
+          metadata: { authorId: post.author_user_id, mediaType: post.media_type, previousStatus: post.status },
+        });
+        await client.query('DELETE FROM posts WHERE id = $1', [post.id]);
+        const { removed } = await remove(FEED_MEDIA.bucket, [post.media_path]);
+        return { id: post.id, auditId, storageObjectsRemoved: removed.length };
+      }),
+    );
     res.json({ ...result, deleted: true });
   }),
 );
@@ -387,37 +477,39 @@ router.delete(
   validate(idParam, 'params'),
   validate(reasonBody),
   asyncHandler(async (req, res) => {
-    const result = await withTransaction(async (client) => {
-      const { rows } = await client.query(
-        'SELECT id, listener_id, storage_path FROM listener_photos WHERE id = $1 FOR UPDATE',
-        [req.params.id],
-      );
-      const photo = rows[0];
-      if (!photo) throw notFound('Photo');
-      const auditId = await audit.record(client, {
-        admin: req.user,
-        action: 'listener_photo.delete_permanent',
-        targetType: 'listener',
-        targetId: photo.listener_id,
-        reason: req.body.reason,
-        metadata: { photoId: photo.id },
-      });
-      await client.query('DELETE FROM listener_photos WHERE id = $1', [photo.id]);
-      const { removed } = await removeOrFail(LISTENER_PHOTOS.bucket, [photo.storage_path]);
-      const { rows: after } = await client.query(
-        `SELECT photo_count, is_online, ${listenerEligibleSql('lp')} AS eligible
-           FROM listener_profiles lp WHERE user_id = $1`,
-        [photo.listener_id],
-      );
-      return {
-        id: photo.id,
-        listenerId: photo.listener_id,
-        auditId,
-        storageObjectsRemoved: removed.length,
-        photoCount: after[0]?.photo_count ?? 0,
-        takeOffline: Boolean(after[0]?.is_online && !after[0]?.eligible),
-      };
-    });
+    const result = await trackedDeletion(req, { targetType: 'listener_photo', targetId: req.params.id }, ({ remove }) =>
+      withTransaction(async (client) => {
+        const { rows } = await client.query(
+          'SELECT id, listener_id, storage_path FROM listener_photos WHERE id = $1 FOR UPDATE',
+          [req.params.id],
+        );
+        const photo = rows[0];
+        if (!photo) throw notFound('Photo');
+        const auditId = await audit.record(client, {
+          admin: req.user,
+          action: 'listener_photo.delete_permanent',
+          targetType: 'listener',
+          targetId: photo.listener_id,
+          reason: req.body.reason,
+          metadata: { photoId: photo.id },
+        });
+        await client.query('DELETE FROM listener_photos WHERE id = $1', [photo.id]);
+        const { removed } = await remove(LISTENER_PHOTOS.bucket, [photo.storage_path]);
+        const { rows: after } = await client.query(
+          `SELECT photo_count, is_online, ${listenerEligibleSql('lp')} AS eligible
+             FROM listener_profiles lp WHERE user_id = $1`,
+          [photo.listener_id],
+        );
+        return {
+          id: photo.id,
+          listenerId: photo.listener_id,
+          auditId,
+          storageObjectsRemoved: removed.length,
+          photoCount: after[0]?.photo_count ?? 0,
+          takeOffline: Boolean(after[0]?.is_online && !after[0]?.eligible),
+        };
+      }),
+    );
     if (result.takeOffline) await presence.setOnline(result.listenerId, false);
     const { takeOffline, ...body } = result;
     res.json({ ...body, deleted: true, takenOffline: takeOffline });
@@ -431,29 +523,33 @@ router.delete(
   validate(idParam, 'params'),
   validate(reasonBody),
   asyncHandler(async (req, res) => {
-    const result = await withTransaction(async (client) => {
-      const { rows } = await client.query(
-        `SELECT id, conversation_id, sender_id, media_path FROM messages
-          WHERE id = $1 AND media_path IS NOT NULL FOR UPDATE`,
-        [req.params.id],
-      );
-      const message = rows[0];
-      if (!message) throw notFound('Chat photo');
-      const auditId = await audit.record(client, {
-        admin: req.user,
-        action: 'chat_media.delete_permanent',
-        targetType: 'message',
-        targetId: message.id,
-        reason: req.body.reason,
-        metadata: { conversationId: message.conversation_id, senderId: message.sender_id },
-      });
-      // Reactions on it cascade with the row.
-      await client.query('DELETE FROM messages WHERE id = $1', [message.id]);
-      const { removed } = await removeOrFail(CHAT_MEDIA.bucket, [message.media_path]);
-      return { id: message.id, auditId, storageObjectsRemoved: removed.length };
-    });
+    const result = await trackedDeletion(req, { targetType: 'message', targetId: req.params.id }, ({ remove }) =>
+      withTransaction(async (client) => {
+        const { rows } = await client.query(
+          `SELECT id, conversation_id, sender_id, media_path FROM messages
+            WHERE id = $1 AND media_path IS NOT NULL FOR UPDATE`,
+          [req.params.id],
+        );
+        const message = rows[0];
+        if (!message) throw notFound('Chat photo');
+        const auditId = await audit.record(client, {
+          admin: req.user,
+          action: 'chat_media.delete_permanent',
+          targetType: 'message',
+          targetId: message.id,
+          reason: req.body.reason,
+          metadata: { conversationId: message.conversation_id, senderId: message.sender_id },
+        });
+        // Reactions on it cascade with the row.
+        await client.query('DELETE FROM messages WHERE id = $1', [message.id]);
+        const { removed } = await remove(CHAT_MEDIA.bucket, [message.media_path]);
+        return { id: message.id, auditId, storageObjectsRemoved: removed.length };
+      }),
+    );
     res.json({ ...result, deleted: true });
   }),
 );
 
 module.exports = router;
+// Exposed for the smoke run, which drives the failure branches directly.
+module.exports.trackedDeletion = trackedDeletion;

@@ -1208,6 +1208,8 @@ async function adminSmoke({ callerToken, reportedListenerId }) {
   check('admin approves a complete application', approve.status === 200 && approve.body.kycStatus === 'approved', approve.body);
   const applicantMe = await call('GET', '/users/me', { token: applicant.token });
   check('the approved applicant is now eligible (no blockers)', JSON.stringify(applicantMe.body.listener?.blockers) === '[]', applicantMe.body.listener);
+  check('the internal approval note is never sent to the app',
+    applicantMe.body.listener?.kycRejectionReason === null && !JSON.stringify(applicantMe.body).includes('docs ok'), applicantMe.body.listener);
   const rejectNoReason = await call('POST', `/admin/kyc/${applicant.user.id}`, { token: A, body: { approve: false } });
   check('rejecting without a reason is refused', rejectNoReason.status === 400, rejectNoReason.body);
   const revoke = await call('POST', `/admin/kyc/${applicant.user.id}`, { token: A, body: { approve: false, reason: 'smoke revoke' } });
@@ -1215,6 +1217,15 @@ async function adminSmoke({ callerToken, reportedListenerId }) {
   check('rejection records reviewer, reason and takes the creator offline',
     revoke.status === 200 && reviewed.rows[0].kyc_status === 'rejected' && Number(reviewed.rows[0].kyc_reviewed_by) === Number(admin.user.id) &&
       reviewed.rows[0].kyc_review_note === 'smoke revoke' && reviewed.rows[0].is_online === false, reviewed.rows[0]);
+  const rejectedMe = await call('GET', '/users/me', { token: applicant.token });
+  check('a rejected applicant sees the rejection reason in the app',
+    rejectedMe.body.listener?.kycStatus === 'rejected' && rejectedMe.body.listener?.kycRejectionReason === 'smoke revoke',
+    rejectedMe.body.listener);
+  const resubmit = await call('POST', '/listeners/kyc', {
+    token: applicant.token,
+    body: { fullName: 'Queue Applicant', docUrl: 'https://example.com/id2.jpg', upiId: 'queue@upi' },
+  });
+  check('a rejected applicant can resubmit (back to pending)', resubmit.status === 200 && resubmit.body.kycStatus === 'pending', resubmit.body);
 
   console.log('== Admin: reports ==');
   const reports = await call('GET', `/admin/reports?status=unresolved&reported=${reportedListenerId}`, { token: A });

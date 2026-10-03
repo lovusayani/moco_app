@@ -204,7 +204,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                               ),
                               const SizedBox(height: 2),
                                Text(
-                                'Verification is required before you can go online.',
+                                '3 profile photos and verification are required before you can go online.',
                                 style: TextStyle(color: MocoColors.textMuted, fontSize: 12.5),
                               ),
                             ],

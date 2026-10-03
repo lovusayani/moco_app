@@ -300,7 +300,12 @@ class _ListenerSectionsState extends ConsumerState<_ListenerSections> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => ref.read(profileControllerProvider.notifier).loadEarnings());
+    Future.microtask(() {
+      ref.read(profileControllerProvider.notifier).loadEarnings();
+      // KYC review happens elsewhere (admin console), so the cached user can
+      // be stale; re-read it so an approval shows up without a restart.
+      ref.read(authActionsProvider).refreshUser();
+    });
   }
 
   @override

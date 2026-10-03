@@ -11,6 +11,7 @@ import 'package:moco/features/discovery/discovery_screen.dart';
 import 'package:moco/features/listener_profile/listener_profile_screen.dart';
 import 'package:moco/features/onboarding/onboarding_screen.dart';
 import 'package:moco/features/profile_setup/profile_setup_screen.dart';
+import 'package:moco/features/settings/app_settings_controller.dart';
 import 'package:moco/shared/models/listener.dart';
 
 import '../support/harness.dart';
@@ -190,6 +191,29 @@ void main() {
           label: 'Discovery',
         );
       });
+
+      // The 1- and 2-per-row layouts use different card variants; the 2-per-row
+      // card overflowed on a real phone before its rate pills could shrink.
+      for (final columns in const [1, 2]) {
+        testWidgets('discovery grid with $columns per row does not overflow', (tester) async {
+          await expectNoOverflow(
+            tester,
+            wrapShellScreen(
+              const DiscoveryScreen(),
+              overrides: [
+                ...base,
+                listenersApiProvider.overrideWithValue(listenersApi),
+                discoveryColumnsProvider.overrideWith(
+                  (ref) => DiscoveryColumnsController(ref.watch(appPreferencesProvider))
+                    ..setColumns(columns),
+                ),
+              ],
+            ),
+            size: size,
+            label: 'Discovery ($columns per row)',
+          );
+        });
+      }
 
       testWidgets('listener profile does not overflow', (tester) async {
         await expectNoOverflow(

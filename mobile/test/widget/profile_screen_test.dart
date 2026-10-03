@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moco/core/api/listeners_api.dart';
 import 'package:moco/core/api/payouts_api.dart';
+import 'package:moco/core/api/users_api.dart';
 import 'package:moco/core/providers.dart';
 import 'package:moco/core/theme/moco_theme.dart';
 import 'package:moco/features/profile/profile_screen.dart';
@@ -16,6 +17,8 @@ import '../support/harness.dart';
 class _MockListenersApi extends Mock implements ListenersApi {}
 
 class _MockPayoutsApi extends Mock implements PayoutsApi {}
+
+class _MockUsersApi extends Mock implements UsersApi {}
 
 const _caller = MocoUser(id: 1, phone: '+919876543210', displayName: 'Rahul');
 
@@ -56,7 +59,7 @@ void main() {
     when(() => payoutsApi.earnings()).thenAnswer((_) async => _earnings);
   });
 
-  Widget subject(MocoUser user) {
+  Widget subject(MocoUser user, {UsersApi? usersApi}) {
     final router = GoRouter(
       initialLocation: '/profile',
       routes: [
@@ -84,7 +87,7 @@ void main() {
     );
 
     return FutureBuilder<List<Override>>(
-      future: signedInOverrides(user: user),
+      future: signedInOverrides(user: user, usersApi: usersApi),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const SizedBox.shrink();
         return ProviderScope(
@@ -99,8 +102,8 @@ void main() {
     );
   }
 
-  Future<void> pumpReady(WidgetTester tester, MocoUser user) async {
-    await tester.pumpWidget(subject(user));
+  Future<void> pumpReady(WidgetTester tester, MocoUser user, {UsersApi? usersApi}) async {
+    await tester.pumpWidget(subject(user, usersApi: usersApi));
     await tester.pump();
     await tester.pump();
   }
@@ -172,6 +175,32 @@ void main() {
       findsNothing,
       reason: 'an unapproved listener must not be offered an online toggle',
     );
+  });
+
+  testWidgets('opening Listening re-reads the user, so an approval made elsewhere shows up', (
+    tester,
+  ) async {
+    const approved = MocoUser(
+      id: 3,
+      phone: '+919800000003',
+      displayName: 'Ananya',
+      role: 'both',
+      listener: ListenerState(kycStatus: 'approved', photoCount: 3, blockers: []),
+    );
+    final usersApi = _MockUsersApi();
+    var calls = 0;
+    // Bootstrap sees the pending application; the admin approves it before
+    // the listener opens their section.
+    when(() => usersApi.me()).thenAnswer(
+      (_) async => calls++ == 0 ? _pendingListenerUser : approved,
+    );
+
+    await pumpReady(tester, _pendingListenerUser, usersApi: usersApi);
+    await tester.tap(find.byKey(const Key('profile_role_listener')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('profile_availability_switch')), findsOneWidget);
+    expect(find.text('Verification pending'), findsNothing);
   });
 
   testWidgets('toggling availability calls the backend', (tester) async {

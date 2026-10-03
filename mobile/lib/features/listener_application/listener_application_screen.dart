@@ -306,16 +306,20 @@ class _PhotoTile extends StatelessWidget {
           Positioned(
             top: 4,
             right: 4,
-            child: Material(
-              color: Colors.black54,
-              shape: const CircleBorder(),
-              child: InkWell(
-                key: Key('remove_photo_${photo.id}'),
-                customBorder: const CircleBorder(),
-                onTap: onRemove,
-                child: const Padding(
-                  padding: EdgeInsets.all(4),
-                  child: Icon(Icons.close_rounded, size: 16, color: Colors.white),
+            child: Semantics(
+              button: true,
+              label: 'Remove photo',
+              child: Material(
+                color: Colors.black54,
+                shape: const CircleBorder(),
+                child: InkWell(
+                  key: Key('remove_photo_${photo.id}'),
+                  customBorder: const CircleBorder(),
+                  onTap: onRemove,
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.close_rounded, size: 16, color: Colors.white),
+                  ),
                 ),
               ),
             ),

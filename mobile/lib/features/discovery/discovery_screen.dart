@@ -95,13 +95,14 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                               // MocoSectionHeader, which every other screen
                               // also uses and must stay in the app's normal
                               // typeface.
-                               Flexible(
+                              Flexible(
                                 child: Text(
                                   'Discover',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontFamily: MocoTheme.discoverWordmarkFontFamily,
+                                    fontFamily:
+                                        MocoTheme.discoverWordmarkFontFamily,
                                     color: MocoColors.textPrimary,
                                     fontSize: 20,
                                     fontWeight: FontWeight.w500,
@@ -150,13 +151,13 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                           key: const Key('discovery_search_field'),
                           controller: _searchController,
                           onChanged: controller.setSearchQuery,
-                          style:  TextStyle(
+                          style: TextStyle(
                             color: MocoColors.textPrimary,
                             fontSize: 15,
                           ),
                           textInputAction: TextInputAction.search,
                           onSubmitted: controller.submitSearch,
-                          decoration:  InputDecoration(
+                          decoration: InputDecoration(
                             hintText: 'Search listeners',
                             prefixIcon: Icon(
                               Icons.search_rounded,
@@ -254,6 +255,12 @@ ListenerCardDensity _densityFor(int columns) => switch (columns) {
   _ => ListenerCardDensity.compact,
 };
 
+/// The 1-per-row card's height. A fixed ratio would make it SHORTER on
+/// narrower phones while its content stays the same height (it overflowed by
+/// 37px at 360px wide), so that layout gets a content-sized height instead.
+/// Null keeps the ratio for the vertical 2- and 3-per-row cards.
+double? _rowExtentFor(int columns) => columns == 1 ? 172 : null;
+
 /// The 1-column large card is a horizontal row (short and wide); 2-column is
 /// a taller vertical card with more breathing room; 3-column is the
 /// approved reference's compact card.
@@ -288,6 +295,7 @@ class _ListenerGrid extends StatelessWidget {
           mainAxisSpacing: MocoSpacing.sm,
           crossAxisSpacing: MocoSpacing.sm,
           childAspectRatio: _aspectRatioFor(columns),
+          mainAxisExtent: _rowExtentFor(columns),
         ),
         delegate: SliverChildBuilderDelegate((context, index) {
           final listener = listeners[index];
@@ -322,6 +330,7 @@ class _LoadingGrid extends StatelessWidget {
           mainAxisSpacing: MocoSpacing.sm,
           crossAxisSpacing: MocoSpacing.sm,
           childAspectRatio: _aspectRatioFor(columns),
+          mainAxisExtent: _rowExtentFor(columns),
         ),
         delegate: SliverChildBuilderDelegate(
           (context, index) => const MocoGlassCard(
@@ -438,15 +447,11 @@ class _CoinBalanceChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            Icons.circle,
-            size: 12,
-            color: MocoColors.coinAccent,
-          ),
+          const Icon(Icons.circle, size: 12, color: MocoColors.coinAccent),
           const SizedBox(width: 5),
           Text(
             '$balance',
-            style:  TextStyle(
+            style: TextStyle(
               color: MocoColors.textPrimary,
               fontSize: 12.5,
               fontWeight: FontWeight.w600,
@@ -546,7 +551,7 @@ class _NotificationsBell extends ConsumerWidget {
               key: const Key('discovery_notifications_badge'),
               width: 9,
               height: 9,
-              decoration:  BoxDecoration(
+              decoration: BoxDecoration(
                 color: MocoColors.danger,
                 shape: BoxShape.circle,
               ),

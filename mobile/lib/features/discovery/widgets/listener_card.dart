@@ -70,7 +70,11 @@ class ListenerCard extends StatelessWidget {
 /// 3-per-row: the approved reference's compact card. Unchanged from the UI
 /// parity pass — small avatar, stacked rate lines, tight type.
 class _CompactCard extends StatelessWidget {
-  const _CompactCard({required this.listener, required this.firstCallFree, this.onTap});
+  const _CompactCard({
+    required this.listener,
+    required this.firstCallFree,
+    this.onTap,
+  });
 
   final ListenerSummary listener;
   final bool firstCallFree;
@@ -98,16 +102,23 @@ class _CompactCard extends StatelessWidget {
                   ),
                 ),
                 if (listener.isOnline)
-                  Positioned(top: 2, right: 2, child: _StatusPill(busy: listener.isBusy)),
-                if (firstCallFree) const Positioned(top: 2, left: 2, child: _FreeBadge()),
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: _StatusPill(busy: listener.isBusy),
+                  ),
+                if (firstCallFree)
+                  const Positioned(top: 2, left: 2, child: _FreeBadge()),
               ],
             ),
           ),
           const SizedBox(height: MocoSpacing.sm),
           _NameRow(listener: listener, fontSize: 15, badgeSize: 14),
-          if (listener.languages.isNotEmpty) _LanguagesLine(listener: listener, fontSize: 12),
+          if (listener.languages.isNotEmpty)
+            _LanguagesLine(listener: listener, fontSize: 12),
           const SizedBox(height: MocoSpacing.sm),
-          if (listener.rating > 0) _RatingRow(rating: listener.rating, fontSize: 12, iconSize: 13),
+          if (listener.rating > 0)
+            _RatingRow(rating: listener.rating, fontSize: 12, iconSize: 13),
           const SizedBox(height: 3),
           _RateLine(rate: listener.audioRate, isVideo: false),
           const SizedBox(height: 2),
@@ -121,7 +132,11 @@ class _CompactCard extends StatelessWidget {
 /// 2-per-row: a taller vertical card with more breathing room — bigger
 /// avatar, both rates as a single pill row instead of stacked icon lines.
 class _MediumCard extends StatelessWidget {
-  const _MediumCard({required this.listener, required this.firstCallFree, this.onTap});
+  const _MediumCard({
+    required this.listener,
+    required this.firstCallFree,
+    this.onTap,
+  });
 
   final ListenerSummary listener;
   final bool firstCallFree;
@@ -149,22 +164,33 @@ class _MediumCard extends StatelessWidget {
                   ),
                 ),
                 if (listener.isOnline)
-                  Positioned(top: 4, right: 4, child: _StatusPill(busy: listener.isBusy)),
-                if (firstCallFree) const Positioned(top: 4, left: 4, child: _FreeBadge()),
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: _StatusPill(busy: listener.isBusy),
+                  ),
+                if (firstCallFree)
+                  const Positioned(top: 4, left: 4, child: _FreeBadge()),
               ],
             ),
           ),
           const SizedBox(height: MocoSpacing.md),
           _NameRow(listener: listener, fontSize: 16.5, badgeSize: 16),
-          if (listener.languages.isNotEmpty) _LanguagesLine(listener: listener, fontSize: 13),
+          if (listener.languages.isNotEmpty)
+            _LanguagesLine(listener: listener, fontSize: 13),
           const SizedBox(height: MocoSpacing.sm),
-          if (listener.rating > 0) _RatingRow(rating: listener.rating, fontSize: 13, iconSize: 14),
+          if (listener.rating > 0)
+            _RatingRow(rating: listener.rating, fontSize: 13, iconSize: 14),
           const SizedBox(height: MocoSpacing.sm),
           Row(
             children: [
-              _RatePill(rate: listener.audioRate, isVideo: false),
+              Flexible(
+                child: _RatePill(rate: listener.audioRate, isVideo: false),
+              ),
               const SizedBox(width: MocoSpacing.sm),
-              _RatePill(rate: listener.videoRate, isVideo: true),
+              Flexible(
+                child: _RatePill(rate: listener.videoRate, isVideo: true),
+              ),
             ],
           ),
         ],
@@ -178,7 +204,11 @@ class _MediumCard extends StatelessWidget {
 /// arrangement (Row, not a stretched Column) rather than the same card
 /// stretched wide.
 class _LargeCard extends StatelessWidget {
-  const _LargeCard({required this.listener, required this.firstCallFree, this.onTap});
+  const _LargeCard({
+    required this.listener,
+    required this.firstCallFree,
+    this.onTap,
+  });
 
   final ListenerSummary listener;
   final bool firstCallFree;
@@ -201,7 +231,8 @@ class _LargeCard extends StatelessWidget {
                 size: 96,
                 ring: listener.isAvailable,
               ),
-              if (firstCallFree) const Positioned(top: -2, left: -2, child: _FreeBadge()),
+              if (firstCallFree)
+                const Positioned(top: -2, left: -2, child: _FreeBadge()),
             ],
           ),
           const SizedBox(width: MocoSpacing.lg),
@@ -211,7 +242,13 @@ class _LargeCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Expanded(child: _NameRow(listener: listener, fontSize: 18, badgeSize: 18)),
+                    Expanded(
+                      child: _NameRow(
+                        listener: listener,
+                        fontSize: 18,
+                        badgeSize: 18,
+                      ),
+                    ),
                     if (listener.isOnline) _StatusPill(busy: listener.isBusy),
                   ],
                 ),
@@ -224,13 +261,24 @@ class _LargeCard extends StatelessWidget {
                 if (listener.rating > 0)
                   Padding(
                     padding: const EdgeInsets.only(bottom: MocoSpacing.sm),
-                    child: _RatingRow(rating: listener.rating, fontSize: 13.5, iconSize: 15),
+                    child: _RatingRow(
+                      rating: listener.rating,
+                      fontSize: 13.5,
+                      iconSize: 15,
+                    ),
                   ),
                 Row(
                   children: [
-                    _RatePill(rate: listener.audioRate, isVideo: false),
+                    Flexible(
+                      child: _RatePill(
+                        rate: listener.audioRate,
+                        isVideo: false,
+                      ),
+                    ),
                     const SizedBox(width: MocoSpacing.sm),
-                    _RatePill(rate: listener.videoRate, isVideo: true),
+                    Flexible(
+                      child: _RatePill(rate: listener.videoRate, isVideo: true),
+                    ),
                   ],
                 ),
               ],
@@ -250,7 +298,11 @@ String _languageLabel(String code) => switch (code) {
 };
 
 class _NameRow extends StatelessWidget {
-  const _NameRow({required this.listener, required this.fontSize, required this.badgeSize});
+  const _NameRow({
+    required this.listener,
+    required this.fontSize,
+    required this.badgeSize,
+  });
 
   final ListenerSummary listener;
   final double fontSize;
@@ -304,7 +356,11 @@ class _LanguagesLine extends StatelessWidget {
 }
 
 class _RatingRow extends StatelessWidget {
-  const _RatingRow({required this.rating, required this.fontSize, required this.iconSize});
+  const _RatingRow({
+    required this.rating,
+    required this.fontSize,
+    required this.iconSize,
+  });
 
   final double rating;
   final double fontSize;
@@ -382,24 +438,29 @@ class _RatePill extends StatelessWidget {
         borderRadius: BorderRadius.circular(MocoRadius.pill),
         border: Border.all(color: MocoColors.borderSubtle),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            isVideo ? Icons.videocam_rounded : Icons.call_rounded,
-            size: 13,
-            color: MocoColors.coinAccent,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            '$rate/min',
-            style: const TextStyle(
+      // Scales down instead of overflowing when two pills share a narrow
+      // 2-per-row card (the row gives each pill a Flexible share).
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isVideo ? Icons.videocam_rounded : Icons.call_rounded,
+              size: 13,
               color: MocoColors.coinAccent,
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
             ),
-          ),
-        ],
+            const SizedBox(width: 4),
+            Text(
+              '$rate/min',
+              style: const TextStyle(
+                color: MocoColors.coinAccent,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -451,7 +512,11 @@ class _FreeBadge extends StatelessWidget {
       ),
       child: const Text(
         '1st free',
-        style: TextStyle(color: Color(0xFF2A1338), fontSize: 10, fontWeight: FontWeight.w800),
+        style: TextStyle(
+          color: Color(0xFF2A1338),
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+        ),
       ),
     );
   }

@@ -216,7 +216,14 @@ td .sub { display: block; color: var(--text-faint); font-size: 11.5px; }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(5,2,5,.65); z-index: 60; display: grid; place-items: center; padding: 20px; }
 .modal { width: min(460px, 100%); background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 14px; padding: 20px; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
 .modal h3 { margin: 0 0 6px; font-size: 16px; }
-.modal p { color: var(--text-dim); margin: 0 0 14px; }
+.modal p, .modal .modal-msg { color: var(--text-dim); margin: 0 0 14px; }
+.modal { max-height: calc(100vh - 40px); overflow-y: auto; }
+.del-warn { color: var(--red); display: block; margin-bottom: 8px; }
+.del-cols { display: grid; gap: 10px; }
+.del-cols h4, .panel h4 { margin: 10px 0 4px; font-size: 12.5px; color: var(--text); }
+.del-list { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.6; }
+.upload-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; }
+.upload-tile { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; max-width: 170px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 
 /* ---------- Health ---------- */

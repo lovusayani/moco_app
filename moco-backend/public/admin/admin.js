@@ -420,7 +420,7 @@ function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', da
       <div class="modal-backdrop">
         <div class="modal" role="dialog" aria-label="${esc(title)}">
           <h3>${esc(title)}</h3>
-          ${message ? `<p>${message}</p>` : ''}
+          ${message ? `<div class="modal-msg">${message}</div>` : ''}
           <div class="error-msg" hidden></div>
           <form>${fieldHtml}
             <div class="modal-actions">
@@ -628,6 +628,108 @@ async function changeUserStatus(user, status) {
   });
 }
 
+/* ---------- Permanent deletion ---------- */
+
+const countList = (obj) => Object.entries(obj)
+  .map(([k, v]) => `<li>${esc(k.replace(/([A-Z])/g, ' $1').toLowerCase())}: <b>${esc(typeof v === 'number' ? num(v) : String(v ?? '—'))}</b></li>`)
+  .join('');
+
+/**
+ * Permanently deletes an account after showing exactly what goes and what
+ * stays. The server re-checks everything (admin, blockers, typed id); this
+ * dialog only makes the consequences impossible to miss.
+ */
+async function deleteAccount(id, label) {
+  let preview;
+  try {
+    preview = await api(`/admin/users/${id}/deletion-preview`);
+  } catch (err) {
+    toast(`Could not load the deletion preview: ${err.message}`, false);
+    return null;
+  }
+  if (preview.blockers.length) {
+    await dialog({
+      title: `${label} cannot be deleted yet`,
+      message: `<ul class="del-list">${preview.blockers.map((b) => `<li>${esc(b.message)}</li>`).join('')}</ul>`,
+      confirmLabel: 'OK',
+    });
+    return null;
+  }
+  const result = await dialog({
+    title: `Permanently delete ${label}?`,
+    message: `<b class="del-warn">This cannot be undone.</b>
+      <div class="del-cols">
+        <div><h4>Deleted (rows and stored files)</h4><ul class="del-list">${countList(preview.deleted)}</ul></div>
+        <div><h4>Anonymised</h4><ul class="del-list">${countList(preview.anonymized)}</ul></div>
+        <div><h4>Retained for accounting and audit</h4><ul class="del-list">${countList(preview.retained)}</ul></div>
+      </div>`,
+    fields: [
+      { name: 'reason', label: 'Reason (recorded in the audit log)', type: 'textarea', required: true },
+      { name: 'confirm', label: `Type the account id (${id}) to confirm`, required: true, placeholder: String(id) },
+    ],
+    confirmLabel: 'Delete permanently',
+    danger: true,
+    onSubmit: (v) => api(`/admin/users/${id}`, { method: 'DELETE', body: { reason: v.reason, confirm: v.confirm } }),
+  });
+  if (result && result.status === 'deleted') {
+    const files = Object.values(result.storageObjectsRemoved).reduce((a, b) => a + b, 0);
+    toast(`Account #${id} deleted — ${files} stored file(s) removed, financial history kept (audit #${result.auditId})`);
+  }
+  return result;
+}
+
+/** Permanently deletes one upload (post, creator photo or chat photo). */
+async function deleteUpload(kind, id) {
+  const spec = {
+    post: { path: `/admin/posts/${id}`, what: `post #${id}`, note: 'The post and its image/video file are deleted. Use "Remove" instead if it may need restoring.' },
+    photo: { path: `/admin/listener-photos/${id}`, what: `creator photo #${id}`, note: 'The photo and its file are deleted. A creator left below the photo minimum is taken offline.' },
+    chat: { path: `/admin/chat-media/${id}`, what: `chat photo (message #${id})`, note: 'The message, its reactions and the stored image are deleted from the conversation.' },
+  }[kind];
+  const result = await dialog({
+    title: `Permanently delete ${spec.what}?`,
+    message: `<b class="del-warn">This cannot be undone.</b> ${esc(spec.note)}`,
+    fields: [{ name: 'reason', label: 'Reason (recorded in the audit log)', type: 'textarea', required: true }],
+    confirmLabel: 'Delete permanently',
+    danger: true,
+    onSubmit: (v) => api(spec.path, { method: 'DELETE', body: { reason: v.reason } }),
+  });
+  if (result && result.deleted) {
+    toast(`Deleted ${spec.what} (${result.storageObjectsRemoved} file removed${result.takenOffline ? '; creator taken offline' : ''})`);
+  }
+  return result;
+}
+
+/** The "Uploads" panel in a user drawer: every post, creator photo and chat
+ * photo the account owns, each with its own permanent delete. */
+async function renderUploads(host, userId) {
+  host.innerHTML = '<div class="sub">Loading uploads…</div>';
+  let up;
+  try {
+    up = await api(`/admin/users/${userId}/uploads`);
+  } catch (err) {
+    host.innerHTML = `<div class="sub">! ${esc(err.message)}</div>`;
+    return;
+  }
+  const tile = (media, meta, kind, id) => `
+    <div class="upload-tile">${media}<div class="sub">${meta}</div>
+      <button class="btn-danger btn-sm" data-del="${kind}" data-id="${id}">Delete permanently</button></div>`;
+  const posts = up.posts.map((p) => tile(postPreview(p), `Post #${p.id} · ${badge(p.media_type)} ${p.status !== 'active' ? badge(p.status) : ''}`, 'post', p.id)).join('');
+  const photos = up.photos.map((p) => tile(
+    p.url ? `<img src="${esc(p.url)}" alt="" class="thumb" style="width:64px;height:64px" loading="lazy">` : postPreview({}),
+    `Photo #${p.id}`, 'photo', p.id)).join('');
+  const chat = up.chatPhotos.map((m) => tile(
+    '<div class="ph" style="width:64px;height:64px;border-radius:8px;display:grid;place-items:center;color:var(--text-faint);font-size:11px;border:1px solid var(--border)">private</div>',
+    `Message #${m.id} · to #${m.other_user_id} · ${when(m.created_at)}`, 'chat', m.id)).join('');
+  host.innerHTML = `
+    <h4>Feed posts (${up.posts.length})</h4><div class="upload-grid">${posts || '<span class="sub">None.</span>'}</div>
+    <h4>Creator photos (${up.photos.length})</h4><div class="upload-grid">${photos || '<span class="sub">None.</span>'}</div>
+    <h4>Chat photos sent (${up.chatPhotos.length}) <span class="sub">— not previewed; private messages</span></h4>
+    <div class="upload-grid">${chat || '<span class="sub">None.</span>'}</div>`;
+  host.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (await deleteUpload(b.dataset.del, b.dataset.id)) renderUploads(host, userId);
+  }));
+}
+
 function openUser(id) {
   drawer.open(`User #${id}`, async (body) => {
     const u = await api(`/admin/users/${id}`);
@@ -638,6 +740,7 @@ function openUser(id) {
         ${u.status === 'suspended' ? '<button class="btn-ok btn-sm" data-act="restore">Restore account</button>' : ''}
         ${L ? '<button class="btn-ghost btn-sm" data-act="listener">Open creator profile</button>' : ''}
         ${typeof openWallet === 'function' ? '<button class="btn-ghost btn-sm" data-act="wallet">Wallet & ledger</button>' : ''}
+        ${!u.isAdmin ? '<button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>' : ''}
       </div>
       <div class="cols-2">
         <div class="panel"><h3>Profile</h3>${kv([
@@ -691,8 +794,13 @@ function openUser(id) {
         { label: 'Status', render: (r) => badge(r.status) },
         { label: 'When', render: (r) => when(r.created_at) },
       ], u.reports, 'No reports.')}</div>
+      <div class="panel"><h3>Uploads</h3><div data-uploads></div></div>
       <div class="panel"><h3>Admin history</h3>${timeline(u.history)}</div>`;
 
+    renderUploads(body.querySelector('[data-uploads]'), u.id);
+    body.querySelector('[data-act=delete]')?.addEventListener('click', async () => {
+      if (await deleteAccount(u.id, u.name || `user #${u.id}`)) drawer.refresh();
+    });
     body.querySelector('[data-act=suspend]')?.addEventListener('click', async () => {
       if (await changeUserStatus(u, 'suspended')) { toast('Account suspended'); drawer.refresh(); }
     });
@@ -744,6 +852,7 @@ function openListener(id) {
         ${k.status === 'pending' ? '<button class="btn-ok btn-sm" data-act="approve">Approve application</button><button class="btn-danger btn-sm" data-act="reject">Reject</button>' : ''}
         ${k.status === 'approved' ? '<button class="btn-danger btn-sm" data-act="reject">Revoke approval</button>' : ''}
         <button class="btn-ghost btn-sm" data-act="user">Open user account</button>
+        <button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>
       </div>
       <div class="cols-2">
         <div class="panel"><h3>Status</h3>${kv([
@@ -809,6 +918,9 @@ function openListener(id) {
     body.querySelector('[data-act=approve]')?.addEventListener('click', () => reviewKyc(l, true, () => drawer.refresh()));
     body.querySelector('[data-act=reject]')?.addEventListener('click', () => reviewKyc(l, false, () => drawer.refresh()));
     body.querySelector('[data-act=user]').addEventListener('click', () => openUser(l.id));
+    body.querySelector('[data-act=delete]').addEventListener('click', async () => {
+      if (await deleteAccount(l.id, l.name || `creator #${l.id}`)) drawer.refresh();
+    });
     body.querySelectorAll('[data-report]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();
       openReport(a.dataset.report);
@@ -1199,7 +1311,7 @@ function postPreview(p, big = false) {
 /* ---------- Content ---------- */
 
 view('content', 'Content / Posts', 'Activity', (el) => {
-  el.innerHTML = head('Content / Posts', 'Feed posts. Removing hides a post but keeps its media so it can be restored; posts their author deleted cannot be restored. Every action needs a reason and is audit-logged.') + '<div id="t"></div>';
+  el.innerHTML = head('Content / Posts', 'Feed posts. Removing hides a post but keeps its media so it can be restored; posts their author deleted cannot be restored. Delete permanently (in a post) erases the post and its stored file for good. Every action needs a reason and is audit-logged.') + '<div id="t"></div>';
   const table = dataTable(el.querySelector('#t'), {
     endpoint: '/admin/posts',
     search: 'Caption, author, phone or #id…',
@@ -1232,6 +1344,7 @@ function openPost(p, onChange) {
       <div class="drawer-actions">
         ${p.status === 'active' ? '<button class="btn-danger btn-sm" data-act="remove">Remove post</button>' : ''}
         ${p.restorable ? '<button class="btn-ok btn-sm" data-act="restore">Restore post</button>' : ''}
+        <button class="btn-danger btn-sm" data-act="purge">Delete permanently</button>
         <button class="btn-ghost btn-sm" data-act="author">Open author</button>
       </div>
       <div class="panel">${postPreview(p, true)}</div>
@@ -1258,6 +1371,9 @@ function openPost(p, onChange) {
     };
     body.querySelector('[data-act=remove]')?.addEventListener('click', act('remove'));
     body.querySelector('[data-act=restore]')?.addEventListener('click', act('restore'));
+    body.querySelector('[data-act=purge]').addEventListener('click', async () => {
+      if (await deleteUpload('post', p.id)) { drawer.close(); onChange?.(); }
+    });
     body.querySelector('[data-act=author]').addEventListener('click', () => openUser(p.author_id));
   });
 }

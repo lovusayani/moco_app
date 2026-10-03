@@ -1332,7 +1332,165 @@ async function adminSmoke({ callerToken, reportedListenerId }) {
       !healthText.includes(process.env.SUPABASE_SERVICE_ROLE_KEY || '~none~'), 'health payload');
   const earningsRec = await call('GET', '/admin/reconcile/earnings', { token: A });
   check('earnings reconciliation responds', earningsRec.status === 200 && typeof earningsRec.body.balanced === 'boolean', earningsRec.body);
+  await deletionSmoke({ A, adminId: admin.user.id, callerToken, sessionFor });
 }
+
+/**
+ * Admin permanent deletion. Everything here runs on accounts this run
+ * creates, so nothing seeded or shared is ever deleted.
+ */
+async function deletionSmoke({ A, adminId, callerToken, sessionFor }) {
+  const storage = require('../src/integrations/storage');
+  const { FEED_MEDIA, LISTENER_PHOTOS, CHAT_MEDIA } = require('../src/utils/constants');
+  const exists = async (bucket, path) => (await storage.statObject(bucket, path)) !== null;
+  const caller = (await call('GET', '/users/me', { token: callerToken })).body;
+
+  async function upload(token, endpoint) {
+    const auth = await call('POST', endpoint, { token, body: { mimeType: 'image/png' } });
+    const put = await uploadToSignedUrl({ uploadUrl: auth.body.uploadUrl, token: auth.body.token, mimeType: 'image/png', bytes: TINY_PNG });
+    return put.status < 300 ? auth.body.path : null;
+  }
+  async function post(token) {
+    const path = await upload(token, '/feed/media/upload-url');
+    const created = await call('POST', '/feed', { token, body: { mediaPath: path, caption: 'deletion smoke' } });
+    return { id: created.body.post?.id, path };
+  }
+  async function chatPhoto(token, toUserId) {
+    const path = await upload(token, '/chat/media/upload-url');
+    const sent = await call('POST', `/chat/${toUserId}/messages`, { token, body: { type: 'image', mediaPath: path } });
+    return { id: sent.body.message?.id, path };
+  }
+  async function account(name) {
+    const s = await sessionFor(freshTestPhone().replace(/\d{3}$/, String(Math.floor(Math.random() * 900) + 100)));
+    await call('PATCH', '/users/me', { token: s.token, body: { displayName: name } });
+    return s;
+  }
+
+  console.log('== Admin: permanent deletion — authorization ==');
+  const victim = await account('Delete Me');
+  const vid = victim.user.id;
+  const noAuth = await call('DELETE', `/admin/users/${vid}`, { body: { reason: 'smoke test', confirm: String(vid) } });
+  const nonAdmin = await Promise.all([
+    call('DELETE', `/admin/users/${vid}`, { token: callerToken, body: { reason: 'smoke test', confirm: String(vid) } }),
+    call('DELETE', '/admin/posts/1', { token: callerToken, body: { reason: 'smoke test' } }),
+    call('DELETE', '/admin/listener-photos/1', { token: callerToken, body: { reason: 'smoke test' } }),
+    call('DELETE', '/admin/chat-media/1', { token: callerToken, body: { reason: 'smoke test' } }),
+    call('GET', `/admin/users/${vid}/deletion-preview`, { token: callerToken }),
+  ]);
+  check('permanent delete rejects an unauthenticated request (401)', noAuth.status === 401, noAuth.status);
+  check('every permanent-delete route rejects a non-admin (403)', nonAdmin.every((r) => r.status === 403), nonAdmin.map((r) => r.status));
+  const stillThere = await pool.query('SELECT status FROM users WHERE id = $1', [vid]);
+  check('a rejected delete changed nothing', stillThere.rows[0]?.status === 'active', stillThere.rows[0]);
+  const wrongConfirm = await call('DELETE', `/admin/users/${vid}`, { token: A, body: { reason: 'smoke test', confirm: '1' } });
+  check('account deletion needs the typed account id',
+    wrongConfirm.status === 400 && wrongConfirm.body.error?.code === 'confirmation_mismatch', wrongConfirm.body);
+  const noReason = await call('DELETE', `/admin/users/${vid}`, { token: A, body: { confirm: String(vid) } });
+  check('account deletion needs a reason', noReason.status === 400, noReason.body);
+  const selfDelete = await call('DELETE', `/admin/users/${adminId}`, { token: A, body: { reason: 'smoke test', confirm: String(adminId) } });
+  check('an admin cannot delete their own / an admin account', selfDelete.status === 409, selfDelete.body);
+
+  console.log('== Admin: permanent deletion — content ==');
+  const p = await post(victim.token);
+  check('(setup) a post with stored media exists', p.id && (await exists(FEED_MEDIA.bucket, p.path)), p);
+  const delPost = await call('DELETE', `/admin/posts/${p.id}`, { token: A, body: { reason: 'smoke: permanent post delete' } });
+  const postRow = await pool.query('SELECT 1 FROM posts WHERE id = $1', [p.id]);
+  check('admin permanently deletes a post', delPost.status === 200 && delPost.body.deleted === true && postRow.rowCount === 0, delPost.body);
+  check("the post's stored media object is removed", !(await exists(FEED_MEDIA.bucket, p.path)));
+  const feedAfter = await call('GET', '/feed?limit=50', { token: callerToken });
+  check('the deleted post is gone from the feed', !(feedAfter.body.posts || []).some((x) => x.id === p.id), feedAfter.status);
+  const postAudit = await pool.query(
+    "SELECT reason FROM admin_audit_log WHERE action = 'content.delete_permanent' AND target_id = $1", [String(p.id)]);
+  check('post deletion is audited with its reason', postAudit.rows[0]?.reason === 'smoke: permanent post delete', postAudit.rows);
+  const again = await call('DELETE', `/admin/posts/${p.id}`, { token: A, body: { reason: 'smoke: again' } });
+  check('deleting it again is a clean 404', again.status === 404, again.body);
+
+  const m = await chatPhoto(victim.token, caller.id);
+  check('(setup) a chat photo with stored media exists', m.id && (await exists(CHAT_MEDIA.bucket, m.path)), m);
+  const delChat = await call('DELETE', `/admin/chat-media/${m.id}`, { token: A, body: { reason: 'smoke: chat photo' } });
+  const msgRow = await pool.query('SELECT 1 FROM messages WHERE id = $1', [m.id]);
+  check('admin permanently deletes a chat photo (row and object)',
+    delChat.status === 200 && msgRow.rowCount === 0 && !(await exists(CHAT_MEDIA.bucket, m.path)), delChat.body);
+
+  console.log('== Admin: permanent deletion — user ==');
+  const adj = await call('POST', `/admin/wallet/${vid}/adjust`, { token: A, body: { amount: 12, reason: 'smoke: ledger before delete' } });
+  const victimPost = await post(victim.token);
+  await call('PUT', `/listeners/${caller.id}/follow`, { token: victim.token });
+  const ledgerBefore = await pool.query('SELECT count(*)::int AS n FROM coin_ledger WHERE user_id = $1', [vid]);
+  const auditBefore = await pool.query(
+    "SELECT count(*)::int AS n FROM admin_audit_log WHERE target_type = 'user' AND target_id = $1", [String(vid)]);
+  const preview = await call('GET', `/admin/users/${vid}/deletion-preview`, { token: A });
+  check('the deletion preview lists what is deleted vs retained',
+    preview.status === 200 && preview.body.blockers.length === 0 && preview.body.deleted.posts === 1 &&
+      preview.body.retained.coinLedgerEntries === ledgerBefore.rows[0].n && preview.body.retained.coinBalance === 12, preview.body);
+  const delUser = await call('DELETE', `/admin/users/${vid}`, { token: A, body: { reason: 'smoke: delete user', confirm: String(vid) } });
+  check('admin permanently deletes a user', adj.status === 201 && delUser.status === 200 && delUser.body.status === 'deleted', delUser.body);
+  const tomb = await pool.query('SELECT phone, display_name, avatar_url, fcm_token, status FROM users WHERE id = $1', [vid]);
+  check('the account is an anonymised tombstone',
+    tomb.rows[0].status === 'deleted' && tomb.rows[0].phone === `deleted_${vid}` && tomb.rows[0].display_name === null, tomb.rows[0]);
+  const meAfter = await call('GET', '/users/me', { token: victim.token });
+  check("the deleted user's existing token is rejected", meAfter.status === 401, meAfter.status);
+  const owned = await pool.query(
+    `SELECT (SELECT count(*) FROM posts WHERE author_user_id = $1)::int AS posts,
+            (SELECT count(*) FROM listener_relations WHERE user_id = $1)::int AS follows`, [vid]);
+  check("the user's posts and follows are deleted", owned.rows[0].posts === 0 && owned.rows[0].follows === 0, owned.rows[0]);
+  check("the user's post media object is removed", !(await exists(FEED_MEDIA.bucket, victimPost.path)));
+  const ledgerAfter = await pool.query('SELECT count(*)::int AS n FROM coin_ledger WHERE user_id = $1', [vid]);
+  const walletAfter = await call('GET', `/admin/wallet/${vid}`, { token: A });
+  check('the coin ledger is retained and the wallet still reconciles',
+    ledgerAfter.rows[0].n === ledgerBefore.rows[0].n && walletAfter.body.balanced === true,
+    { before: ledgerBefore.rows[0], after: ledgerAfter.rows[0], wallet: walletAfter.body });
+  const auditAfter = await pool.query(
+    "SELECT action FROM admin_audit_log WHERE target_type = 'user' AND target_id = $1 ORDER BY id", [String(vid)]);
+  check('earlier audit history is intact and the deletion is audited',
+    auditAfter.rowCount === auditBefore.rows[0].n + 1 && auditAfter.rows.at(-1).action === 'user.delete_permanent', auditAfter.rows);
+  const auditMeta = await pool.query(
+    "SELECT metadata::text AS m FROM admin_audit_log WHERE action = 'user.delete_permanent' AND target_id = $1", [String(vid)]);
+  check('the deletion audit entry carries no phone number', !auditMeta.rows[0].m.includes(victim.user.phone), 'metadata');
+
+  console.log('== Admin: permanent deletion — creator ==');
+  const creator = await account('Delete Creator');
+  const cid = creator.user.id;
+  await call('POST', '/users/me/become-listener', { token: creator.token });
+  const photos = await addListenerPhotos(creator.token, 3);
+  const photoRows = (await pool.query('SELECT id, storage_path FROM listener_photos WHERE listener_id = $1 ORDER BY id', [cid])).rows;
+  check('(setup) the creator has 3 stored photos', photos?.status === 201 && photoRows.length === 3, photos?.body);
+  const delPhoto = await call('DELETE', `/admin/listener-photos/${photoRows[0].id}`, { token: A, body: { reason: 'smoke: creator photo' } });
+  check('admin permanently deletes a creator photo (row, object, count)',
+    delPhoto.status === 200 && delPhoto.body.photoCount === 2 &&
+      !(await exists(LISTENER_PHOTOS.bucket, photoRows[0].storage_path)), delPhoto.body);
+  const creatorPost = await post(creator.token);
+  const creatorChat = await chatPhoto(creator.token, caller.id);
+  const orphan = await upload(creator.token, '/feed/media/upload-url'); // uploaded, never posted
+  await call('PUT', `/listeners/${cid}/follow`, { token: callerToken });
+  await pool.query("UPDATE listener_profiles SET kyc_name = 'Smoke Name', upi_id = 'smoke@upi', bio = 'bio' WHERE user_id = $1", [cid]);
+  check('(setup) the unregistered upload exists in storage', orphan && (await exists(FEED_MEDIA.bucket, orphan)));
+  const delCreator = await call('DELETE', `/admin/users/${cid}`, { token: A, body: { reason: 'smoke: delete creator', confirm: String(cid) } });
+  check('admin permanently deletes a creator',
+    delCreator.status === 200 && delCreator.body.storageObjectsRemoved?.creatorPhotos === 2 &&
+      delCreator.body.storageObjectsRemoved?.unregistered >= 1, delCreator.body);
+  const remaining = [
+    [LISTENER_PHOTOS.bucket, photoRows[1].storage_path], [LISTENER_PHOTOS.bucket, photoRows[2].storage_path],
+    [FEED_MEDIA.bucket, creatorPost.path], [CHAT_MEDIA.bucket, creatorChat.path], [FEED_MEDIA.bucket, orphan],
+  ];
+  const still = [];
+  for (const [bucket, path] of remaining) if (await exists(bucket, path)) still.push(`${bucket}/${path}`);
+  check('every storage object of the creator is removed (photos, post, chat, unregistered upload)', still.length === 0, still);
+  const lp = await pool.query(
+    'SELECT is_online, bio, kyc_name, upi_id, kyc_doc_url, photo_count FROM listener_profiles WHERE user_id = $1', [cid]);
+  check('the creator profile is kept for accounting but stripped of personal data',
+    lp.rows[0] && !lp.rows[0].is_online && lp.rows[0].bio === null && lp.rows[0].kyc_name === null &&
+      lp.rows[0].upi_id === null && lp.rows[0].photo_count === 0, lp.rows[0]);
+  const rels = await pool.query('SELECT count(*)::int AS n FROM listener_relations WHERE listener_id = $1', [cid]);
+  const convs = await pool.query('SELECT count(*)::int AS n FROM conversations WHERE user_a = $1 OR user_b = $1', [cid]);
+  check('follows of the creator and their conversations are deleted',
+    rels.rows[0].n === 0 && convs.rows[0].n === 0, { rels: rels.rows[0], convs: convs.rows[0] });
+  const profileGone = await call('GET', `/listeners/${cid}`, { token: callerToken });
+  check('the deleted creator is no longer reachable in the app', profileGone.status === 404, profileGone.status);
+  const earningsRec = await call('GET', '/admin/reconcile/earnings', { token: A });
+  check('earnings still reconcile after the creator deletion',
+    !(earningsRec.body.discrepancies || []).some((d) => Number(d.user_id) === Number(cid)), earningsRec.body);
+}
+
 
 main().catch(async (err) => {
   console.error('SMOKE TEST CRASHED', err);

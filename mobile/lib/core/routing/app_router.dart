@@ -93,7 +93,9 @@ final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
 final routerProvider = Provider<GoRouter>((ref) {
   final auth = ref.watch(authActionsProvider);
-  final callingSupported = ref.watch(platformCapabilitiesProvider).supportsCalling;
+  final capabilities = ref.watch(platformCapabilitiesProvider);
+  final callingSupported = capabilities.supportsCalling;
+  final home = homeRouteFor(capabilities);
 
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
@@ -101,8 +103,12 @@ final routerProvider = Provider<GoRouter>((ref) {
     // The controller is a Listenable, so every auth change re-evaluates
     // redirects. This is what keeps routing and session state in lockstep.
     refreshListenable: auth,
-    redirect: (context, state) =>
-        _redirect(auth.value, state, callingSupported: callingSupported),
+    redirect: (context, state) => _redirect(
+      auth.value,
+      state,
+      callingSupported: callingSupported,
+      home: home,
+    ),
     routes: [
       GoRoute(
         path: Routes.onboarding,
@@ -226,7 +232,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         navigatorKey: _shellNavigatorKey,
         builder: (context, state, child) => AppShell(child: child),
         routes: [
-          GoRoute(path: Routes.app, redirect: (_, __) => Routes.discovery),
+          GoRoute(path: Routes.app, redirect: (_, __) => home),
           GoRoute(
             path: Routes.discovery,
             pageBuilder: (context, state) =>
@@ -265,6 +271,10 @@ final routerProvider = Provider<GoRouter>((ref) {
   );
 });
 
+/// Where a signed-in user lands: Feed on web, Discovery on Android.
+String homeRouteFor(PlatformCapabilities capabilities) =>
+    capabilities.isWeb ? Routes.feed : Routes.discovery;
+
 /// The single startup decision, evaluated on every navigation.
 ///
 /// Order matters and mirrors the launch flow: onboarding, then authentication,
@@ -279,6 +289,7 @@ String? _redirect(
   AuthState auth,
   GoRouterState state, {
   bool callingSupported = true,
+  String home = Routes.discovery,
 }) {
   if (auth.isInitializing) return null;
 
@@ -300,7 +311,7 @@ String? _redirect(
       return atProfileSetup ? null : Routes.profileSetup;
     case AuthStatus.authenticated:
       // Bounce away from the pre-auth screens once signed in and complete.
-      if (atOnboarding || atLogin || atProfileSetup) return Routes.discovery;
+      if (atOnboarding || atLogin || atProfileSetup) return home;
       if (!callingSupported && location.startsWith('/call/')) {
         return Routes.discovery;
       }

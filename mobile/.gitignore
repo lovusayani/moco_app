@@ -50,3 +50,6 @@ app.*.map.json
 # Codegen artifacts (kept in case codegen is reinstated)
 *.g.dart
 *.freezed.dart
+
+# Vercel CLI project link (vercel link / vercel pull)
+.vercel/

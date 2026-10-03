@@ -1,0 +1,60 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "node tool/vercel/install_flutter.mjs",
+  "buildCommand": "node tool/vercel/build_web.mjs",
+  "outputDirectory": "build/web",
+  "routes": [
+    {
+      "src": "^/api/(.*)$",
+      "dest": "${MOCO_BACKEND_ORIGIN}/api/$1",
+      "env": ["MOCO_BACKEND_ORIGIN"],
+      "transforms": [
+        {
+          "type": "request.headers",
+          "op": "set",
+          "target": { "key": "x-moco-edge-secret" },
+          "args": "${MOCO_EDGE_PROXY_SECRET}",
+          "env": ["MOCO_EDGE_PROXY_SECRET"]
+        }
+      ],
+      "headers": {
+        "x-vercel-enable-rewrite-caching": "0",
+        "Cache-Control": "no-store"
+      }
+    },
+    {
+      "src": "^/(socket\\.io|admin|health)(/.*)?$",
+      "status": 404
+    },
+    {
+      "src": "^/(.*)$",
+      "headers": {
+        "Cache-Control": "no-cache",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "X-Frame-Options": "DENY"
+      },
+      "continue": true
+    },
+    {
+      "src": "^/sw\\.js$",
+      "headers": { "Service-Worker-Allowed": "/" },
+      "continue": true
+    },
+    {
+      "src": "^/manifest\\.json$",
+      "headers": { "Content-Type": "application/manifest+json" },
+      "continue": true
+    },
+    { "handle": "filesystem" },
+    {
+      "src": "^/.*\\.[A-Za-z0-9]+$",
+      "status": 404
+    },
+    {
+      "src": "^/.*$",
+      "dest": "/index.html"
+    }
+  ]
+}

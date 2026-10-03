@@ -41,7 +41,13 @@ not need it).
 
 ## Deploy
 
-See [`web_deploy/nginx-moco-web.conf`](web_deploy/nginx-moco-web.conf): one
+**Production (lovcamx.online) is on Vercel.** See
+[`docs/DEPLOYMENT-VERCEL.md`](../docs/DEPLOYMENT-VERCEL.md) and
+[`vercel.json`](vercel.json). The build runs `tool/vercel/build_web.mjs`.
+Vercel proxies `/api`, and Socket.IO connects straight to the backend origin
+(`SOCKET_URL`), because Vercel cannot proxy WebSockets.
+
+Self-hosted alternative: [`web_deploy/nginx-moco-web.conf`](web_deploy/nginx-moco-web.conf): one
 nginx server block serves `build/web` at `/` and proxies `/api` and
 `/socket.io` to the backend, so the PWA and API are **same-origin**.
 

@@ -10,7 +10,7 @@ const storage = require('../../integrations/storage');
 const feedStorage = require('../../integrations/feed.storage');
 const walletService = require('../wallet/wallet.service');
 const notifications = require('../notifications/notifications.service');
-const { tickQueue, payoutQueue, notificationQueue } = require('../../workers/queues');
+const jobs = require('../../jobs');
 const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
 const { notFound, badRequest } = require('../../utils/errors');
@@ -451,7 +451,7 @@ router.post(
     // The worker debits earnings and marks it paid; approving only authorises.
     // No money is transferred by any code path — see the payout worker.
     if (req.body.approve) {
-      await payoutQueue.add('payout', { payoutId: payout.id }, { jobId: `payout-${payout.id}` });
+      await jobs.processPayout(payout.id);
     }
     await notifications.create({
       userId: payout.listener_id,
@@ -500,6 +500,20 @@ router.post(
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', '..', 'db', 'migrations');
 
+/**
+ * Migration file names. On Vercel the SQL files are not part of the function
+ * bundle, so the build records their names (scripts/vercel_build.js); locally
+ * the directory is read directly.
+ */
+function migrationFiles() {
+  try {
+    // eslint-disable-next-line global-require
+    return require('../../db/migrations.generated.json');
+  } catch {
+    return fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql') && !f.endsWith('.down.sql')).sort();
+  }
+}
+
 async function timed(fn) {
   const started = Date.now();
   try {
@@ -520,7 +534,7 @@ router.get(
     const [database, cache, objectStorage, tickWorker, queues] = await Promise.all([
       timed(async () => {
         await query('SELECT 1');
-        const files = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql') && !f.endsWith('.down.sql')).sort();
+        const files = migrationFiles();
         const { rows } = await query('SELECT name FROM schema_migrations');
         const applied = new Set(rows.map((r) => r.name));
         return {
@@ -530,14 +544,23 @@ router.get(
       }),
       timed(async () => ({ pong: await redis.ping() })),
       storage.health(),
+      // Billing ticks run as Vercel Queues consumers, not a worker process, so
+      // there is no heartbeat. The honest check: if a call is live, a tick
+      // must have run within the last few minutes.
       timed(async () => {
-        const last = await redis.get(REDIS.workerHeartbeatKey('tick'));
-        if (!last) throw new Error('no heartbeat — the tick worker is not running (calls are not being billed)');
-        return { lastBeat: new Date(Number(last)).toISOString(), ageSeconds: Math.round((Date.now() - Number(last)) / 1000) };
+        const last = Number(await redis.get(REDIS.jobLastRunKey(jobs.TOPICS.TICK))) || null;
+        const ageSeconds = last ? Math.round((Date.now() - last) / 1000) : null;
+        const { rows } = await query(`SELECT count(*)::int AS n FROM calls WHERE status = 'active'`);
+        const activeCalls = rows[0].n;
+        if (activeCalls > 0 && (ageSeconds === null || ageSeconds > 180)) {
+          throw new Error(`${activeCalls} active call(s) but no billing tick in ${ageSeconds === null ? 'recent history' : `${ageSeconds}s`} — check Vercel Queues (moco-tick)`);
+        }
+        return { lastTickAt: last ? new Date(last).toISOString() : null, ageSeconds: ageSeconds ?? '—', activeCalls };
       }),
+      // Queue depth lives in Vercel (Observability → Queues); the API cannot
+      // read it, and reporting zeros would be a lie.
       timed(async () => {
-        const counts = async (q) => q.getJobCounts('waiting', 'active', 'delayed', 'failed');
-        return { tick: await counts(tickQueue), payout: await counts(payoutQueue), notification: await counts(notificationQueue) };
+        throw new Error(`managed by Vercel Queues (mode: ${process.env.VERCEL ? 'vercel' : 'local'}) — see Vercel → moco-api → Observability → Queues`);
       }),
     ]);
 

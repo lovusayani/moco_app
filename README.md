@@ -34,12 +34,14 @@ nowhere else.
 ## Stack
 
 Flutter + GetX · Node.js · PostgreSQL · Redis · Agora (audio/video) ·
-BullMQ · DigitalOcean droplet with PM2 and nginx.
+Vercel (web, admin and API projects; Functions, WebSockets, Queues, Cron) ·
+Supabase Postgres + Storage · Upstash Redis.
 
 ## Getting started
 
 See [`moco-backend/README.md`](moco-backend/README.md) for local setup, how the
-billing engine's guarantees work, and the DigitalOcean deployment steps.
+billing engine's guarantees work, and
+[`docs/DEPLOYMENT-VERCEL.md`](docs/DEPLOYMENT-VERCEL.md) for production.
 
 ```bash
 cd moco-backend

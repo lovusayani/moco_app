@@ -6,13 +6,13 @@ const { WS_EVENTS } = require('../utils/constants');
 const logger = require('../utils/logger');
 
 /**
- * Bridges worker processes to connected sockets.
+ * Bridges background jobs and API instances to connected sockets.
  *
- * The tick worker runs in its own PM2 process and holds no sockets, so it
- * cannot emit directly. It publishes to a Redis channel; the API process (which
- * does hold the sockets) subscribes and forwards. This also means the API can
- * be scaled to several instances and every one of them will deliver to whoever
- * it happens to be holding.
+ * On Vercel a socket is pinned to whichever function instance accepted it, and
+ * queue consumers run in instances that hold no sockets at all. So nothing
+ * emits directly: every event is published to a Redis channel, and every API
+ * instance (each subscribes on start, see src/http.js) forwards it to the
+ * sockets it happens to be holding.
  */
 
 const CHANNEL = 'moco:events';

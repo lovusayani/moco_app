@@ -4,8 +4,8 @@ require('dotenv').config();
 
 /**
  * Env access is centralised here so every host/port is a config change rather
- * than a code change — this is what makes the planned split of Postgres and
- * Redis onto DigitalOcean managed add-ons a config-only migration.
+ * than a code change. Production runs on Vercel (project moco-api) against
+ * managed Postgres (Supabase) and Redis (Upstash); see docs/DEPLOYMENT-VERCEL.md.
  */
 
 function required(name) {
@@ -38,11 +38,22 @@ function bool(name, fallback) {
 const nodeEnv = optional('NODE_ENV', 'development');
 const isProduction = nodeEnv === 'production';
 const isTest = nodeEnv === 'test';
+const onVercel = Boolean(process.env.VERCEL);
+
+function list(name, fallback) {
+  const raw = optional(name, undefined);
+  if (raw === undefined) return fallback;
+  return raw
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
 
 const env = {
   nodeEnv,
   isProduction,
   isTest,
+  onVercel,
   port: int('PORT', 3000),
   logLevel: optional('LOG_LEVEL', isProduction ? 'info' : 'debug'),
 
@@ -60,8 +71,7 @@ const env = {
     user: optional('PGUSER', 'moco'),
     password: optional('PGPASSWORD', 'moco'),
     database: optional('PGDATABASE', isTest ? 'moco_test' : 'moco'),
-    // DO managed Postgres and Supabase both require TLS; a local droplet- or
-    // Docker-resident Postgres does not.
+    // Supabase requires TLS; the local Docker Postgres does not.
     ssl: bool('PGSSL', false) ? { rejectUnauthorized: false } : false,
     poolMax: int('PG_POOL_MAX', 10),
   },
@@ -115,6 +125,22 @@ const env = {
     // The service account's JSON key, as a single-line string (its own
     // private key PEM included). Never logged, never returned by any route.
     serviceAccountJson: optional('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON', ''),
+  },
+
+  /**
+   * Browser origins allowed to call the API and open a socket. The web app,
+   * the admin console and the API are separate origins in production, so
+   * this is an explicit allow-list (never "*"). Requests with no Origin
+   * header (the Android app, webhooks, curl) are not browser requests and are
+   * unaffected. Outside production, localhost on any port is also allowed.
+   */
+  cors: {
+    origins: list('CORS_ORIGINS', []),
+  },
+
+  /** Background jobs — see src/jobs/index.js. */
+  jobs: {
+    mode: optional('JOBS_MODE', onVercel ? 'vercel' : isTest ? 'record' : 'inline'),
   },
 
   otp: {

@@ -198,7 +198,7 @@ Test flow:
 
 The same codebase builds as an installable PWA (`flutter build web`). Calling
 and Google Play Billing are deliberately unavailable on web. Build, local
-serving, deployment (HTTPS, same-origin nginx) and the full platform audit are
+serving, deployment (Vercel, HTTPS) and the full platform audit are
 in [`WEB.md`](WEB.md).
 
 ## Tests

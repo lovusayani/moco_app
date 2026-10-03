@@ -222,7 +222,7 @@ async function main() {
   check('call 2 accepts', accept2.status === 200, accept2.body);
 
   // Minute 1 is scheduled with 0 delay (non-trial accept) — give the tick
-  // worker a few seconds to pick the BullMQ job up and settle it.
+  // job handler a few seconds to pick the tick up and settle it.
   let ticked = false;
   for (let i = 0; i < 8 && !ticked; i += 1) {
     await sleep(1000);

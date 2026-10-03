@@ -1,7 +1,8 @@
 # Moco Backend
 
 Per-minute paid social calling backend for the Indian market. Node.js modular
-monolith on PostgreSQL + Redis, deployed to a DigitalOcean droplet under PM2.
+monolith on PostgreSQL + Redis, deployed to Vercel as the `moco-api` project
+(see [`../docs/DEPLOYMENT-VERCEL.md`](../docs/DEPLOYMENT-VERCEL.md)).
 
 - **API contract:** [`../docs/API.md`](../docs/API.md)
 - **Economy:** [`src/utils/constants.js`](src/utils/constants.js) is the single
@@ -26,8 +27,8 @@ docker compose up -d          # Postgres 16 + Redis 7
 npm install
 npm run migrate               # apply the schema
 npm run seed                  # sample callers and listeners
-npm start                     # API on :3000
-npm run worker:tick           # billing worker, in a second terminal
+npm start                     # API on :3000; background jobs (billing ticks,
+                              # pushes, payouts) run in-process (JOBS_MODE=inline)
 ```
 
 Sign in without an SMS gateway: `SMS_PROVIDER=log` prints the OTP to the log,
@@ -39,7 +40,7 @@ Supabase is used here **only as hosted Postgres** — not Supabase Auth, not the
 Supabase client SDK, not the Data API. This backend is the only thing that
 holds database credentials; Flutter never talks to Supabase directly (it only
 ever calls this API, exactly as with local Postgres). Everything else —
-custom OTP auth, Redis, Socket.IO, BullMQ, Agora, the billing engine — is
+custom OTP auth, Redis, Socket.IO, background jobs, Agora, the billing engine — is
 unchanged.
 
 ```bash
@@ -148,8 +149,9 @@ stats, and the wallet-vs-ledger reconciliation check. Serving the page grants
 nothing on its own — every request it makes is re-checked server-side against
 the allow-list, so a non-admin who loads it simply gets refused.
 
-In production nginx serves `/admin` through the same proxy; restrict it by IP
-in `nginx/moco.conf` if you want it off the public internet entirely.
+In production the console is its own Vercel project (`moco-admin`,
+https://admin.lovcamx.online, built by `../admin-web/build.mjs` from these same
+files) and the API does not serve `/admin` at all.
 
 ### Tests
 
@@ -228,7 +230,8 @@ src/
 │   └── admin/       KYC/payout/report queues, stats, reconciliation
 ├── db/          migrations/, migrate.js, seed.js
 ├── realtime/    socket.server.js, call.events.js, presence.js
-├── workers/     tick, payout, notification (separate PM2 processes)
+├── jobs/        enqueue (Vercel Queues / inline / record) + topic → handler map
+├── workers/     tick, sweep, payout, notification, presence job handlers
 ├── integrations/agora, sms, fcm, payment.gateway, storage (one Supabase client)
 ├── middleware/  auth, error, rateLimit, validate
 └── utils/       constants.js (single source of truth), logger, errors
@@ -236,41 +239,22 @@ src/
 public/admin/    the admin console (plain HTML/CSS/JS, no build step)
 ```
 
-Workers run as separate PM2 processes so a slow job never blocks an API
-request, and the API can be restarted without interrupting billing mid-call.
-They hold no sockets, so they publish events over a Redis pub/sub channel that
-the API process forwards to the right socket.
+Background work runs as **Vercel Queues** consumers (`api/queues/`), not
+worker processes: billing ticks (one delayed message per minute of a call,
+chained), the stale-call sweep (self-rescheduling while calls are live), push
+notifications, payouts and the presence grace check. Handlers are idempotent;
+delivery is at-least-once. They hold no sockets, so they publish events over a
+Redis pub/sub channel that every API instance forwards to the sockets it holds.
 
-## Deploying to DigitalOcean
+## Deploying
 
-Start on a 2GB / 1 vCPU droplet (~$12/mo) running Node, Postgres and Redis
-together.
-
-```bash
-sudo apt update && sudo apt install -y nodejs npm postgresql redis nginx certbot python3-certbot-nginx
-sudo npm install -g pm2
-
-git clone <repo> && cd moco_app/moco-backend
-npm ci --omit=dev
-cp .env.example .env         # set JWT_SECRET, Agora, SMS, payment keys
-npm run migrate
-
-mkdir -p logs
-pm2 start ecosystem.config.js
-pm2 save && pm2 startup
-
-sudo cp nginx/moco.conf /etc/nginx/sites-available/moco
-sudo ln -s /etc/nginx/sites-available/moco /etc/nginx/sites-enabled/moco
-sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d api.yourdomain.com
-```
-
-**Before real wallets exist on it:** turn on weekly droplet snapshots.
-
-**When call traffic starts:** move Postgres and Redis to DigitalOcean managed
-add-ons so an API spike cannot starve the database. Every host and port is read
-from env, so this is a config change and a data migration — not a rewrite. Set
-`PGSSL=true` and `REDIS_TLS=true`, which managed instances require.
+Production is the Vercel project `moco-api` (root `moco-backend`,
+https://api.lovcamx.online): `api/index.mjs` serves Express + Socket.IO
+(WebSockets), `api/queues/*.mjs` are the queue consumers, `api/cron/sweep.mjs`
+is a daily backstop, all configured in [`vercel.json`](vercel.json). Postgres is
+Supabase (session pooler), Redis is Upstash. Every push to `main` deploys it.
+Settings, environment variables and the runbook are in
+[`../docs/DEPLOYMENT-VERCEL.md`](../docs/DEPLOYMENT-VERCEL.md).
 
 ## Production checklist
 
@@ -283,7 +267,7 @@ from env, so this is a config change and a data migration — not a rewrite. Set
 - [ ] `AGORA_WEBHOOK_SECRET` and `PAYMENT_WEBHOOK_SECRET` set; unsigned
       webhooks are rejected in production
 - [ ] `ADMIN_PHONES` set to the real admin numbers
-- [ ] Weekly droplet snapshots enabled
+- [ ] Supabase point-in-time recovery / daily backups enabled
 - [ ] `GET /api/admin/reconcile` monitored — a discrepancy means money moved
       without a ledger row
 - [ ] `GOOGLE_PLAY_PACKAGE_NAME` and `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` set

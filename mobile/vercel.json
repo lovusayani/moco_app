@@ -4,19 +4,7 @@
   "installCommand": "node tool/vercel/install_flutter.mjs",
   "buildCommand": "node tool/vercel/build_web.mjs",
   "outputDirectory": "build/web",
-  "regions": [
-    "bom1"
-  ],
-  "functions": {
-    "api/moco-proxy.mjs": {
-      "maxDuration": 35
-    }
-  },
   "rewrites": [
-    {
-      "source": "/api/:__moco_path(.+)",
-      "destination": "/api/moco-proxy"
-    },
     {
       "source": "/:path((?!api(?:/|$)|socket\\.io(?:/|$)|admin(?:/|$)|health$)(?!.*\\.[A-Za-z0-9]+$).*)",
       "destination": "/index.html"
@@ -24,7 +12,7 @@
   ],
   "headers": [
     {
-      "source": "/:path((?!api(?:/|$)).*)",
+      "source": "/(.*)",
       "headers": [
         {
           "key": "Cache-Control",

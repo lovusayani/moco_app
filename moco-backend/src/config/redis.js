@@ -22,8 +22,8 @@ const redis = new IORedis(buildOptions());
 redis.on('error', (err) => logger.error({ err }, 'redis error'));
 
 /**
- * BullMQ requires its own connections with `maxRetriesPerRequest: null`, and
- * blocking commands need a connection that is not shared with normal traffic.
+ * A dedicated connection for blocking or subscriber-mode use (the realtime
+ * event subscriber), which cannot share the general-purpose connection.
  */
 function createQueueConnection() {
   return new IORedis(buildOptions({ maxRetriesPerRequest: null, enableReadyCheck: false }));

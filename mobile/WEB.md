@@ -18,7 +18,9 @@ from the same origin — no Google CDN). It is **not** Wasm-compatible yet:
 reports. Pass `--no-wasm-dry-run` to silence that warning.
 
 `API_BASE_URL` / `SOCKET_URL` defines are optional on web: by default the app
-talks to **its own origin** (`https://<host>/api`, Socket.IO on `<host>`).
+talks to **its own origin** (`https://<host>/api`, Socket.IO on `<host>`), which
+is what `tool/serve_web.mjs` provides locally. The production build sets both to
+`https://api.lovcamx.online` (see below).
 
 ## Run locally
 
@@ -27,7 +29,8 @@ flutter build web --release --dart-define=FLAVOR=development
 node tool/serve_web.mjs            # http://localhost:8080, API -> localhost:3000
 ```
 
-`tool/serve_web.mjs` (no dependencies) mirrors production: static files with
+`tool/serve_web.mjs` (no dependencies) serves the build like production does:
+static files with
 SPA fallback, `no-cache` revalidation, and `/api` + `/socket.io` (incl.
 WebSocket upgrade) proxied to the backend. `localhost` is a secure context, so
 the service worker, install prompt and session storage all work without HTTPS.
@@ -35,22 +38,17 @@ Options: `--port`, `--backend`, `--root <build dir>`.
 
 `flutter run -d chrome` also works for development, but it serves from a
 random port with no `/api` proxy — pass
-`--dart-define=API_BASE_URL=... --dart-define=SOCKET_URL=...` and expect the
-browser to need CORS from the backend (it has none; the deployed layout does
-not need it).
+`--dart-define=API_BASE_URL=http://localhost:3000/api --dart-define=SOCKET_URL=http://localhost:3000`.
+Outside production the API allows any `localhost` origin via CORS.
 
 ## Deploy
 
 **Production (lovcamx.online) is on Vercel.** See
 [`docs/DEPLOYMENT-VERCEL.md`](../docs/DEPLOYMENT-VERCEL.md) and
 [`vercel.json`](vercel.json). The build runs `tool/vercel/build_web.mjs`.
-A small Vercel Function (`api/moco-proxy.mjs`) proxies `/api`. Socket.IO
-connects straight to the backend origin (`SOCKET_URL`), because Vercel cannot
-proxy WebSockets.
-
-Self-hosted alternative: [`web_deploy/nginx-moco-web.conf`](web_deploy/nginx-moco-web.conf): one
-nginx server block serves `build/web` at `/` and proxies `/api` and
-`/socket.io` to the backend, so the PWA and API are **same-origin**.
+The site is static; the app calls the API project on its own origin,
+`https://api.lovcamx.online` (REST at `/api`, Socket.IO WebSocket at the root),
+which allows `https://lovcamx.online` via CORS.
 
 Requirements:
 
@@ -59,8 +57,9 @@ Requirements:
   Over plain `http://<LAN-IP>` the session cannot be stored and sign-in fails.
 - **Site root.** The app is built for `/` (`<base href>`); path-based routing
   and the service worker scope assume it.
-- **SPA fallback.** Unknown paths must return `index.html` (`try_files`), or a
-  refresh on `/chat/12` would 404.
+- **SPA fallback.** Unknown paths must return `index.html` (the `vercel.json`
+  rewrite), or a refresh on `/chat/12` would 404. Missing files with an
+  extension (`/x.js`) stay a real 404.
 - **No long-lived caching.** Flutter's output is not content-hashed; every file
   is served `Cache-Control: no-cache`.
 
@@ -111,7 +110,7 @@ drag-scroll (snap feed, carousels).
 | Uploads (chat photo, feed media) | Works | Bytes go browser → Supabase signed upload URL directly (Supabase allows cross-origin), exactly as on Android. |
 | `video_player` | Works | HTML `<video>`. Feed videos start muted, which is what browser autoplay policies require. |
 | `cached_network_image` | Works | Browser HTTP cache; no on-disk cache manager. |
-| `socket_io_client` | Works | WebSocket transport, same-origin via the proxy. |
+| `socket_io_client` | Works | WebSocket transport to `wss://api.lovcamx.online` (origin allow-listed on the API). |
 | `google_fonts` | Works | Inter is fetched from Google Fonts at runtime (not available offline on first launch). |
 | `SystemChrome` status/nav bar styling | No-op | Status bar colour comes from `theme_color` in the manifest/`index.html`. |
 | Push notifications | Not implemented | The app has no push client on any platform yet (`UsersApi.registerPushToken` exists but nothing calls it). Web Push would need its own service-worker work. |

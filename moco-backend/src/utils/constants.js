@@ -68,16 +68,13 @@ const REDIS = Object.freeze({
   /** Live call state outlives the call itself just long enough to settle it. */
   callStateTtlSeconds: 6 * 60 * 60,
   presenceTtlSeconds: 90,
-  /** Worker liveness for the admin health page (refreshed every 15s). */
-  workerHeartbeatKey: (name) => `worker:${name}:heartbeat`,
-  workerHeartbeatTtlSeconds: 45,
-});
-
-// BullMQ rejects ':' in queue names (it uses ':' as its own key separator).
-const BULL_QUEUES = Object.freeze({
-  TICK: 'moco-tick',
-  PAYOUT: 'moco-payout',
-  NOTIFICATION: 'moco-notification',
+  /** When each background job type last ran, for the admin health page. */
+  jobLastRunKey: (topic) => `jobs:${topic}:last_run`,
+  jobLastRunTtlSeconds: 7 * 24 * 60 * 60,
+  /** Open sockets per user, so one device dropping does not mark a user offline. */
+  presenceConnectionsKey: (userId) => `presence:${userId}:connections`,
+  /** How long a dropped socket has to reconnect before the user counts as gone. */
+  presenceGraceSeconds: 15,
 });
 
 /** Enum values that mirror the Postgres enums in the migrations. */
@@ -297,7 +294,6 @@ module.exports = {
   TICK_INTERVAL_SECONDS,
   LOW_BALANCE_WARNING_MINUTES,
   REDIS,
-  BULL_QUEUES,
   USER_ROLE,
   USER_STATUS,
   CALL_STATUS,

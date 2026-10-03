@@ -1,13 +1,11 @@
 'use strict';
 
-const { Worker } = require('bullmq');
-const { createQueueConnection } = require('../config/redis');
 const { withTransaction, query } = require('../config/db');
 const walletService = require('../modules/wallet/wallet.service');
-const { notificationQueue } = require('./queues');
+const { sendNotification } = require('../jobs');
 const notifications = require('../modules/notifications/notifications.service');
 const logger = require('../utils/logger');
-const { BULL_QUEUES, PAYOUT_STATUS, EARNING_REASON } = require('../utils/constants');
+const { PAYOUT_STATUS, EARNING_REASON } = require('../utils/constants');
 
 /**
  * Processes admin-approved withdrawals.
@@ -58,7 +56,7 @@ async function handlePayout(job) {
       [payoutId, PAYOUT_STATUS.PAID, PAYOUT_STATUS.APPROVED],
     );
 
-    await notificationQueue.add('payout_paid', {
+    await sendNotification({
       userId: payout.listener_id,
       title: 'Withdrawal sent',
       body: `Your withdrawal of ${payout.amount} has been processed.`,
@@ -76,27 +74,4 @@ async function handlePayout(job) {
   });
 }
 
-function start() {
-  const connection = createQueueConnection();
-  // Concurrency 1: payouts are low-volume and money leaving the platform is
-  // not worth parallelising.
-  const worker = new Worker(BULL_QUEUES.PAYOUT, handlePayout, { connection, concurrency: 1 });
-
-  worker.on('failed', (job, err) =>
-    logger.error({ jobId: job?.id, err }, 'payout job failed'),
-  );
-
-  const shutdown = async () => {
-    await worker.close();
-    process.exit(0);
-  };
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
-
-  logger.info('payout worker started');
-  return worker;
-}
-
-if (require.main === module) start();
-
-module.exports = { start, handlePayout };
+module.exports = { handlePayout };

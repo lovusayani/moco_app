@@ -114,12 +114,21 @@ async function createPost({ author, mediaType = 'image', caption = null, status 
 }
 
 async function resetDb() {
-  await query(
-    `TRUNCATE users, wallets, coin_ledger, listener_profiles, listener_earnings,
-              calls, call_ticks, payouts, conversations, messages, message_reactions,
-              posts, notifications, purchases, blocks, reports, call_ratings, auth_events
-              RESTART IDENTITY CASCADE`,
-  );
+  // TRUNCATE ... CASCADE reaches admin_audit_log through its FK to users, and
+  // that table's append-only trigger (migration 009) refuses TRUNCATE by
+  // design. On this disposable test database only, switch the trigger off
+  // for the reset; the same transaction switches it back on.
+  await withTransaction(async (client) => {
+    await client.query('ALTER TABLE admin_audit_log DISABLE TRIGGER USER');
+    await client.query(
+      `TRUNCATE users, wallets, coin_ledger, listener_profiles, listener_earnings,
+                calls, call_ticks, payouts, conversations, messages, message_reactions,
+                posts, notifications, purchases, blocks, reports, call_ratings, auth_events,
+                admin_audit_log
+                RESTART IDENTITY CASCADE`,
+    );
+    await client.query('ALTER TABLE admin_audit_log ENABLE TRIGGER USER');
+  });
   await redis.flushdb();
 }
 

@@ -82,8 +82,10 @@ test('constants are frozen so nothing can mutate a rate at runtime', () => {
   });
 });
 
-test('bullmq queue names avoid the colon separator bullmq reserves', () => {
-  for (const name of Object.values(c.BULL_QUEUES)) {
-    assert.ok(!name.includes(':'), `${name} must not contain ':'`);
-  }
+test('job topics are unique, URL-safe names (they appear in vercel.json triggers)', () => {
+  // eslint-disable-next-line global-require
+  const { TOPICS } = require('../src/jobs');
+  const names = Object.values(TOPICS);
+  assert.equal(new Set(names).size, names.length);
+  for (const name of names) assert.match(name, /^[a-z0-9-]+$/);
 });

@@ -1,21 +1,14 @@
 'use strict';
 
-const { Worker } = require('bullmq');
-const { createQueueConnection } = require('../config/redis');
 const billing = require('../modules/calls/billing.engine');
 const callEvents = require('../realtime/call.events');
-const { scheduleTick } = require('./queues');
+const { scheduleTick, ensureSweep } = require('../jobs');
 const logger = require('../utils/logger');
-const {
-  BULL_QUEUES,
-  REDIS,
-  TICK_INTERVAL_SECONDS,
-  CALL_END_REASON,
-  coinsPerMinute,
-} = require('../utils/constants');
+const { TICK_INTERVAL_SECONDS, CALL_END_REASON, coinsPerMinute } = require('../utils/constants');
 
 /**
- * The tick worker — the process that actually charges for calls.
+ * The tick handler — the code that actually charges for calls. It runs as the
+ * Vercel Queues consumer for the moco-tick topic (api/queues/tick.mjs).
  *
  * One job bills one minute of one call, then chains the next minute. The
  * outcomes it must handle:
@@ -25,9 +18,9 @@ const {
  *   duplicate / locked   → another worker has this minute; chain and move on
  *   not_active           → the call ended; stop the chain by doing nothing
  *
- * Concurrency is set well above one because ticks for *different* calls are
- * independent; correctness for the *same* call is guarded by the per-call lock
- * and the UNIQUE(call_id, minute_index) constraint in the billing engine.
+ * Delivery is at-least-once and ticks for different calls run concurrently;
+ * correctness for the *same* call is guarded by the per-call lock and the
+ * UNIQUE(call_id, minute_index) constraint in the billing engine.
  */
 
 async function handleTick(job) {
@@ -68,6 +61,8 @@ async function handleTick(job) {
       }
 
       await scheduleTick(callId, minuteIndex + 1, TICK_INTERVAL_SECONDS);
+      // Keep the stale-call backstop alive for as long as calls are billing.
+      await ensureSweep();
       return result;
     }
 
@@ -111,53 +106,4 @@ async function handleTick(job) {
   }
 }
 
-function start() {
-  const connection = createQueueConnection();
-
-  const worker = new Worker(BULL_QUEUES.TICK, handleTick, {
-    connection,
-    concurrency: 50,
-  });
-
-  worker.on('failed', (job, err) => {
-    logger.error({ jobId: job?.id, callId: job?.data?.callId, err }, 'tick job failed');
-  });
-
-  worker.on('error', (err) => logger.error({ err }, 'tick worker error'));
-
-  // Backstop for calls whose chain died with the process (a crash between
-  // billing a minute and enqueueing the next one).
-  const sweeper = setInterval(() => {
-    billing.sweepStaleCalls().catch((err) => logger.error({ err }, 'sweep failed'));
-  }, TICK_INTERVAL_SECONDS * 1000);
-
-  // Liveness signal for the admin system-health page: a short-TTL key that
-  // only exists while this process is running. A stale or missing key means
-  // calls are not being billed.
-  const beat = () =>
-    connection
-      .set(REDIS.workerHeartbeatKey('tick'), String(Date.now()), 'EX', REDIS.workerHeartbeatTtlSeconds)
-      .catch((err) => logger.warn({ err }, 'tick heartbeat failed'));
-  beat();
-  const heartbeat = setInterval(beat, 15_000);
-
-  const shutdown = async () => {
-    logger.info('tick worker shutting down');
-    clearInterval(sweeper);
-    clearInterval(heartbeat);
-    await connection.del(REDIS.workerHeartbeatKey('tick')).catch(() => {});
-    // Let in-flight ticks finish so no minute is billed without its chain.
-    await worker.close();
-    process.exit(0);
-  };
-
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
-
-  logger.info('tick worker started');
-  return worker;
-}
-
-if (require.main === module) start();
-
-module.exports = { start, handleTick };
+module.exports = { handleTick };

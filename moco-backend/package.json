@@ -2,27 +2,26 @@
   "name": "moco-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "Moco \u2014 per-minute paid social calling backend (SPRS INFOTECH)",
+  "description": "Moco — per-minute paid social calling backend (SPRS INFOTECH)",
   "main": "src/server.js",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "worker:tick": "node src/workers/tick.worker.js",
-    "worker:payout": "node src/workers/payout.worker.js",
-    "worker:notification": "node src/workers/notification.worker.js",
     "migrate": "node src/db/migrate.js up",
     "migrate:down": "node src/db/migrate.js down",
     "seed": "node src/db/seed.js",
     "test": "node --test --test-concurrency=1 tests/*.test.js",
-    "smoke": "node scripts/supabase_smoke_test.js"
+    "smoke": "node scripts/supabase_smoke_test.js",
+    "build:vercel": "node scripts/vercel_build.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
+    "@vercel/functions": "^3.9.11",
+    "@vercel/queue": "^0.7.0",
     "agora-token": "^2.0.5",
-    "bullmq": "^5.34.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "helmet": "^8.0.0",

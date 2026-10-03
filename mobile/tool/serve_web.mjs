@@ -1,6 +1,5 @@
-// Local server for the Moco PWA build — mirrors the production nginx layout
-// (see web_deploy/nginx-moco-web.conf) so the web app can be tested exactly as
-// it will be served:
+// Local server for the Moco PWA build, for testing a release build against a
+// local backend:
 //
 //   * build/web as static files, index.html for any unknown path (SPA deep
 //     links and refresh). Flutter's output is not content-hashed (main.dart.js

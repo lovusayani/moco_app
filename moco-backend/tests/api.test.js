@@ -8,7 +8,6 @@ const { createApp } = require('../src/app');
 const db = require('../src/config/db');
 const redisConfig = require('../src/config/redis');
 const { redis } = require('../src/config/redis');
-const queues = require('../src/workers/queues');
 const { resetDb, createUser, createActiveCall, balanceOf } = require('./helpers');
 const { signToken } = require('../src/middleware/auth');
 const { KYC_STATUS } = require('../src/utils/constants');
@@ -25,7 +24,6 @@ test.before(async () => {
 
 test.after(async () => {
   await new Promise((resolve) => server.close(resolve));
-  await queues.closeAll();
   await db.close();
   await redisConfig.close();
 });

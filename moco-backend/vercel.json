@@ -1,0 +1,79 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "npm run build:vercel",
+  "outputDirectory": "vercel-static",
+  "regions": [
+    "icn1"
+  ],
+  "functions": {
+    "api/index.mjs": {
+      "maxDuration": 300
+    },
+    "api/cron/sweep.mjs": {
+      "maxDuration": 30
+    },
+    "api/queues/tick.mjs": {
+      "maxDuration": 60,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "moco-tick",
+          "retryAfterSeconds": 5
+        }
+      ]
+    },
+    "api/queues/sweep.mjs": {
+      "maxDuration": 120,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "moco-sweep",
+          "retryAfterSeconds": 10
+        }
+      ]
+    },
+    "api/queues/payout.mjs": {
+      "maxDuration": 60,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "moco-payout",
+          "retryAfterSeconds": 60
+        }
+      ]
+    },
+    "api/queues/notification.mjs": {
+      "maxDuration": 30,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "moco-notification",
+          "retryAfterSeconds": 15
+        }
+      ]
+    },
+    "api/queues/presence.mjs": {
+      "maxDuration": 30,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "moco-presence",
+          "retryAfterSeconds": 10
+        }
+      ]
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/sweep",
+      "schedule": "17 3 * * *"
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
+  ]
+}

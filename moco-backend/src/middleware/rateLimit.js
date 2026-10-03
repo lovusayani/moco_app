@@ -5,7 +5,7 @@ const { tooManyRequests } = require('../utils/errors');
 const logger = require('../utils/logger');
 
 /**
- * Fixed-window rate limiter backed by Redis, so the limit holds across PM2
+ * Fixed-window rate limiter backed by Redis, so the limit holds across function
  * cluster workers — an in-process limiter would let a 4-instance cluster serve
  * 4x the intended rate.
  */

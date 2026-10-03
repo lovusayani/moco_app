@@ -6,6 +6,7 @@ const helmet = require('helmet');
 const env = require('./config/env');
 const logger = require('./utils/logger');
 const { errorHandler, notFoundHandler } = require('./middleware/error');
+const { cors } = require('./middleware/cors');
 const { RATES, COIN_PACKS, FREE_TRIAL_SECONDS } = require('./utils/constants');
 
 const authRoutes = require('./modules/auth/auth.routes');
@@ -25,10 +26,16 @@ function createApp() {
   const app = express();
 
   app.disable('x-powered-by');
-  // nginx terminates TLS on the droplet, so trust its X-Forwarded-For or every
-  // request will appear to come from 127.0.0.1 and rate limiting will be global.
+  // Vercel's edge terminates TLS and sets X-Forwarded-For to the client IP
+  // (overwriting anything the client sent). Trust that one hop, or every
+  // request would share one IP and per-IP rate limits would be global.
   app.set('trust proxy', 1);
-  app.use(helmet());
+  // Before helmet and every route, so preflights are answered and blocked
+  // origins never reach a handler.
+  app.use(cors);
+  // The API is called cross-origin by design (web app, admin console), so its
+  // responses must be readable cross-origin; CORS still decides who may.
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
   /**
    * Webhook routes are mounted BEFORE the JSON body parser and given a raw
@@ -42,33 +49,36 @@ function createApp() {
   app.use(express.json({ limit: '1mb' }));
 
   /**
-   * The admin console is plain static files served from the API's own origin,
-   * so it needs no CORS setup, no build step and no second deployment. Every
-   * request it makes is still authenticated and re-checked against the admin
-   * allow-list server-side; serving the page grants nothing on its own.
+   * Local development only: the admin console's static files at /admin, on
+   * the API's own origin. In production the console is its own Vercel project
+   * (admin.lovcamx.online, built from these same files by admin-web/build.mjs)
+   * and calls this API cross-origin, so the API serves no UI there. Every
+   * request the console makes is authenticated and re-checked against the
+   * admin allow-list server-side either way.
+   *
+   * Its CSP is the global one plus exactly one origin — this project's
+   * Supabase Storage — for img/media, because KYC photos and post previews
+   * are short-lived signed URLs on that host.
    */
-  //
-  // Its CSP is the global one plus exactly one origin — this project's
-  // Supabase Storage — for img/media, because KYC photos and post previews
-  // are short-lived signed URLs on that host. Nothing else is loosened, and
-  // only this page gets it.
-  const storageOrigin = (() => {
-    try {
-      const url = new URL(env.supabaseStorage.url);
-      return `${url.protocol}//${url.host}`;
-    } catch {
-      return null;
-    }
-  })();
-  const adminMediaSrc = ["'self'", 'data:', ...(storageOrigin ? [storageOrigin] : [])];
-  app.use(
-    '/admin',
-    helmet.contentSecurityPolicy({
-      useDefaults: true,
-      directives: { 'img-src': adminMediaSrc, 'media-src': adminMediaSrc },
-    }),
-    express.static(path.join(__dirname, '..', 'public', 'admin')),
-  );
+  if (!env.isProduction) {
+    const storageOrigin = (() => {
+      try {
+        const url = new URL(env.supabaseStorage.url);
+        return `${url.protocol}//${url.host}`;
+      } catch {
+        return null;
+      }
+    })();
+    const adminMediaSrc = ["'self'", 'data:', ...(storageOrigin ? [storageOrigin] : [])];
+    app.use(
+      '/admin',
+      helmet.contentSecurityPolicy({
+        useDefaults: true,
+        directives: { 'img-src': adminMediaSrc, 'media-src': adminMediaSrc },
+      }),
+      express.static(path.join(__dirname, '..', 'public', 'admin')),
+    );
+  }
 
   app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
 

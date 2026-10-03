@@ -1,43 +1,26 @@
 'use strict';
 
-const http = require('http');
-const { createApp } = require('./app');
 const env = require('./config/env');
 const logger = require('./utils/logger');
-const socketServer = require('./realtime/socket.server');
-const callEvents = require('./realtime/call.events');
 const db = require('./config/db');
 const redisConfig = require('./config/redis');
+const { buildServer } = require('./http');
 
 /**
- * API process entry point. Workers run as separate PM2 processes so a slow job
- * can never block an API request, and so the API can be restarted without
- * interrupting billing mid-call.
+ * Local development entry point (`npm run dev` / `npm start`).
+ *
+ * Production does not run this file: on Vercel the same server is exported by
+ * api/index.mjs, and background jobs are Vercel Queues consumers in
+ * api/queues/. Locally, jobs run in this process (JOBS_MODE=inline), so the
+ * whole backend, billing ticks included, works from one command.
  */
 
-const app = createApp();
-const server = http.createServer(app);
-
-socketServer.init(server);
-
-// A listener's socket dropping makes them uncallable; broadcast it so open
-// discovery grids stop showing them as available.
-socketServer.setListenerDisconnectHandler(async (listenerId) => {
-  await callEvents.listenerPresence({ listenerId, isOnline: false });
-});
-// This process holds the sockets, so it subscribes to the event channel the
-// workers publish tick/low-balance/forced-end events on.
-const subscriber = callEvents.startSubscriber();
+const { server, subscriber } = buildServer();
 
 server.listen(env.port, () => {
-  logger.info({ port: env.port, env: env.nodeEnv }, 'moco api listening');
+  logger.info({ port: env.port, env: env.nodeEnv, jobs: env.jobs.mode }, 'moco api listening');
 });
 
-/**
- * Graceful shutdown: stop taking new connections, then close the DB and Redis.
- * PM2 sends SIGINT on reload, so getting this right is what makes a deploy
- * during a live call non-disruptive.
- */
 let shuttingDown = false;
 
 async function shutdown(signal) {
@@ -72,11 +55,4 @@ process.on('unhandledRejection', (err) => {
   logger.error({ err }, 'unhandled rejection');
 });
 
-process.on('uncaughtException', (err) => {
-  // An uncaught exception leaves the process in an unknown state; log and let
-  // PM2 restart it rather than continuing to serve money-moving requests.
-  logger.fatal({ err }, 'uncaught exception, exiting');
-  process.exit(1);
-});
-
-module.exports = { server, app };
+module.exports = { server };

@@ -7,3 +7,6 @@ logs/
 npm-debug.log*
 coverage/
 .DS_Store
+vercel-static/
+.vercel/
+src/db/migrations.generated.json

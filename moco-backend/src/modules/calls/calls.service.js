@@ -6,8 +6,7 @@ const agora = require('../../integrations/agora');
 const callEvents = require('../../realtime/call.events');
 const presence = require('../../realtime/presence');
 const walletService = require('../wallet/wallet.service');
-const { scheduleTick } = require('../../workers/queues');
-const { notificationQueue } = require('../../workers/queues');
+const jobs = require('../../jobs');
 const logger = require('../../utils/logger');
 const {
   CALL_STATUS,
@@ -115,13 +114,16 @@ async function initiate({ caller, listenerId, callType }) {
   });
 
   // Push as well as socket: the listener's app may be backgrounded.
-  await notificationQueue.add('incoming_call', {
+  await jobs.sendNotification({
     userId: listenerId,
     title: 'Incoming call',
     body: `${caller.display_name || 'Someone'} is calling you`,
     data: { type: 'incoming_call', callId: String(call.id), callType },
     highPriority: true,
   });
+
+  // The sweep times out a call nobody answers; make sure one is scheduled.
+  await jobs.ensureSweep();
 
   logger.info({ callId: call.id, callerId: caller.id, listenerId, callType }, 'call initiated');
 
@@ -167,10 +169,10 @@ async function accept({ callId, listenerId }) {
     // Burn the trial now so a dropped call cannot be used to farm free minutes.
     await query('UPDATE users SET free_trial_used = TRUE WHERE id = $1', [call.caller_id]);
     // First minute free: the first charge lands after the free window.
-    await scheduleTick(call.id, 1, FREE_TRIAL_SECONDS);
+    await jobs.scheduleTick(call.id, 1, FREE_TRIAL_SECONDS);
   } else {
     // Bill minute 1 now, then chain every 60s.
-    await scheduleTick(call.id, 1, 0);
+    await jobs.scheduleTick(call.id, 1, 0);
   }
 
   await callEvents.callAccepted(call.caller_id, {

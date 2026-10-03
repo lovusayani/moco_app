@@ -2,23 +2,20 @@
 // Also runnable locally: `node tool/vercel/build_web.mjs` (uses `flutter` on
 // PATH).
 //
-// Build-time configuration (Vercel project environment variables):
+// The web app talks to the API on its own origin, https://api.lovcamx.online
+// (the moco-api Vercel project): REST at /api and Socket.IO at the root. Both
+// are public addresses baked into the bundle with --dart-define. The API
+// allows this site's origin via CORS (CORS_ORIGINS on moco-api).
 //
-//   MOCO_SOCKET_URL      optional. Socket.IO origin baked into the bundle.
-//                        Default: BACKEND_ORIGIN below. The web app opens
-//                        its WebSocket there directly, because Vercel cannot
-//                        proxy WebSockets.
-//   MOCO_FLAVOR          optional, default "production". "staging" or
-//                        "development" for preview builds only.
-//   MOCO_EDGE_PROXY_SECRET  required on Vercel, but only checked for presence
-//                        here. It is a RUNTIME secret of the /api proxy function
-//                        (api/moco-proxy.mjs) and is never passed to Flutter.
-//                        This script fails the build if its value shows up
-//                        anywhere in the static output.
+// Build-time configuration (optional Vercel project environment variables):
 //
-// The API base URL is deliberately not set: on web the app defaults to its own
-// origin (`https://lovcamx.online/api`), which the proxy function forwards to
-// the backend. That keeps it same-origin, so the backend needs no CORS policy.
+//   MOCO_API_ORIGIN   API origin. Default: API_ORIGIN below.
+//   MOCO_FLAVOR       default "production". "staging" or "development" are
+//                     refused for the production deployment.
+//
+// This project has no secrets. The build still fails if the value of any
+// known server-side secret present in the build environment shows up in the
+// output.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -30,8 +27,8 @@ const appDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const outDir = join(appDir, 'build', 'web');
 const onVercel = process.env.VERCEL === '1';
 
-// Public. Keep in sync with BACKEND_ORIGIN in api/moco-proxy.mjs.
-const BACKEND_ORIGIN = 'https://api.lovcamx.online';
+// Public: the production API (Vercel project moco-api).
+const API_ORIGIN = 'https://api.lovcamx.online';
 
 const fail = (msg) => {
   console.error(`\n[build_web] ERROR: ${msg}\n`);
@@ -54,14 +51,11 @@ function origin(name) {
   return url.origin;
 }
 
-const socketUrl = origin('MOCO_SOCKET_URL') || BACKEND_ORIGIN;
+const apiOrigin = origin('MOCO_API_ORIGIN') || API_ORIGIN;
 const flavor = process.env.MOCO_FLAVOR || 'production';
 if (!['production', 'staging', 'development'].includes(flavor)) fail(`MOCO_FLAVOR="${flavor}" is not production|staging|development.`);
 if (onVercel && process.env.VERCEL_ENV === 'production' && flavor !== 'production') {
   fail(`MOCO_FLAVOR must be "production" for the production deployment (got "${flavor}").`);
-}
-if (onVercel && !(process.env.MOCO_EDGE_PROXY_SECRET || '').trim()) {
-  fail('MOCO_EDGE_PROXY_SECRET is not set. The /api proxy function sends it to nginx with every request.');
 }
 
 // --- build -------------------------------------------------------------------
@@ -69,8 +63,7 @@ if (onVercel && !(process.env.MOCO_EDGE_PROXY_SECRET || '').trim()) {
 const flutterHome = process.env.FLUTTER_HOME || join(homedir(), 'flutter-sdk');
 const flutter = onVercel ? join(flutterHome, 'flutter', 'bin', 'flutter') : 'flutter';
 
-const defines = [`FLAVOR=${flavor}`];
-defines.push(`SOCKET_URL=${socketUrl}`);
+const defines = [`FLAVOR=${flavor}`, `API_BASE_URL=${apiOrigin}/api`, `SOCKET_URL=${apiOrigin}`];
 
 const args = ['build', 'web', '--release', '--no-wasm-dry-run', ...defines.map((d) => `--dart-define=${d}`)];
 console.log(`[build_web] flutter ${args.join(' ')}`);
@@ -104,12 +97,13 @@ if (!index.includes('<base href="/">')) fail('index.html must have <base href="/
 // No server-side secret may end up in the static output. Vercel exposes every
 // project variable to the build process, so check the values that exist here.
 const SECRET_NAMES = [
-  'MOCO_EDGE_PROXY_SECRET',
   'DATABASE_URL',
   'PGPASSWORD',
   'REDIS_PASSWORD',
   'REDIS_URL',
   'JWT_SECRET',
+  'CRON_SECRET',
+  'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON',
   'SUPABASE_SERVICE_ROLE_KEY',
   'AGORA_APP_CERTIFICATE',
   'AGORA_CUSTOMER_SECRET',
@@ -139,6 +133,6 @@ for (const file of walk(outDir)) {
 
 console.log(
   `[build_web] OK — ${files} files in build/web, flavor=${flavor}, ` +
-    `socket=${socketUrl}, api=(page origin)/api, ` +
+    `api=${apiOrigin}/api, socket=${apiOrigin}, ` +
     `secret scan: ${secrets.length} value(s) checked.`,
 );

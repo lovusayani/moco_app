@@ -4,8 +4,9 @@ const pino = require('pino');
 const env = require('../config/env');
 
 /**
- * One logger for the whole process. In development it is pretty-printed; on
- * the droplet it stays as JSON lines so PM2's log files remain greppable.
+ * One logger for the whole process. In development it is pretty-printed; in
+ * production it stays as JSON lines, which Vercel's runtime logs keep
+ * searchable.
  */
 const logger = pino({
   level: env.logLevel,

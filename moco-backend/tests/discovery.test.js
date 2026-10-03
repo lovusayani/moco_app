@@ -7,7 +7,6 @@ const http = require('http');
 const { createApp } = require('../src/app');
 const db = require('../src/config/db');
 const redisConfig = require('../src/config/redis');
-const queues = require('../src/workers/queues');
 const { resetDb, createUser } = require('./helpers');
 const { signToken } = require('../src/middleware/auth');
 
@@ -23,7 +22,6 @@ test.before(async () => {
 
 test.after(async () => {
   await new Promise((resolve) => server.close(resolve));
-  await queues.closeAll();
   await db.close();
   await redisConfig.close();
 });

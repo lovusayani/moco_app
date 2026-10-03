@@ -371,7 +371,8 @@ const drawer = {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (document.getElementById('modal-root').innerHTML) document.getElementById('modal-root').innerHTML = '';
+  if (closeActiveDialog) closeActiveDialog();
+  else if (document.getElementById('modal-root').innerHTML) document.getElementById('modal-root').innerHTML = '';
   else drawer.close();
 });
 
@@ -385,96 +386,212 @@ document.addEventListener('keydown', (e) => {
  * the error is shown inside the dialog and it stays open — so a server
  * refusal (e.g. "needs 3 photos") is read in context, not lost in a toast.
  */
+/** Cancels the dialog on screen, if any (Escape uses it). */
+let closeActiveDialog = null;
+
+/**
+ * Why a rendered dialog is not genuinely usable, or null if it is. Checks
+ * what a person would see, not just that the element exists: real size,
+ * not hidden/transparent, and actually on top at its centre and at its
+ * confirm button (a hiding stylesheet, extension or covering layer fails
+ * this even though the DOM looks right).
+ */
+function dialogVisibilityProblem(modal) {
+  if (!modal) return 'dialog element missing';
+  const r = modal.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return `dialog has no size (${Math.round(r.width)}x${Math.round(r.height)})`;
+  if (r.bottom <= 0 || r.right <= 0 || r.top >= innerHeight || r.left >= innerWidth) return 'dialog is off-screen';
+  if (modal.checkVisibility && !modal.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
+    return 'dialog is hidden (display/visibility/opacity)';
+  }
+  const onTop = (el) => {
+    if (!el) return false;
+    const b = el.getBoundingClientRect();
+    const x = Math.min(Math.max(b.left + b.width / 2, 0), innerWidth - 1);
+    const y = Math.min(Math.max(b.top + b.height / 2, 0), innerHeight - 1);
+    // A transient toast may float over the footer; look through it.
+    const hit = document.elementsFromPoint(x, y).find((e) => !e.closest('.toast'));
+    return Boolean(hit && modal.contains(hit));
+  };
+  if (!onTop(modal)) return 'dialog is covered or not painted';
+  if (!onTop(modal.querySelector('button[type=submit]'))) return 'confirm button is not reachable';
+  return null;
+}
+
+/**
+ * Last-resort path when the styled dialog cannot be shown: the browser's own
+ * prompt/confirm boxes, which no page stylesheet or content blocker can
+ * hide. Same fields, same validation, same onSubmit — just plainer.
+ */
+async function nativeDialogFallback({ title, message, fields, confirmLabel, onSubmit }) {
+  const plain = (html) => { const d = document.createElement('div'); d.innerHTML = html || ''; return d.textContent.replace(/\s+/g, ' ').trim(); };
+  const values = {};
+  for (const f of fields) {
+    if (['checkbox', 'multi', 'select'].includes(f.type)) values[f.name] = f.value ?? (f.type === 'multi' ? [] : '');
+    else {
+      for (;;) {
+        const v = window.prompt(`${title}\n\n${f.label}${f.help ? ` (${f.help})` : ''}${f.required ? ' — required' : ''}`, f.value ?? '');
+        if (v === null) return null;
+        const t = v.trim();
+        if (f.required && !t) { window.alert(`${f.label} is required.`); continue; }
+        if (f.minLength && t.length < f.minLength) { window.alert(`${f.label} needs at least ${f.minLength} characters.`); continue; }
+        values[f.name] = t;
+        break;
+      }
+    }
+  }
+  if (!window.confirm(`${title}\n\n${plain(message).slice(0, 600)}\n\n${confirmLabel}?`)) return null;
+  try {
+    return (onSubmit ? await onSubmit(values) : values) ?? true;
+  } catch (err) {
+    window.alert(`${title}\n\nFailed: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * dialog({ title, message, fields, confirmLabel, danger, wide, onSubmit(values) })
+ * Resolves to onSubmit's result, or null if cancelled. If onSubmit throws,
+ * the error is shown inside the dialog and it stays open — so a server
+ * refusal (e.g. "needs 3 photos") is read in context, not lost in a toast.
+ *
+ * It can never leave the admin stuck behind a bare overlay: a rendering
+ * error removes the overlay and says so; a dialog that renders but is not
+ * genuinely visible (see dialogVisibilityProblem) is replaced by the
+ * browser's own prompts; Escape and a click on the backdrop cancel.
+ */
 function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', danger = false, wide = false, onSubmit }) {
   return new Promise((resolve) => {
     const root = document.getElementById('modal-root');
-    const fieldHtml = fields
-      .map((f) => {
-        const id = `f_${f.name}`;
-        const req = f.required ? ' *' : '';
-        let input;
-        if (f.type === 'textarea') {
-          input = `<textarea id="${id}" placeholder="${esc(f.placeholder || '')}">${esc(f.value || '')}</textarea>`;
-        } else if (f.type === 'select') {
-          input = `<select id="${id}">${f.options
-            .map(([v, l]) => `<option value="${esc(v)}" ${String(f.value ?? '') === String(v) ? 'selected' : ''}>${esc(l)}</option>`)
-            .join('')}</select>`;
-        } else if (f.type === 'checkbox') {
-          return `<div class="field"><label style="display:flex;gap:8px;align-items:center;font-weight:500">
-            <input id="${id}" type="checkbox" style="width:auto" ${f.value ? 'checked' : ''}> ${esc(f.label)}</label></div>`;
-        } else if (f.type === 'multi') {
-          return `<div class="field"><label>${esc(f.label)}${req}</label><div style="display:flex;gap:14px">${f.options
-            .map(([v, l]) => `<label style="display:flex;gap:6px;align-items:center;font-weight:500">
-              <input type="checkbox" style="width:auto" data-multi="${esc(f.name)}" value="${esc(v)}"
-              ${(f.value || []).includes(v) ? 'checked' : ''}> ${esc(l)}</label>`)
-            .join('')}</div></div>`;
-        } else {
-          input = `<input id="${id}" type="${f.type || 'text'}" placeholder="${esc(f.placeholder || '')}" value="${esc(f.value ?? '')}">`;
-        }
-        return `<div class="field"><label for="${id}">${esc(f.label)}${req}</label>${input}${
-          f.help ? `<div class="help">${esc(f.help)}</div>` : ''}</div>`;
-      })
-      .join('');
-
-    root.innerHTML = `
-      <div class="modal-backdrop">
-        <div class="modal${wide ? ' wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-          <form class="modal-form">
-            <div class="modal-head"><h3>${esc(title)}</h3></div>
-            <div class="modal-body">
-              ${message ? `<div class="modal-msg">${message}</div>` : ''}
-              <div class="error-msg" hidden></div>
-              ${fieldHtml}
-            </div>
-            <div class="modal-actions">
-              <button type="button" class="btn-ghost" data-cancel>Cancel</button>
-              <button type="submit" class="${danger ? 'btn-danger' : 'btn-primary inline'}">${esc(confirmLabel)}</button>
-            </div>
-          </form>
-        </div>
-      </div>`;
-
-    const errEl = root.querySelector('.error-msg');
-    const showError = (text) => {
-      errEl.textContent = text;
-      errEl.hidden = false;
-      errEl.scrollIntoView({ block: 'nearest' });
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      root.innerHTML = '';
+      closeActiveDialog = null;
+      resolve(value);
     };
-    const close = (value) => { root.innerHTML = ''; resolve(value); };
-    root.querySelector('[data-cancel]').addEventListener('click', () => close(null));
-    root.querySelector('form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const values = {};
-      for (const f of fields) {
-        if (f.type === 'multi') {
-          values[f.name] = [...root.querySelectorAll(`[data-multi="${f.name}"]:checked`)].map((c) => c.value);
-        } else if (f.type === 'checkbox') {
-          values[f.name] = root.querySelector(`#f_${f.name}`).checked;
-        } else {
-          values[f.name] = root.querySelector(`#f_${f.name}`).value.trim();
+
+    try {
+      const fieldHtml = fields
+        .map((f) => {
+          const id = `f_${f.name}`;
+          const req = f.required ? ' *' : '';
+          let input;
+          if (f.type === 'textarea') {
+            input = `<textarea id="${id}" placeholder="${esc(f.placeholder || '')}">${esc(f.value || '')}</textarea>`;
+          } else if (f.type === 'select') {
+            input = `<select id="${id}">${f.options
+              .map(([v, l]) => `<option value="${esc(v)}" ${String(f.value ?? '') === String(v) ? 'selected' : ''}>${esc(l)}</option>`)
+              .join('')}</select>`;
+          } else if (f.type === 'checkbox') {
+            return `<div class="field"><label style="display:flex;gap:8px;align-items:center;font-weight:500">
+              <input id="${id}" type="checkbox" style="width:auto" ${f.value ? 'checked' : ''}> ${esc(f.label)}</label></div>`;
+          } else if (f.type === 'multi') {
+            return `<div class="field"><label>${esc(f.label)}${req}</label><div style="display:flex;gap:14px">${f.options
+              .map(([v, l]) => `<label style="display:flex;gap:6px;align-items:center;font-weight:500">
+                <input type="checkbox" style="width:auto" data-multi="${esc(f.name)}" value="${esc(v)}"
+                ${(f.value || []).includes(v) ? 'checked' : ''}> ${esc(l)}</label>`)
+              .join('')}</div></div>`;
+          } else {
+            input = `<input id="${id}" type="${f.type || 'text'}" placeholder="${esc(f.placeholder || '')}" value="${esc(f.value ?? '')}">`;
+          }
+          return `<div class="field"><label for="${id}">${esc(f.label)}${req}</label>${input}${
+            f.help ? `<div class="help">${esc(f.help)}</div>` : ''}</div>`;
+        })
+        .join('');
+
+      root.innerHTML = `
+        <div class="modal-backdrop">
+          <div class="modal${wide ? ' wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+            <form class="modal-form">
+              <div class="modal-head"><h3>${esc(title)}</h3></div>
+              <div class="modal-body">
+                ${message ? `<div class="modal-msg">${message}</div>` : ''}
+                <div class="error-msg" hidden></div>
+                ${fieldHtml}
+              </div>
+              <div class="modal-actions">
+                <button type="button" class="btn-ghost" data-cancel>Cancel</button>
+                <button type="submit" class="${danger ? 'btn-danger' : 'btn-primary inline'}">${esc(confirmLabel)}</button>
+              </div>
+            </form>
+          </div>
+        </div>`;
+
+      const errEl = root.querySelector('.error-msg');
+      const showError = (text) => {
+        errEl.textContent = text;
+        errEl.hidden = false;
+        errEl.scrollIntoView({ block: 'nearest' });
+      };
+      closeActiveDialog = () => finish(null);
+      root.querySelector('[data-cancel]').addEventListener('click', () => finish(null));
+      // A click on the dim backdrop itself (not inside the dialog) cancels.
+      const backdrop = root.querySelector('.modal-backdrop');
+      backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) finish(null); });
+      root.querySelector('form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const values = {};
+        for (const f of fields) {
+          if (f.type === 'multi') {
+            values[f.name] = [...root.querySelectorAll(`[data-multi="${f.name}"]:checked`)].map((c) => c.value);
+          } else if (f.type === 'checkbox') {
+            values[f.name] = root.querySelector(`#f_${f.name}`).checked;
+          } else {
+            values[f.name] = root.querySelector(`#f_${f.name}`).value.trim();
+          }
+          const v = values[f.name];
+          if (f.required && (v === '' || (Array.isArray(v) && v.length === 0))) {
+            showError(`${f.label} is required.`);
+            return;
+          }
+          if (f.minLength && typeof v === 'string' && v.length < f.minLength) {
+            showError(`${f.label} needs at least ${f.minLength} characters.`);
+            return;
+          }
         }
-        const v = values[f.name];
-        if (f.required && (v === '' || (Array.isArray(v) && v.length === 0))) {
-          showError(`${f.label} is required.`);
-          return;
+        const btn = root.querySelector('button[type=submit]');
+        btn.disabled = true;
+        try {
+          const result = onSubmit ? await onSubmit(values) : values;
+          finish(result ?? true);
+        } catch (err) {
+          showError(err.message);
+          btn.disabled = false;
         }
-        if (f.minLength && typeof v === 'string' && v.length < f.minLength) {
-          showError(`${f.label} needs at least ${f.minLength} characters.`);
-          return;
-        }
-      }
-      const btn = root.querySelector('button[type=submit]');
-      btn.disabled = true;
-      try {
-        const result = onSubmit ? await onSubmit(values) : values;
-        close(result ?? true);
-      } catch (err) {
-        showError(err.message);
-        btn.disabled = false;
-      }
-    });
-    root.querySelector('input, textarea, select')?.focus();
+      });
+      root.querySelector('input, textarea, select')?.focus();
+    } catch (err) {
+      // Never leave an overlay without a dialog on it.
+      console.error('dialog failed to render', err);
+      finish(null);
+      toast(`Could not open "${title}": ${err.message}`, false, 9000);
+      return;
+    }
+
+    // After layout and paint: is the dialog really there for a person?
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (settled) return;
+      const problem = dialogVisibilityProblem(root.querySelector('.modal'));
+      if (!problem) return;
+      console.error(`dialog "${title}" is not visible: ${problem}`);
+      settled = true;
+      root.innerHTML = '';
+      closeActiveDialog = null;
+      toast('The dialog could not be displayed (a browser extension or an outdated page may be hiding it) — using the browser\'s own prompts instead.', false, 9000);
+      nativeDialogFallback({ title, message, fields, confirmLabel, onSubmit }).then(resolve);
+    }));
   });
+}
+
+// The console uses no service worker. One scoped to /admin (left over from
+// an earlier build served here) could keep serving stale console files, so
+// remove it; root-scoped workers belong to other apps and are left alone.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations()
+    .then((regs) => regs.filter((r) => new URL(r.scope).pathname.startsWith('/admin')).forEach((r) => r.unregister()))
+    .catch(() => {});
 }
 
 /* =====================================================================

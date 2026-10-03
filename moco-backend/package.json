@@ -18,7 +18,8 @@
     "seed": "node src/db/seed.js",
     "test": "node --test --test-concurrency=1 tests/*.test.js",
     "smoke": "node scripts/supabase_smoke_test.js",
-    "e2e:admin-content-delete": "node scripts/admin_content_delete_e2e.js"
+    "e2e:admin-content-delete": "node scripts/admin_content_delete_e2e.js",
+    "e2e:admin-dialog-visibility": "node scripts/admin_dialog_visibility_e2e.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

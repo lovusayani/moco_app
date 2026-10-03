@@ -20,6 +20,16 @@ class SocketService {
 
   io.Socket? _socket;
 
+  /// Every live subscription, independent of whether a socket exists yet.
+  ///
+  /// Subscribers are often created before the socket is: on a cold start —
+  /// and always on web, where a refresh or deep link can open a chat thread
+  /// directly — a controller subscribes in the same frame the session is
+  /// restored, while [connect] is still waiting on the stored token. Keeping
+  /// the registry here means those subscriptions are attached as soon as the
+  /// socket exists, and re-attached after a sign-out/sign-in replaces it.
+  final Map<String, Set<void Function(dynamic data)>> _handlers = {};
+
   final ValueNotifier<SocketStatus> status = ValueNotifier(
     SocketStatus.disconnected,
   );
@@ -40,8 +50,10 @@ class SocketService {
           .setTransports(['websocket'])
           .disableAutoConnect()
           .setAuth({'token': token})
+          // Reconnect indefinitely: socket_io_client's default attempt limit
+          // is infinite. (Passing 0 here would mean zero attempts — a single
+          // network blip would end realtime until the next sign-in.)
           .enableReconnection()
-          .setReconnectionAttempts(0) // retry indefinitely
           .setReconnectionDelay(1000)
           .setReconnectionDelayMax(15000) // exponential backoff, capped
           .build(),
@@ -62,17 +74,28 @@ class SocketService {
       if (Env.enableHttpLogging) debugPrint('socket connect error');
     });
 
+    for (final entry in _handlers.entries) {
+      for (final handler in entry.value) {
+        socket.on(entry.key, handler);
+      }
+    }
+
     _socket = socket;
     socket.connect();
   }
 
   /// Subscribes to a server event. Returns a disposer, so a screen can detach
   /// its listener on dispose and not leak across navigations.
+  ///
+  /// Safe to call before [connect]: the handler is attached when the socket
+  /// is created, and survives the socket being replaced.
   VoidCallback on(String event, void Function(dynamic data) handler) {
-    final socket = _socket;
-    if (socket == null) return () {};
-    socket.on(event, handler);
-    return () => socket.off(event, handler);
+    _handlers.putIfAbsent(event, () => {}).add(handler);
+    _socket?.on(event, handler);
+    return () {
+      _handlers[event]?.remove(handler);
+      _socket?.off(event, handler);
+    };
   }
 
   /// Emits a client→server event, e.g. `heartbeat` with `{ callId }` during an
@@ -92,6 +115,7 @@ class SocketService {
 
   void dispose() {
     disconnect();
+    _handlers.clear();
     status.dispose();
   }
 }

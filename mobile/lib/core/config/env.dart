@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// Environment configuration, supplied at build time with `--dart-define`.
 ///
 /// Nothing here is a secret: the API base URL and the Agora app ID are public
@@ -25,19 +27,33 @@ class Env {
   /// Base URL of the Node backend, including the `/api` prefix used by every
   /// route in docs/API.md.
   ///
-  /// The default targets the Android emulator, where 10.0.2.2 is the host
+  /// Native default: the Android emulator, where 10.0.2.2 is the host
   /// machine's loopback — a plain localhost would resolve to the emulator.
-  static const String apiBaseUrl = String.fromEnvironment(
+  ///
+  /// Web default: the page's own origin. The PWA is deployed behind the same
+  /// nginx that proxies `/api` and `/socket.io` to the backend, so requests
+  /// are same-origin and the backend needs no CORS policy. A `--dart-define`
+  /// still wins on either platform.
+  static String get apiBaseUrl => _apiBaseUrlDefine.isNotEmpty
+      ? _apiBaseUrlDefine
+      : kIsWeb
+      ? '${Uri.base.origin}/api'
+      : 'http://10.0.2.2:3000/api';
+
+  static const String _apiBaseUrlDefine = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:3000/api',
   );
 
   /// Socket.IO origin. The backend mounts Socket.IO on the same server as the
-  /// API, so this is the API URL without the `/api` path.
-  static const String socketUrl = String.fromEnvironment(
-    'SOCKET_URL',
-    defaultValue: 'http://10.0.2.2:3000',
-  );
+  /// API, so this is the API URL without the `/api` path. Same defaults as
+  /// [apiBaseUrl].
+  static String get socketUrl => _socketUrlDefine.isNotEmpty
+      ? _socketUrlDefine
+      : kIsWeb
+      ? Uri.base.origin
+      : 'http://10.0.2.2:3000';
+
+  static const String _socketUrlDefine = String.fromEnvironment('SOCKET_URL');
 
   /// Needed only once calling ships (Phase 2). Empty is valid until then.
   static const String agoraAppId = String.fromEnvironment('AGORA_APP_ID');

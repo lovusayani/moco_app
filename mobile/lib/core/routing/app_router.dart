@@ -27,6 +27,7 @@ import '../../features/profile_setup/profile_setup_screen.dart';
 import '../../features/wallet/wallet_screen.dart';
 import '../../shared/models/chat.dart';
 import '../auth/auth_state.dart';
+import '../platform/platform_capabilities.dart';
 import '../providers.dart';
 
 /// Route paths, named once so no screen builds a path from a string literal.
@@ -75,19 +76,31 @@ class Routes {
   static const callSummary = '/call/summary';
 }
 
+/// Where the router starts. [Routes.app] natively; on web, main() overrides it
+/// with the URL the page was opened at, captured before runApp.
+///
+/// It has to be captured that early: while the stored session is verified,
+/// main.dart shows a plain bootstrap MaterialApp, and that app reports its own
+/// `/` route to the browser — so by the time this router exists the address
+/// bar no longer says `/chat/12`. Without this, every refresh and every deep
+/// link would land on Discovery.
+final initialLocationProvider = Provider<String>((ref) => Routes.app);
+
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
 final routerProvider = Provider<GoRouter>((ref) {
   final auth = ref.watch(authActionsProvider);
+  final callingSupported = ref.watch(platformCapabilitiesProvider).supportsCalling;
 
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
-    initialLocation: Routes.app,
+    initialLocation: ref.watch(initialLocationProvider),
     // The controller is a Listenable, so every auth change re-evaluates
     // redirects. This is what keeps routing and session state in lockstep.
     refreshListenable: auth,
-    redirect: (context, state) => _redirect(auth.value, state),
+    redirect: (context, state) =>
+        _redirect(auth.value, state, callingSupported: callingSupported),
     routes: [
       GoRoute(
         path: Routes.onboarding,
@@ -251,7 +264,15 @@ final routerProvider = Provider<GoRouter>((ref) {
 /// then profile completeness. Returning null while initializing is what avoids
 /// redirect flicker — the app holds on the bootstrap screen instead of
 /// bouncing through login on its way to discovery.
-String? _redirect(AuthState auth, GoRouterState state) {
+///
+/// Where calling is unsupported (web) the call screens are unreachable: a
+/// typed or refreshed `/call/...` URL lands on Discovery rather than on a call
+/// screen with no call behind it.
+String? _redirect(
+  AuthState auth,
+  GoRouterState state, {
+  bool callingSupported = true,
+}) {
   if (auth.isInitializing) return null;
 
   final location = state.matchedLocation;
@@ -273,6 +294,9 @@ String? _redirect(AuthState auth, GoRouterState state) {
     case AuthStatus.authenticated:
       // Bounce away from the pre-auth screens once signed in and complete.
       if (atOnboarding || atLogin || atProfileSetup) return Routes.discovery;
+      if (!callingSupported && location.startsWith('/call/')) {
+        return Routes.discovery;
+      }
       return null;
   }
 }

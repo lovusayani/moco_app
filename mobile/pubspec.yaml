@@ -9,6 +9,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Web: path-based URL strategy (no-op on Android/iOS).
+  flutter_web_plugins:
+    sdk: flutter
 
   # State management
   flutter_riverpod: ^2.6.1

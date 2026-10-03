@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/calls_api.dart';
 import '../errors/api_exception.dart';
+import '../platform/platform_capabilities.dart';
 import '../providers.dart';
 import '../realtime/socket_service.dart';
 import '../utils/ws_events.dart';
@@ -31,9 +32,11 @@ class CallController extends StateNotifier<CallSession> {
     required CallsApi callsApi,
     required SocketService socket,
     required AgoraCallService agora,
+    bool callingSupported = true,
   }) : _callsApi = callsApi,
        _socket = socket,
        _agora = agora,
+       _callingSupported = callingSupported,
        super(const CallSession()) {
     _socketOffs
       ..add(_socket.on(WsEvents.incomingCall, _onIncoming))
@@ -50,6 +53,12 @@ class CallController extends StateNotifier<CallSession> {
   final CallsApi _callsApi;
   final SocketService _socket;
   final AgoraCallService _agora;
+
+  /// False on web (see [PlatformCapabilities.supportsCalling]). The screens
+  /// never offer a call there; this is the backstop that guarantees no call
+  /// is created or answered — and so no listener claimed or billing started —
+  /// on a platform that cannot carry the media.
+  final bool _callingSupported;
 
   final List<VoidCallback> _socketOffs = [];
   Timer? _heartbeatTimer;
@@ -68,6 +77,7 @@ class CallController extends StateNotifier<CallSession> {
     required ListenerDetail listener,
     required CallType type,
   }) async {
+    if (!_callingSupported) return;
     if (state.phase != CallPhase.idle || state.isBusy) return;
 
     state = CallSession(
@@ -114,6 +124,7 @@ class CallController extends StateNotifier<CallSession> {
 
   /// Listener accepts an incoming call.
   Future<void> acceptCall() async {
+    if (!_callingSupported) return;
     if (state.phase != CallPhase.incoming || state.isBusy) return;
     final callId = state.callId;
     if (callId == null) return;
@@ -466,5 +477,6 @@ final callControllerProvider =
         callsApi: ref.watch(callsApiProvider),
         socket: ref.watch(socketServiceProvider),
         agora: ref.watch(agoraCallServiceProvider),
+        callingSupported: ref.watch(platformCapabilitiesProvider).supportsCalling,
       );
     });

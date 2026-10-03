@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!--
+    Replaced by `flutter build web --base-href`. The PWA is deployed at the
+    site root ("/"); path-based routing (usePathUrlStrategy) relies on it.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Talk to people who listen. Discover listeners, chat, and share moments.">
+  <meta name="theme-color" content="#120A12">
+  <meta name="color-scheme" content="dark light">
+
+  <!-- Installed (standalone) behaviour on iOS Safari and Android Chrome. -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Moco">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+
+  <title>Moco</title>
+
+  <style>
+    /* Matches the app's dark background so there is no white flash between
+       the HTML loading and Flutter's first frame. */
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #120A12;
+      overscroll-behavior: none;
+    }
+    #moco-splash {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #120A12;
+      transition: opacity 200ms ease-out;
+    }
+    #moco-splash img {
+      width: 72px;
+      height: 72px;
+      border-radius: 18px;
+    }
+    #moco-splash.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    noscript {
+      color: #F5E8E8;
+      font: 15px/1.5 system-ui, sans-serif;
+      display: block;
+      padding: 24px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="moco-splash" aria-hidden="true">
+    <img src="icons/Icon-192.png" alt="">
+  </div>
+  <noscript>Moco needs JavaScript enabled to run.</noscript>
+
+  <!-- Custom loader config lives in web/flutter_bootstrap.js. -->
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

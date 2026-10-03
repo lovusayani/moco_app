@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/calling/call_controller.dart';
 import '../../core/calling/call_session.dart';
 import '../../core/config/env.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/routing/app_router.dart';
 import '../../core/theme/moco_colors.dart';
 import '../../core/theme/moco_spacing.dart';
@@ -90,6 +91,24 @@ class AppShell extends ConsumerWidget {
     ref.listen<CallSession>(callControllerProvider, (previous, next) {
       if (previous?.phase != CallPhase.idle) return;
       if (next.phase != CallPhase.incoming) return;
+      // Where calls cannot be answered (web), say so instead of opening an
+      // Accept button that could never connect media. The session is left
+      // alone: the server still ends or times out the call as usual, and a
+      // signed-in Android device can still answer it.
+      if (!ref.read(platformCapabilitiesProvider).supportsCalling) {
+        final from = next.counterpartyName;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            key: const Key('incoming_call_unavailable_snackbar'),
+            content: Text(
+              '${from == null || from.isEmpty ? 'Incoming call' : 'Incoming call from $from'}'
+              ' — answer it in the Moco Android app.',
+            ),
+            duration: const Duration(seconds: 6),
+          ),
+        );
+        return;
+      }
       context.push(Routes.callIncoming);
     });
 

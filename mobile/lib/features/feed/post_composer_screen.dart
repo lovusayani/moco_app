@@ -12,6 +12,8 @@ import '../../core/widgets/moco_surfaces.dart';
 import '../../shared/models/feed.dart';
 import 'feed_controller.dart';
 import 'post_composer_controller.dart';
+import '../../core/routing/app_router.dart';
+import '../../core/routing/pop_or_go.dart';
 
 /// Picks media and returns its bytes. Injected so the composer can be tested
 /// without the platform picker — there is no headless image picker.
@@ -102,7 +104,7 @@ class _PostComposerScreenState extends ConsumerState<PostComposerScreen> {
     // The post exists on the server before it exists in the feed. Prepending
     // here is a display shortcut over a refetch, not an optimistic guess.
     ref.read(feedControllerProvider.notifier).prepend(post);
-    Navigator.of(context).pop();
+    popOrGo(context, Routes.feed);
   }
 
   @override
@@ -118,7 +120,7 @@ class _PostComposerScreenState extends ConsumerState<PostComposerScreen> {
         leading: IconButton(
           key: const Key('composer_close'),
           icon: const Icon(Icons.close_rounded),
-          onPressed: state.isBusy ? null : () => Navigator.of(context).pop(),
+          onPressed: state.isBusy ? null : () => popOrGo(context, Routes.feed),
         ),
       ),
       body: MocoBackground(

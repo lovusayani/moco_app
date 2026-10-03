@@ -10,6 +10,7 @@ import '../../core/utils/time_format.dart';
 import '../../core/widgets/moco_states.dart';
 import '../../shared/models/notification.dart';
 import 'notifications_controller.dart';
+import '../../core/routing/pop_or_go.dart';
 
 /// The Notifications inbox. Reached from a bell icon on Discovery — the five
 /// bottom-nav tabs are fixed, so this is a pushed screen rather than a sixth
@@ -46,6 +47,7 @@ class NotificationsScreen extends ConsumerWidget {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         title: const Text('Notifications'),
+        leading: deepLinkBackButton(context, Routes.discovery),
         actions: [
           if (state.unreadCount > 0)
             TextButton(

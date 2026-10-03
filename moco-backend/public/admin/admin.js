@@ -458,6 +458,10 @@ function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', da
           showError(`${f.label} is required.`);
           return;
         }
+        if (f.minLength && typeof v === 'string' && v.length < f.minLength) {
+          showError(`${f.label} needs at least ${f.minLength} characters.`);
+          return;
+        }
       }
       const btn = root.querySelector('button[type=submit]');
       btn.disabled = true;
@@ -636,6 +640,13 @@ async function changeUserStatus(user, status) {
 
 /* ---------- Permanent deletion ---------- */
 
+/** Must match REASON in deletion.admin.js — the server re-checks it. */
+const REASON_MIN = 3;
+const deleteReasonField = () => ({
+  name: 'reason', label: 'Reason', type: 'textarea', required: true, minLength: REASON_MIN,
+  help: `At least ${REASON_MIN} characters. Recorded in the audit log.`,
+});
+
 const countList = (obj) => Object.entries(obj)
   .map(([k, v]) => `<li>${esc(k.replace(/([A-Z])/g, ' $1').toLowerCase())}: <b>${esc(typeof v === 'number' ? num(v) : String(v ?? '—'))}</b></li>`)
   .join('');
@@ -670,7 +681,7 @@ async function deleteAccount(id, label) {
         <div><h4>Retained for accounting and audit</h4><ul class="del-list">${countList(preview.retained)}</ul></div>
       </div>`,
     fields: [
-      { name: 'reason', label: 'Reason (recorded in the audit log)', type: 'textarea', required: true },
+      deleteReasonField(),
       { name: 'confirm', label: `Type the account id (${id}) to confirm`, required: true },
     ],
     confirmLabel: 'Delete permanently',
@@ -695,7 +706,7 @@ async function deleteUpload(kind, id) {
   const result = await dialog({
     title: `Permanently delete ${spec.what}?`,
     message: `<b class="del-warn">This cannot be undone.</b> ${esc(spec.note)}`,
-    fields: [{ name: 'reason', label: 'Reason (recorded in the audit log)', type: 'textarea', required: true }],
+    fields: [deleteReasonField()],
     confirmLabel: 'Delete permanently',
     danger: true,
     onSubmit: (v) => api(spec.path, { method: 'DELETE', body: { reason: v.reason } }),

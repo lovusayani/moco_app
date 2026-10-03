@@ -59,7 +59,9 @@ const audit = require('./audit.service');
 const router = express.Router();
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
-const REASON = z.string().trim().min(5, 'Give a reason of at least 5 characters').max(500);
+// Same minimum as every other admin reason (Remove/Restore, Suspend…), and
+// the console enforces it before sending — see REASON_MIN in admin.js.
+const REASON = z.string().trim().min(3, 'Give a reason of at least 3 characters').max(500);
 const BUCKETS = [FEED_MEDIA.bucket, LISTENER_PHOTOS.bucket, CHAT_MEDIA.bucket];
 
 /**

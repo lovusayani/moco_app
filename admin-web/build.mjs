@@ -7,8 +7,9 @@
 // into dist/ for Vercel and checks it.
 //
 // The console calls the API with relative URLs (`/api/auth/*`, `/api/admin/*`);
-// vercel.json proxies exactly those two prefixes to MOCO_BACKEND_ORIGIN, so
-// the console and its API are same-origin and the backend needs no CORS.
+// vercel.json rewrites exactly those two prefixes to the api/moco-proxy.mjs
+// function, which forwards them to https://api.lovcamx.online. The console and
+// its API are therefore same-origin, and the backend needs no CORS.
 //
 // Requires Vercel's "Include files outside the root directory in the Build
 // Step" (on by default), because the source lives outside admin-web/.
@@ -27,17 +28,10 @@ const fail = (msg) => {
   process.exit(1);
 };
 
-if (onVercel) {
-  const backend = (process.env.MOCO_BACKEND_ORIGIN || '').trim();
-  if (!backend) fail('MOCO_BACKEND_ORIGIN is not set. Add it in Vercel → Project → Settings → Environment Variables.');
-  let url;
-  try {
-    url = new URL(backend);
-  } catch {
-    fail(`MOCO_BACKEND_ORIGIN="${backend}" is not a URL.`);
-  }
-  if (url.protocol !== 'https:' || url.pathname !== '/') fail('MOCO_BACKEND_ORIGIN must be an https origin with no path, e.g. https://api.lovcamx.online');
-  if (!(process.env.MOCO_EDGE_PROXY_SECRET || '').trim()) fail('MOCO_EDGE_PROXY_SECRET is not set.');
+// A runtime secret of the proxy function. This only checks that it is set, so
+// a missing one fails the deploy instead of every /api request.
+if (onVercel && !(process.env.MOCO_EDGE_PROXY_SECRET || '').trim()) {
+  fail('MOCO_EDGE_PROXY_SECRET is not set. Add it in Vercel → Project → Settings → Environment Variables (Production, Sensitive).');
 }
 
 if (!existsSync(join(src, 'index.html'))) {
@@ -58,5 +52,12 @@ if (missing.length) fail(`index.html references missing files: ${missing.join(',
 const js = readFileSync(join(out, 'admin.js'), 'utf8');
 if (!/const API = '\/api';/.test(js)) fail("admin.js no longer uses `const API = '/api'` — update vercel.json routing to match.");
 if (/https?:\/\/(localhost|127\.0\.0\.1)/.test(js)) fail('admin.js contains a localhost URL.');
+
+const secret = (process.env.MOCO_EDGE_PROXY_SECRET || '').trim();
+if (secret.length >= 8) {
+  for (const f of readdirSync(out)) {
+    if (readFileSync(join(out, f), 'latin1').includes(secret)) fail(`the MOCO_EDGE_PROXY_SECRET value was found in dist/${f}.`);
+  }
+}
 
 console.log(`[admin build] OK — ${readdirSync(out).join(', ')} → admin-web/dist (refs checked: ${refs.join(', ')})`);

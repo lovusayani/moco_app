@@ -1,26 +1,24 @@
 // Vercel "Build Command" for the moco-web project (lovcamx.online).
 // Also runnable locally: `node tool/vercel/build_web.mjs` (uses `flutter` on
-// PATH; set MOCO_BACKEND_ORIGIN to mimic production).
+// PATH).
 //
 // Build-time configuration (Vercel project environment variables):
 //
-//   MOCO_BACKEND_ORIGIN  required on Vercel. Origin of the Node backend, e.g.
-//                        https://api.lovcamx.online. vercel.json proxies
-//                        /api/* there, and the web app opens its Socket.IO
-//                        connection there directly (Vercel cannot proxy
-//                        WebSockets). Public: it is visible in the bundle.
-//   MOCO_SOCKET_URL      optional. Overrides the Socket.IO origin.
+//   MOCO_SOCKET_URL      optional. Socket.IO origin baked into the bundle.
+//                        Default: BACKEND_ORIGIN below. The web app opens
+//                        its WebSocket there directly, because Vercel cannot
+//                        proxy WebSockets.
 //   MOCO_FLAVOR          optional, default "production". "staging" or
 //                        "development" for preview builds only.
-//   MOCO_EDGE_PROXY_SECRET  required on Vercel. Used ONLY by vercel.json (sent
-//                        to nginx on proxied /api requests so the backend can
-//                        trust the client IP Vercel reports). It is never
-//                        passed to Flutter; this script fails the build if it
-//                        ever shows up in the output.
+//   MOCO_EDGE_PROXY_SECRET  required on Vercel, but only checked for presence
+//                        here. It is a RUNTIME secret of the /api proxy function
+//                        (api/moco-proxy.mjs) and is never passed to Flutter.
+//                        This script fails the build if its value shows up
+//                        anywhere in the static output.
 //
 // The API base URL is deliberately not set: on web the app defaults to its own
-// origin (`https://lovcamx.online/api`), which vercel.json proxies to the
-// backend — same-origin, so the backend needs no CORS policy.
+// origin (`https://lovcamx.online/api`), which the proxy function forwards to
+// the backend. That keeps it same-origin, so the backend needs no CORS policy.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -32,6 +30,9 @@ const appDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const outDir = join(appDir, 'build', 'web');
 const onVercel = process.env.VERCEL === '1';
 
+// Public. Keep in sync with BACKEND_ORIGIN in api/moco-proxy.mjs.
+const BACKEND_ORIGIN = 'https://api.lovcamx.online';
+
 const fail = (msg) => {
   console.error(`\n[build_web] ERROR: ${msg}\n`);
   process.exit(1);
@@ -39,12 +40,9 @@ const fail = (msg) => {
 
 // --- configuration -----------------------------------------------------------
 
-function origin(name, { required }) {
+function origin(name) {
   const raw = (process.env[name] || '').trim();
-  if (!raw) {
-    if (required) fail(`${name} is not set. Add it in Vercel → Project → Settings → Environment Variables.`);
-    return '';
-  }
+  if (!raw) return '';
   let url;
   try {
     url = new URL(raw);
@@ -56,15 +54,14 @@ function origin(name, { required }) {
   return url.origin;
 }
 
-const backendOrigin = origin('MOCO_BACKEND_ORIGIN', { required: onVercel });
-const socketUrl = origin('MOCO_SOCKET_URL', { required: false }) || backendOrigin;
+const socketUrl = origin('MOCO_SOCKET_URL') || BACKEND_ORIGIN;
 const flavor = process.env.MOCO_FLAVOR || 'production';
 if (!['production', 'staging', 'development'].includes(flavor)) fail(`MOCO_FLAVOR="${flavor}" is not production|staging|development.`);
 if (onVercel && process.env.VERCEL_ENV === 'production' && flavor !== 'production') {
   fail(`MOCO_FLAVOR must be "production" for the production deployment (got "${flavor}").`);
 }
 if (onVercel && !(process.env.MOCO_EDGE_PROXY_SECRET || '').trim()) {
-  fail('MOCO_EDGE_PROXY_SECRET is not set. vercel.json sends it to nginx with every proxied /api request.');
+  fail('MOCO_EDGE_PROXY_SECRET is not set. The /api proxy function sends it to nginx with every request.');
 }
 
 // --- build -------------------------------------------------------------------
@@ -73,7 +70,7 @@ const flutterHome = process.env.FLUTTER_HOME || join(homedir(), 'flutter-sdk');
 const flutter = onVercel ? join(flutterHome, 'flutter', 'bin', 'flutter') : 'flutter';
 
 const defines = [`FLAVOR=${flavor}`];
-if (socketUrl) defines.push(`SOCKET_URL=${socketUrl}`);
+defines.push(`SOCKET_URL=${socketUrl}`);
 
 const args = ['build', 'web', '--release', '--no-wasm-dry-run', ...defines.map((d) => `--dart-define=${d}`)];
 console.log(`[build_web] flutter ${args.join(' ')}`);
@@ -142,6 +139,6 @@ for (const file of walk(outDir)) {
 
 console.log(
   `[build_web] OK — ${files} files in build/web, flavor=${flavor}, ` +
-    `socket=${socketUrl || '(page origin)'}, api=(page origin)/api, ` +
+    `socket=${socketUrl}, api=(page origin)/api, ` +
     `secret scan: ${secrets.length} value(s) checked.`,
 );

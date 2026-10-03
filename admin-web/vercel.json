@@ -4,47 +4,70 @@
   "installCommand": "",
   "buildCommand": "node build.mjs",
   "outputDirectory": "dist",
-  "routes": [
+  "regions": [
+    "bom1"
+  ],
+  "functions": {
+    "api/moco-proxy.mjs": {
+      "maxDuration": 35
+    }
+  },
+  "rewrites": [
     {
-      "src": "^/api/((?:auth|admin)/.*)$",
-      "dest": "${MOCO_BACKEND_ORIGIN}/api/$1",
-      "env": ["MOCO_BACKEND_ORIGIN"],
-      "transforms": [
+      "source": "/api/:__moco_path((?:auth|admin)/.+)",
+      "destination": "/api/moco-proxy"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/admin",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/admin/",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/admin/index.html",
+      "destination": "/",
+      "permanent": true
+    }
+  ],
+  "headers": [
+    {
+      "source": "/:path((?!api(?:/|$)).*)",
+      "headers": [
         {
-          "type": "request.headers",
-          "op": "set",
-          "target": { "key": "x-moco-edge-secret" },
-          "args": "${MOCO_EDGE_PROXY_SECRET}",
-          "env": ["MOCO_EDGE_PROXY_SECRET"]
+          "key": "Cache-Control",
+          "value": "no-cache"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self' https: data:; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https://*.supabase.co; media-src 'self' data: https://*.supabase.co; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self' https: 'unsafe-inline'; upgrade-insecure-requests"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
         }
-      ],
-      "headers": {
-        "x-vercel-enable-rewrite-caching": "0",
-        "Cache-Control": "no-store"
-      }
-    },
-    {
-      "src": "^/(api|socket\\.io|health)(/.*)?$",
-      "status": 404
-    },
-    {
-      "src": "^/admin/?(index\\.html)?$",
-      "status": 308,
-      "headers": { "Location": "/" }
-    },
-    {
-      "src": "^/(.*)$",
-      "headers": {
-        "Cache-Control": "no-cache",
-        "Content-Security-Policy": "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self' https: data:; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https://*.supabase.co; media-src 'self' data: https://*.supabase.co; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self' https: 'unsafe-inline'; upgrade-insecure-requests",
-        "Cross-Origin-Opener-Policy": "same-origin",
-        "Referrer-Policy": "no-referrer",
-        "X-Content-Type-Options": "nosniff",
-        "X-Frame-Options": "DENY",
-        "X-Robots-Tag": "noindex, nofollow"
-      },
-      "continue": true
-    },
-    { "handle": "filesystem" }
+      ]
+    }
   ]
 }

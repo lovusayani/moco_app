@@ -4,57 +4,63 @@
   "installCommand": "node tool/vercel/install_flutter.mjs",
   "buildCommand": "node tool/vercel/build_web.mjs",
   "outputDirectory": "build/web",
-  "routes": [
+  "regions": [
+    "bom1"
+  ],
+  "functions": {
+    "api/moco-proxy.mjs": {
+      "maxDuration": 35
+    }
+  },
+  "rewrites": [
     {
-      "src": "^/api/(.*)$",
-      "dest": "${MOCO_BACKEND_ORIGIN}/api/$1",
-      "env": ["MOCO_BACKEND_ORIGIN"],
-      "transforms": [
+      "source": "/api/:__moco_path(.+)",
+      "destination": "/api/moco-proxy"
+    },
+    {
+      "source": "/:path((?!api(?:/|$)|socket\\.io(?:/|$)|admin(?:/|$)|health$)(?!.*\\.[A-Za-z0-9]+$).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/:path((?!api(?:/|$)).*)",
+      "headers": [
         {
-          "type": "request.headers",
-          "op": "set",
-          "target": { "key": "x-moco-edge-secret" },
-          "args": "${MOCO_EDGE_PROXY_SECRET}",
-          "env": ["MOCO_EDGE_PROXY_SECRET"]
+          "key": "Cache-Control",
+          "value": "no-cache"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
         }
-      ],
-      "headers": {
-        "x-vercel-enable-rewrite-caching": "0",
-        "Cache-Control": "no-store"
-      }
+      ]
     },
     {
-      "src": "^/(socket\\.io|admin|health)(/.*)?$",
-      "status": 404
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Service-Worker-Allowed",
+          "value": "/"
+        }
+      ]
     },
     {
-      "src": "^/(.*)$",
-      "headers": {
-        "Cache-Control": "no-cache",
-        "X-Content-Type-Options": "nosniff",
-        "Referrer-Policy": "strict-origin-when-cross-origin",
-        "X-Frame-Options": "DENY"
-      },
-      "continue": true
-    },
-    {
-      "src": "^/sw\\.js$",
-      "headers": { "Service-Worker-Allowed": "/" },
-      "continue": true
-    },
-    {
-      "src": "^/manifest\\.json$",
-      "headers": { "Content-Type": "application/manifest+json" },
-      "continue": true
-    },
-    { "handle": "filesystem" },
-    {
-      "src": "^/.*\\.[A-Za-z0-9]+$",
-      "status": 404
-    },
-    {
-      "src": "^/.*$",
-      "dest": "/index.html"
+      "source": "/manifest.json",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/manifest+json"
+        }
+      ]
     }
   ]
 }

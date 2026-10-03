@@ -125,9 +125,12 @@ flutter run -d <deviceA-id> \
   --dart-define=API_BASE_URL=http://10.0.2.2:3000/api \
   --dart-define=SOCKET_URL=http://10.0.2.2:3000
 
-# Device B — listener. Use a second phone number, opt into listener mode from
-# Profile setup, then toggle "online" (PATCH /api/listeners/status) once KYC
-# shows approved — the dev seed/admin console can approve it instantly.
+# Device B — listener. Use a second phone number, opt into listener mode
+# (Profile setup or Edit profile), then on Profile → Photos & verification add
+# at least 3 photos and submit verification. Approve it in the admin console
+# (/admin → KYC); Profile then shows the "online" switch
+# (PATCH /api/listeners/status). The server refuses to go online without
+# approved KYC and 3 photos.
 # A physical device on the same LAN uses your machine's IP instead of 10.0.2.2
 # (see the LAN example above) for both API_BASE_URL and SOCKET_URL.
 flutter run -d <deviceB-id> \

@@ -45,6 +45,7 @@ function createApp() {
    */
   app.use('/api/wallet/webhook', express.raw({ type: '*/*', limit: '256kb' }));
   app.use('/api/calls/webhook', express.raw({ type: '*/*', limit: '256kb' }));
+  app.use('/api/webhooks/whatsapp', express.raw({ type: '*/*', limit: '256kb' }));
 
   app.use(express.json({ limit: '1mb' }));
 
@@ -100,6 +101,7 @@ function createApp() {
   });
 
   app.use('/api/auth', authRoutes);
+  app.use('/api/webhooks/whatsapp', require('./modules/auth/whatsapp.webhook'));
   app.use('/api/users', usersRoutes);
   app.use('/api/wallet', walletRoutes);
   app.use('/api/listeners', listenersRoutes);

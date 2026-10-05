@@ -104,6 +104,31 @@ const env = {
     senderId: optional('SMS_SENDER_ID', 'MOCOAP'),
   },
 
+  /**
+   * WhatsApp Cloud API (Meta) — the FALLBACK OTP channel when an SMS does not
+   * arrive. Sends an approved Authentication template only; never free-form
+   * text. Every value is backend-only (moco-api), never sent to a client or
+   * logged. All unset is a valid "WhatsApp fallback unavailable" state.
+   */
+  whatsapp: {
+    accessToken: optional('WHATSAPP_ACCESS_TOKEN', ''),
+    phoneNumberId: optional('WHATSAPP_PHONE_NUMBER_ID', ''),
+    businessAccountId: optional('WHATSAPP_BUSINESS_ACCOUNT_ID', ''),
+    templateName: optional('WHATSAPP_OTP_TEMPLATE_NAME', ''),
+    templateLanguage: optional('WHATSAPP_OTP_TEMPLATE_LANGUAGE', 'en'),
+    // Authentication templates carry a "Copy code"/one-tap button whose
+    // parameter is the code itself; set false only for a template without one.
+    templateHasCodeButton: bool('WHATSAPP_OTP_TEMPLATE_HAS_BUTTON', true),
+    graphVersion: optional('WHATSAPP_GRAPH_VERSION', 'v23.0'),
+    // Webhook (delivery status callbacks): verification token for Meta's
+    // GET handshake, and the app secret that signs every POST.
+    webhookVerifyToken: optional('WHATSAPP_WEBHOOK_VERIFY_TOKEN', ''),
+    appSecret: optional('WHATSAPP_APP_SECRET', ''),
+    // Outside production only: print the code instead of sending, like
+    // SMS_PROVIDER=log. Ignored in production, where OTPs are never logged.
+    devLog: !isProduction && bool('WHATSAPP_DEV_LOG', false),
+  },
+
   fcm: {
     serverKey: optional('FCM_SERVER_KEY', ''),
   },
@@ -148,6 +173,12 @@ const env = {
     fixedCode: isProduction ? null : optional('OTP_FIXED_CODE', '123456'),
     ttlSeconds: int('OTP_TTL', 300),
     maxAttempts: int('OTP_MAX_ATTEMPTS', 5),
+    // Minimum gap between two code sends to one phone, on any channel.
+    resendCooldownSeconds: int('OTP_RESEND_COOLDOWN', 30),
+    // All channels together, per phone per hour (the original limit).
+    maxRequestsPerHour: int('OTP_MAX_REQUESTS_PER_HOUR', 5),
+    // WhatsApp sends cost money and reach a personal inbox: a tighter cap.
+    maxWhatsappPerHour: int('OTP_MAX_WHATSAPP_PER_HOUR', 3),
   },
 
   // Storage only — the same Supabase project used for Postgres, or a separate

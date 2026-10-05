@@ -14,7 +14,12 @@ const phoneSchema = z
   .string()
   .regex(/^\+[1-9]\d{7,14}$/, 'Phone must be in international format, e.g. +919876543210');
 
-const requestSchema = z.object({ phone: phoneSchema });
+// channel: 'sms' (primary, the default) or 'whatsapp' (the fallback). Either
+// way it is the same Moco login code, verified by POST /otp/verify.
+const requestSchema = z.object({
+  phone: phoneSchema,
+  channel: z.enum(['sms', 'whatsapp']).default('sms'),
+});
 const verifySchema = z.object({
   phone: phoneSchema,
   code: z.string().regex(/^\d{4,8}$/, 'Code must be numeric'),
@@ -27,10 +32,19 @@ router.post(
   rateLimit({ windowSeconds: 300, max: 10, keyPrefix: 'otp_req', by: (req) => req.ip }),
   validate(requestSchema),
   asyncHandler(async (req, res) => {
-    const result = await authService.requestOtp({ phone: req.body.phone, ip: req.ip });
+    const result = await authService.requestOtp({
+      phone: req.body.phone,
+      channel: req.body.channel,
+      ip: req.ip,
+    });
     res.json(result);
   }),
 );
+
+/** Which delivery channels can send a code right now (no secrets). */
+router.get('/otp/channels', (req, res) => {
+  res.json(authService.availableChannels());
+});
 
 router.post(
   '/otp/verify',

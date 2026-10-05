@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api/auth_api.dart';
 import '../../core/errors/api_exception.dart';
 import '../../core/providers.dart';
 import '../../core/theme/moco_colors.dart';
@@ -36,6 +37,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   int _resendIn = 0;
   Timer? _resendTimer;
 
+  /// The channel the current code went out on.
+  OtpChannel _channel = OtpChannel.sms;
+
+  /// Whether the backend can deliver a code on WhatsApp (the fallback).
+  bool _whatsappAvailable = false;
+
+  /// An SMS could not be sent at all — offer WhatsApp straight away.
+  bool _smsFailed = false;
+
   // India-first, matching the target market. Kept as a constant rather than a
   // picker until the product ships outside +91.
   static const _dialCode = '+91';
@@ -62,28 +72,66 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
   }
 
-  Future<void> _requestOtp() async {
+  Future<void> _requestOtp({OtpChannel channel = OtpChannel.sms}) async {
     setState(() {
       _busy = true;
       _error = null;
     });
 
+    final auth = ref.read(authActionsProvider);
     try {
-      final expiresIn = await ref.read(authActionsProvider).requestOtp(_e164);
+      final result = await auth.requestOtp(_e164, channel: channel);
       if (!mounted) return;
       setState(() {
         _step = _Step.code;
         _busy = false;
+        _channel = result.channel;
+        _smsFailed = false;
+        if (result.channel == OtpChannel.sms) {
+          _whatsappAvailable = result.whatsappFallback;
+        }
       });
-      // Offer resend at one minute, or sooner if the code expires first.
-      _startResendTimer(expiresIn < 60 ? expiresIn : 60);
+      // Offer another channel at one minute, or sooner if the code expires.
+      _startResendTimer(result.expiresIn < 60 ? result.expiresIn : 60);
     } on ApiException catch (e) {
+      // An SMS that could not be sent at all is a hard failure: offer
+      // WhatsApp now instead of making the user wait for a code that won't come.
+      var whatsapp = _whatsappAvailable;
+      if (e.code == 'sms_delivery_failed') {
+        try {
+          whatsapp = await auth.whatsappAvailable();
+        } on ApiException {
+          whatsapp = false;
+        }
+      }
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = e.message;
+        _error = _friendlyError(e, whatsapp: whatsapp);
+        if (e.code == 'sms_delivery_failed') {
+          _smsFailed = whatsapp;
+          _whatsappAvailable = whatsapp;
+        }
       });
     }
+  }
+
+  /// Provider and limit errors in plain words — never the provider's own text.
+  String _friendlyError(ApiException e, {required bool whatsapp}) {
+    return switch (e.code) {
+      'sms_delivery_failed' =>
+        whatsapp
+            ? "We couldn't send an SMS to this number. You can get the code on WhatsApp instead."
+            : "We couldn't send an SMS to this number. Please try again in a moment.",
+      'whatsapp_delivery_failed' => "We couldn't send a WhatsApp message to this number. Check it uses WhatsApp, or get the code by SMS.",
+      'whatsapp_unavailable' =>
+        "WhatsApp codes aren't available right now. Please use SMS.",
+      'whatsapp_limit' =>
+        "You've asked for several WhatsApp codes. Please try again later.",
+      'otp_cooldown' =>
+        'Please wait a few seconds before asking for another code.',
+      _ => e.message,
+    };
   }
 
   Future<void> _verifyOtp() async {
@@ -123,7 +171,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: MocoSpacing.xxl),
                 Text(
                   _step == _Step.phone ? 'Welcome to Moco' : 'Enter the code',
-                  style:  TextStyle(
+                  style: TextStyle(
                     color: MocoColors.textPrimary,
                     fontSize: 28,
                     fontWeight: FontWeight.w700,
@@ -134,8 +182,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Text(
                   _step == _Step.phone
                       ? 'We will text you a code to sign in.'
-                      : 'Sent to $_e164',
-                  style:  TextStyle(
+                      : _channel == OtpChannel.whatsapp
+                      ? 'Code sent on WhatsApp to $_e164'
+                      : 'Code sent by SMS to $_e164',
+                  style: TextStyle(
                     color: MocoColors.textSecondary,
                     fontSize: 15,
                   ),
@@ -147,14 +197,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   _ErrorBanner(message: _error!),
                 ],
                 const SizedBox(height: MocoSpacing.xl),
-                if (_step == _Step.phone)
+                if (_step == _Step.phone) ...[
                   MocoPrimaryButton(
                     key: const Key('login_send_code'),
                     label: 'Send code',
                     loading: _busy,
                     onPressed: _phoneValid ? _requestOtp : null,
-                  )
-                else ...[
+                  ),
+                  if (_smsFailed) ...[
+                    const SizedBox(height: MocoSpacing.md),
+                    _whatsappButton(),
+                  ],
+                ] else ...[
                   MocoPrimaryButton(
                     key: const Key('login_verify'),
                     label: 'Verify',
@@ -162,29 +216,62 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     onPressed: _codeValid ? _verifyOtp : null,
                   ),
                   const SizedBox(height: MocoSpacing.md),
-                  TextButton(
-                    key: const Key('login_resend'),
-                    onPressed: _resendIn > 0 || _busy ? null : _requestOtp,
-                    child: Text(
-                      _resendIn > 0
-                          ? 'Resend code in ${_resendIn}s'
-                          : 'Resend code',
+                  if (_resendIn > 0)
+                    TextButton(
+                      key: const Key('login_resend'),
+                      onPressed: null,
+                      child: Text(
+                        'Resend code in ${_resendIn}s',
+                        style: TextStyle(color: MocoColors.textMuted),
+                      ),
+                    )
+                  else ...[
+                    Text(
+                      "Didn't receive the code?",
+                      key: const Key('login_didnt_receive'),
+                      textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: _resendIn > 0
-                            ? MocoColors.textMuted
-                            : MocoColors.accentSoft,
+                        color: MocoColors.textSecondary,
+                        fontSize: 14,
                       ),
                     ),
-                  ),
+                    const SizedBox(height: MocoSpacing.sm),
+                    if (_whatsappAvailable && _channel == OtpChannel.sms) ...[
+                      _whatsappButton(),
+                      const SizedBox(height: MocoSpacing.xs),
+                    ],
+                    TextButton(
+                      key: const Key('login_resend'),
+                      onPressed: _busy ? null : () => _requestOtp(),
+                      child: Text(
+                        _channel == OtpChannel.whatsapp
+                            ? 'Send by SMS instead'
+                            : 'Resend SMS',
+                        style: TextStyle(color: MocoColors.accentSoft),
+                      ),
+                    ),
+                    if (_channel == OtpChannel.whatsapp && _whatsappAvailable)
+                      TextButton(
+                        key: const Key('login_resend_whatsapp'),
+                        onPressed: _busy
+                            ? null
+                            : () => _requestOtp(channel: OtpChannel.whatsapp),
+                        child: Text(
+                          'Resend on WhatsApp',
+                          style: TextStyle(color: MocoColors.accentSoft),
+                        ),
+                      ),
+                  ],
                   TextButton(
                     onPressed: _busy
                         ? null
                         : () => setState(() {
                             _step = _Step.phone;
                             _error = null;
+                            _smsFailed = false;
                             _codeController.clear();
                           }),
-                    child:  Text(
+                    child: Text(
                       'Use a different number',
                       style: TextStyle(color: MocoColors.textMuted),
                     ),
@@ -198,12 +285,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
+  Widget _whatsappButton() {
+    return MocoSecondaryButton(
+      key: const Key('login_whatsapp'),
+      label: 'Send via WhatsApp',
+      icon: Icons.chat_rounded,
+      onPressed: _busy || !_phoneValid
+          ? null
+          : () => _requestOtp(channel: OtpChannel.whatsapp),
+    );
+  }
+
   Widget _phoneField() {
     return MocoGlassCard(
       padding: const EdgeInsets.symmetric(horizontal: MocoSpacing.lg),
       child: Row(
         children: [
-           Text(
+          Text(
             _dialCode,
             style: TextStyle(
               color: MocoColors.textPrimary,
@@ -223,7 +321,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               maxLength: 10,
               onChanged: (_) => setState(() {}),
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              style:  TextStyle(
+              style: TextStyle(
                 color: MocoColors.textPrimary,
                 fontSize: 17,
                 letterSpacing: 1.2,
@@ -254,7 +352,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         textAlign: TextAlign.center,
         onChanged: (_) => setState(() {}),
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style:  TextStyle(
+        style: TextStyle(
           color: MocoColors.textPrimary,
           fontSize: 26,
           fontWeight: FontWeight.w600,
@@ -289,16 +387,12 @@ class _ErrorBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-           Icon(
-            Icons.error_outline_rounded,
-            color: MocoColors.danger,
-            size: 19,
-          ),
+          Icon(Icons.error_outline_rounded, color: MocoColors.danger, size: 19),
           const SizedBox(width: MocoSpacing.sm),
           Expanded(
             child: Text(
               message,
-              style:  TextStyle(color: MocoColors.danger, fontSize: 13.5),
+              style: TextStyle(color: MocoColors.danger, fontSize: 13.5),
             ),
           ),
         ],

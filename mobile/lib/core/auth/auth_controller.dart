@@ -75,7 +75,12 @@ class AuthController extends ValueNotifier<AuthState> {
     }
   }
 
-  Future<int> requestOtp(String phone) => _authApi.requestOtp(phone);
+  Future<OtpRequestResult> requestOtp(
+    String phone, {
+    OtpChannel channel = OtpChannel.sms,
+  }) => _authApi.requestOtp(phone, channel: channel);
+
+  Future<bool> whatsappAvailable() => _authApi.whatsappAvailable();
 
   /// Verifies the OTP and establishes the session.
   Future<AuthStatus> verifyOtp({

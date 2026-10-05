@@ -130,11 +130,19 @@ class _StubUsersApi implements UsersApi {
 /// Never called in a signed-in-session test, but AuthController requires one.
 class _NoopAuthApi implements AuthApi {
   @override
-  Future<int> requestOtp(String phone) => throw UnimplementedError();
+  Future<OtpRequestResult> requestOtp(
+    String phone, {
+    OtpChannel channel = OtpChannel.sms,
+  }) => throw UnimplementedError();
 
   @override
-  Future<AuthSession> verifyOtp({required String phone, required String code}) =>
-      throw UnimplementedError();
+  Future<bool> whatsappAvailable() => throw UnimplementedError();
+
+  @override
+  Future<AuthSession> verifyOtp({
+    required String phone,
+    required String code,
+  }) => throw UnimplementedError();
 }
 
 /// Wraps a screen that supplies its own Scaffold (onboarding, login, profile

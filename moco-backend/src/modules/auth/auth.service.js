@@ -5,8 +5,9 @@ const { withTransaction, query } = require('../../config/db');
 const { redis } = require('../../config/redis');
 const env = require('../../config/env');
 const sms = require('../../integrations/sms');
+const whatsapp = require('../../integrations/whatsapp');
 const { signToken } = require('../../middleware/auth');
-const { badRequest, tooManyRequests, unauthorized } = require('../../utils/errors');
+const { AppError, badRequest, tooManyRequests, unauthorized } = require('../../utils/errors');
 const logger = require('../../utils/logger');
 
 /**
@@ -20,6 +21,14 @@ const logger = require('../../utils/logger');
 const otpKey = (phone) => `otp:${phone}`;
 const attemptsKey = (phone) => `otp_attempts:${phone}`;
 const requestKey = (phone) => `otp_requests:${phone}`;
+const whatsappRequestKey = (phone) => `otp_wa_requests:${phone}`;
+const cooldownKey = (phone) => `otp_cooldown:${phone}`;
+
+/** Delivery channels for the same Moco OTP. SMS is primary, WhatsApp the fallback. */
+const CHANNELS = Object.freeze({ SMS: 'sms', WHATSAPP: 'whatsapp' });
+
+/** Which channels can deliver a code right now — shown to the client. */
+const availableChannels = () => ({ sms: true, whatsapp: whatsapp.isAvailable() });
 
 const hashOtp = (phone, code) =>
   crypto.createHmac('sha256', env.jwt.secret).update(`${phone}:${code}`).digest('hex');
@@ -32,26 +41,82 @@ function generateCode() {
 }
 
 /**
- * Sends an OTP, rate-limited per phone number so the endpoint cannot be used
- * to bill us for SMS or to spam someone else's phone.
+ * Issues a login code for `phone` and delivers it on `channel`.
+ *
+ * There is ONE live code per phone, whatever the channel: asking for the
+ * WhatsApp fallback replaces the SMS code (the SMS one stops working), and
+ * both are checked by the same verifyOtp — which is what keeps SMS and
+ * WhatsApp from ever creating competing logins or accounts.
+ *
+ * Limits, all per phone and Redis-backed: a resend cooldown across channels,
+ * the hourly cap across channels, and a tighter hourly cap for WhatsApp.
+ * A delivery failure lifts the cooldown so the other channel can be offered
+ * at once, and is reported as a typed error (never the provider's own text).
  */
-async function requestOtp({ phone, ip }) {
+async function requestOtp({ phone, ip, channel = CHANNELS.SMS }) {
+  if (channel === CHANNELS.WHATSAPP && !whatsapp.isAvailable()) {
+    throw badRequest('whatsapp_unavailable', 'WhatsApp codes are not available right now.');
+  }
+
+  // Atomic: only one send per cooldown window, on any channel.
+  const free = await redis.set(cooldownKey(phone), channel, 'EX', env.otp.resendCooldownSeconds, 'NX');
+  if (!free) {
+    const retryAfter = Math.max(1, await redis.ttl(cooldownKey(phone)));
+    throw new AppError(429, 'otp_cooldown', `Please wait ${retryAfter}s before requesting another code.`, { retryAfter });
+  }
+
   const requests = await redis.incr(requestKey(phone));
   if (requests === 1) await redis.expire(requestKey(phone), 3600);
-  if (requests > 5) throw tooManyRequests('Too many OTP requests. Try again later.');
+  if (requests > env.otp.maxRequestsPerHour) throw tooManyRequests('Too many OTP requests. Try again later.');
+
+  if (channel === CHANNELS.WHATSAPP) {
+    const waRequests = await redis.incr(whatsappRequestKey(phone));
+    if (waRequests === 1) await redis.expire(whatsappRequestKey(phone), 3600);
+    if (waRequests > env.otp.maxWhatsappPerHour) {
+      throw new AppError(429, 'whatsapp_limit', 'Too many WhatsApp codes requested. Try again later.');
+    }
+  }
 
   const code = generateCode();
   await redis.setex(otpKey(phone), env.otp.ttlSeconds, hashOtp(phone, code));
   await redis.del(attemptsKey(phone));
 
-  await sms.sendOtp(phone, code);
-  await query(`INSERT INTO auth_events (phone, event, ip) VALUES ($1, 'otp_requested', $2)`, [
+  const result =
+    channel === CHANNELS.WHATSAPP ? await whatsapp.sendAuthCode(phone, code) : await sms.sendOtp(phone, code);
+  if (!result.ok) {
+    // Not delivered: drop the undeliverable code and the cooldown, so the
+    // fallback channel can be used straight away.
+    await redis.del(otpKey(phone), cooldownKey(phone));
+    await query('INSERT INTO auth_events (phone, event, ip) VALUES ($1, $2, $3)', [
+      phone,
+      channel === CHANNELS.WHATSAPP ? 'otp_send_failed_wa' : 'otp_send_failed_sms',
+      ip || null,
+    ]);
+    if (channel === CHANNELS.WHATSAPP) {
+      throw new AppError(502, 'whatsapp_delivery_failed', 'We could not send a WhatsApp message to this number.', {
+        reason: result.reason === 'recipient_unreachable' ? 'not_on_whatsapp' : 'unavailable',
+      });
+    }
+    throw new AppError(502, 'sms_delivery_failed', 'We could not send an SMS to this number.', {
+      fallbackChannels: whatsapp.isAvailable() ? [CHANNELS.WHATSAPP] : [],
+    });
+  }
+
+  await query('INSERT INTO auth_events (phone, event, ip) VALUES ($1, $2, $3)', [
     phone,
+    channel === CHANNELS.WHATSAPP ? 'otp_requested_wa' : 'otp_requested',
     ip || null,
   ]);
 
-  logger.info({ phone }, 'otp requested');
-  return { sent: true, expiresIn: env.otp.ttlSeconds };
+  logger.info({ phone: whatsapp.maskPhone(phone), channel }, 'otp requested');
+  return {
+    sent: true,
+    channel,
+    expiresIn: env.otp.ttlSeconds,
+    resendIn: env.otp.resendCooldownSeconds,
+    // The client offers these under "Didn't receive the code?".
+    fallbackChannels: channel === CHANNELS.SMS && whatsapp.isAvailable() ? [CHANNELS.WHATSAPP] : [],
+  };
 }
 
 /**
@@ -78,7 +143,7 @@ async function verifyOtp({ phone, code, ip }) {
     throw unauthorized('Incorrect code');
   }
 
-  await redis.del(otpKey(phone), attemptsKey(phone));
+  await redis.del(otpKey(phone), attemptsKey(phone), cooldownKey(phone));
 
   const { user, isNew } = await findOrCreateUser(phone);
 
@@ -109,4 +174,4 @@ async function findOrCreateUser(phone) {
   });
 }
 
-module.exports = { requestOtp, verifyOtp, findOrCreateUser };
+module.exports = { requestOtp, verifyOtp, findOrCreateUser, availableChannels, CHANNELS };

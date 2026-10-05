@@ -33,10 +33,33 @@ Client bootstrap — rates, packs, languages, minimum app version. Call on launc
 ## Auth
 
 ### `POST /api/auth/otp/request`
-`{ "phone": "+919876543210" }` → `{ "sent": true, "expiresIn": 300 }`
+`{ "phone": "+919876543210", "channel": "sms" }` →
+`{ "sent": true, "channel": "sms", "expiresIn": 300, "resendIn": 30, "fallbackChannels": ["whatsapp"] }`
 
-Rate limited to 5 per phone per hour and 10 per IP per 5 minutes. Outside
+`channel` is `"sms"` (default — the primary channel) or `"whatsapp"` (the
+fallback when an SMS does not arrive). Both deliver the SAME kind of Moco
+login code, checked by `/otp/verify`; there is one live code per phone, so a
+WhatsApp request replaces an earlier SMS code. WhatsApp uses an approved
+Authentication template only. `fallbackChannels` lists what the client may
+offer under "Didn't receive the code?".
+
+Limits (per phone unless stated): one send per `OTP_RESEND_COOLDOWN` seconds
+across channels (429 `otp_cooldown`, `details.retryAfter`), 5 per hour across
+channels, 3 WhatsApp per hour (429 `whatsapp_limit`), 10 per IP per 5 minutes.
+Delivery failures: 502 `sms_delivery_failed` (`details.fallbackChannels`; the
+cooldown is lifted so WhatsApp can be tried at once), 502
+`whatsapp_delivery_failed` (`details.reason`: `not_on_whatsapp` | `unavailable`),
+400 `whatsapp_unavailable` when WhatsApp is not configured. Outside
 production the code is fixed (`OTP_FIXED_CODE`, default `123456`).
+
+### `GET /api/auth/otp/channels`
+→ `{ "sms": true, "whatsapp": true }` — which channels can deliver a code now.
+
+### `GET|POST /api/webhooks/whatsapp`
+Meta WhatsApp Cloud API webhook. GET answers Meta's verification handshake
+(`hub.verify_token` must equal `WHATSAPP_WEBHOOK_VERIFY_TOKEN`). POST accepts
+delivery-status callbacks only with a valid `X-Hub-Signature-256` (HMAC-SHA256
+of the raw body with `WHATSAPP_APP_SECRET`); anything else is 401.
 
 ### `POST /api/auth/otp/verify`
 `{ "phone": "+919876543210", "code": "123456" }` →

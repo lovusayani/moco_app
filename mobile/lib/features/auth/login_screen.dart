@@ -368,6 +368,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           labelText: 'Email address',
           hintText: 'you@example.com',
           border: InputBorder.none,
+          // The theme's outlined borders would draw a box inside the card.
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
           filled: false,
           contentPadding: EdgeInsets.symmetric(vertical: 14),
         ),
@@ -410,6 +413,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 hintText: '98765 43210',
                 counterText: '',
                 border: InputBorder.none,
+                // The theme's outlined borders would draw a box inside the card.
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
                 filled: false,
                 contentPadding: EdgeInsets.symmetric(vertical: 14),
               ),
@@ -446,6 +452,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           hintText: '••••••',
           counterText: '',
           border: InputBorder.none,
+          // The theme's outlined borders would draw a box inside the card.
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
           filled: false,
           contentPadding: EdgeInsets.symmetric(vertical: 16),
         ),

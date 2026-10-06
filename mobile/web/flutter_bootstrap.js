@@ -4,8 +4,9 @@
 // Moco's loader. Flutter's own (deprecated) service worker is deliberately not
 // passed to the loader — it unregisters itself on activate and would remove
 // the app's real worker, web/sw.js, which owns installability and the offline
-// app shell. sw.js is network-first, so a deploy is picked up on the next load
-// without any build-version plumbing.
+// app shell. sw.js is network-first, and tool/vercel/build_web.mjs stamps this
+// file's URL and main.dart.js with the build id (?v=...), so a deploy is picked
+// up on the next load even where a CDN or browser cached the previous build.
 (function () {
   if ('serviceWorker' in navigator && window.isSecureContext) {
     window.addEventListener('load', function () {

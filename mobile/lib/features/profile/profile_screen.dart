@@ -35,7 +35,8 @@ class ProfileScreen extends ConsumerWidget {
       return const SizedBox.shrink();
     }
 
-    final showingListener = activeRole == ActiveRoleController.listener && user.canBeListener;
+    final showingListener =
+        activeRole == ActiveRoleController.listener && user.canBeListener;
 
     return SafeArea(
       bottom: false,
@@ -47,7 +48,7 @@ class ProfileScreen extends ConsumerWidget {
           MocoSpacing.xxl,
         ),
         children: [
-           Text(
+          Text(
             'Profile',
             style: TextStyle(
               color: MocoColors.textPrimary,
@@ -114,7 +115,7 @@ class _IdentityCard extends ConsumerWidget {
               clipBehavior: Clip.none,
               children: [
                 MocoAvatar(
-                  name: user.displayName ?? user.phone,
+                  name: user.displayName ?? user.contactLabel,
                   imageUrl: user.avatarUrl,
                   size: 64,
                 ),
@@ -152,7 +153,7 @@ class _IdentityCard extends ConsumerWidget {
                       : 'Moco user',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style:  TextStyle(
+                  style: TextStyle(
                     color: MocoColors.textPrimary,
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -160,8 +161,8 @@ class _IdentityCard extends ConsumerWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  user.phone,
-                  style:  TextStyle(color: MocoColors.textMuted, fontSize: 13),
+                  user.contactLabel,
+                  style: TextStyle(color: MocoColors.textMuted, fontSize: 13),
                 ),
               ],
             ),
@@ -169,7 +170,7 @@ class _IdentityCard extends ConsumerWidget {
           IconButton(
             key: const Key('profile_edit_button'),
             onPressed: () => context.push(Routes.editProfile),
-            icon:  Icon(Icons.edit_outlined, color: MocoColors.textSecondary),
+            icon: Icon(Icons.edit_outlined, color: MocoColors.textSecondary),
             tooltip: 'Edit profile',
           ),
         ],
@@ -246,7 +247,9 @@ class _RoleSwitchSegment extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-            color: selected ? MocoColors.textOnAccent : MocoColors.textSecondary,
+            color: selected
+                ? MocoColors.textOnAccent
+                : MocoColors.textSecondary,
             fontSize: 13.5,
             fontWeight: FontWeight.w700,
           ),
@@ -338,7 +341,9 @@ class _ListenerSectionsState extends ConsumerState<_ListenerSections> {
             isOnline: listener?.isOnline ?? false,
             isBusy: state.isTogglingAvailability,
             error: state.availabilityError,
-            canGoOnline: ref.watch(platformCapabilitiesProvider).supportsCalling,
+            canGoOnline: ref
+                .watch(platformCapabilitiesProvider)
+                .supportsCalling,
             onChanged: controller.setAvailability,
           ),
         ],
@@ -359,7 +364,7 @@ class _ListenerSectionsState extends ConsumerState<_ListenerSections> {
         else if (state.earningsError != null && state.earnings == null)
           Text(
             ApiErrorMapper.from(state.earningsError!).message,
-            style:  TextStyle(color: MocoColors.danger, fontSize: 13),
+            style: TextStyle(color: MocoColors.danger, fontSize: 13),
           )
         else if (state.earnings != null)
           _EarningsCard(earnings: state.earnings!),
@@ -383,10 +388,26 @@ class _KycStatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color, icon) = switch (kycStatus) {
-      'approved' => ('Verified listener', MocoColors.success, Icons.verified_rounded),
-      'pending' => ('Verification pending', MocoColors.warning, Icons.hourglass_top_rounded),
-      'rejected' => ('Verification rejected', MocoColors.danger, Icons.error_outline_rounded),
-      _ => ('Not yet verified', MocoColors.textMuted, Icons.info_outline_rounded),
+      'approved' => (
+        'Verified listener',
+        MocoColors.success,
+        Icons.verified_rounded,
+      ),
+      'pending' => (
+        'Verification pending',
+        MocoColors.warning,
+        Icons.hourglass_top_rounded,
+      ),
+      'rejected' => (
+        'Verification rejected',
+        MocoColors.danger,
+        Icons.error_outline_rounded,
+      ),
+      _ => (
+        'Not yet verified',
+        MocoColors.textMuted,
+        Icons.info_outline_rounded,
+      ),
     };
 
     return MocoGlassCard(
@@ -397,7 +418,11 @@ class _KycStatusCard extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style: TextStyle(color: color, fontSize: 14.5, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: color,
+                fontSize: 14.5,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
@@ -437,7 +462,7 @@ class _AvailabilityCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   isOnline ? 'You are online' : 'You are offline',
-                  style:  TextStyle(
+                  style: TextStyle(
                     color: MocoColors.textPrimary,
                     fontSize: 14.5,
                     fontWeight: FontWeight.w600,
@@ -447,7 +472,9 @@ class _AvailabilityCard extends StatelessWidget {
               Switch(
                 key: const Key('profile_availability_switch'),
                 value: isOnline,
-                onChanged: isBusy || (!isOnline && !canGoOnline) ? null : onChanged,
+                onChanged: isBusy || (!isOnline && !canGoOnline)
+                    ? null
+                    : onChanged,
                 activeThumbColor: MocoColors.accentPrimary,
               ),
             ],
@@ -464,7 +491,7 @@ class _AvailabilityCard extends StatelessWidget {
             const SizedBox(height: MocoSpacing.sm),
             Text(
               ApiErrorMapper.from(error!).message,
-              style:  TextStyle(color: MocoColors.danger, fontSize: 12.5),
+              style: TextStyle(color: MocoColors.danger, fontSize: 12.5),
             ),
           ],
         ],
@@ -512,7 +539,10 @@ class _EarningsFigure extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 2),
-          Text(label, style:  TextStyle(color: MocoColors.textMuted, fontSize: 12)),
+          Text(
+            label,
+            style: TextStyle(color: MocoColors.textMuted, fontSize: 12),
+          ),
         ],
       ),
     );
@@ -537,7 +567,10 @@ class _NavRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return MocoGlassCard(
       onTap: onTap,
-      padding: const EdgeInsets.symmetric(horizontal: MocoSpacing.lg, vertical: MocoSpacing.md),
+      padding: const EdgeInsets.symmetric(
+        horizontal: MocoSpacing.lg,
+        vertical: MocoSpacing.md,
+      ),
       child: Row(
         children: [
           Icon(icon, color: MocoColors.accentSoft, size: 20),
@@ -545,7 +578,7 @@ class _NavRow extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style:  TextStyle(
+              style: TextStyle(
                 color: MocoColors.textPrimary,
                 fontSize: 14.5,
                 fontWeight: FontWeight.w600,
@@ -553,10 +586,13 @@ class _NavRow extends StatelessWidget {
             ),
           ),
           if (trailing != null) ...[
-            Text(trailing!, style:  TextStyle(color: MocoColors.textMuted, fontSize: 13)),
+            Text(
+              trailing!,
+              style: TextStyle(color: MocoColors.textMuted, fontSize: 13),
+            ),
             const SizedBox(width: MocoSpacing.sm),
           ],
-           Icon(Icons.chevron_right_rounded, color: MocoColors.textMuted),
+          Icon(Icons.chevron_right_rounded, color: MocoColors.textMuted),
         ],
       ),
     );

@@ -40,7 +40,7 @@ async function authenticate(req, res, next) {
 
     const payload = verifyToken(token);
     const { rows } = await query(
-      `SELECT u.id, u.phone, u.display_name, u.role, u.status, u.language, u.free_trial_used,
+      `SELECT u.id, u.phone, u.email, u.display_name, u.role, u.status, u.language, u.free_trial_used,
               w.coin_balance
          FROM users u
          LEFT JOIN wallets w ON w.user_id = u.id
@@ -70,16 +70,25 @@ function requireListener(req, res, next) {
 }
 
 /**
- * Admin endpoints. Backed by an allow-list of phone numbers in env rather than
- * a role flag, so a compromised user row cannot escalate to admin.
+ * Admin endpoints. Backed by allow-lists of verified identities in env
+ * (ADMIN_PHONES, ADMIN_EMAILS) rather than a role flag, so a compromised user
+ * row cannot escalate to admin. Emails are compared normalized (lower-case),
+ * matching how they are stored.
  */
+const allowList = (name) => (process.env[name] || '').split(',').map((s) => s.trim()).filter(Boolean);
+
 function isAdminPhone(phone) {
-  const admins = (process.env.ADMIN_PHONES || '').split(',').map((s) => s.trim()).filter(Boolean);
-  return Boolean(phone) && admins.includes(phone);
+  return Boolean(phone) && allowList('ADMIN_PHONES').includes(phone);
 }
 
+function isAdminEmail(email) {
+  return Boolean(email) && allowList('ADMIN_EMAILS').map((e) => e.toLowerCase()).includes(email);
+}
+
+const isAdminUser = (user) => Boolean(user) && (isAdminPhone(user.phone) || isAdminEmail(user.email));
+
 function requireAdmin(req, res, next) {
-  if (!req.user || !isAdminPhone(req.user.phone)) {
+  if (!isAdminUser(req.user)) {
     return next(forbidden('Admin access required'));
   }
   return next();
@@ -90,6 +99,8 @@ module.exports = {
   requireListener,
   requireAdmin,
   isAdminPhone,
+  isAdminEmail,
+  isAdminUser,
   signToken,
   verifyToken,
 };

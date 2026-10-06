@@ -5,7 +5,7 @@ const { z } = require('zod');
 const { query, withTransaction } = require('../../config/db');
 const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
-const { isAdminPhone } = require('../../middleware/auth');
+const { isAdminUser } = require('../../middleware/auth');
 const { notFound, badRequest } = require('../../utils/errors');
 const { USER_STATUS } = require('../../utils/constants');
 const audit = require('./audit.service');
@@ -174,7 +174,7 @@ router.post(
 
     const result = await withTransaction(async (client) => {
       const { rows: found } = await client.query(
-        `SELECT r.id, r.status, r.reported_id, u.phone AS reported_phone, u.status AS reported_status
+        `SELECT r.id, r.status, r.reported_id, u.phone AS reported_phone, u.email AS reported_email, u.status AS reported_status
            FROM reports r JOIN users u ON u.id = r.reported_id
           WHERE r.id = $1 FOR UPDATE OF r`,
         [req.params.id],
@@ -185,7 +185,7 @@ router.post(
         throw badRequest('already_resolved', `This report is already ${report.status}`);
       }
       if (action === 'suspend') {
-        if (isAdminPhone(report.reported_phone)) {
+        if (isAdminUser({ phone: report.reported_phone, email: report.reported_email })) {
           throw badRequest('admin_account', 'Admin accounts cannot be suspended from the console');
         }
         if (report.reported_status === USER_STATUS.DELETED) {

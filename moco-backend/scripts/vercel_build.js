@@ -53,10 +53,16 @@ if (process.env.VERCEL) {
       process.exit(1);
     }
   }
-  if (isProductionDeploy && (process.env.SMS_PROVIDER || 'log') === 'log') {
-    // Not fatal — the API runs — but nobody can sign in: production OTPs are
-    // never fixed, and the 'log' provider does not deliver them.
-    console.warn('[moco-api build] WARNING: SMS_PROVIDER is "log" in production; OTP sign-in cannot work.');
+  // Email is the default sign-in method and must work in production. (SMS,
+  // WhatsApp and Telegram are optional: unconfigured, they are simply not
+  // offered, and the 'log' SMS provider is refused at runtime.)
+  if (isProductionDeploy) {
+    const provider = process.env.EMAIL_PROVIDER || 'resend';
+    const missing = provider === 'resend' ? ['RESEND_API_KEY', 'EMAIL_FROM'].filter((n) => !(process.env[n] || '').trim()) : [];
+    if (provider !== 'resend' || missing.length) {
+      console.error(`[moco-api build] email sign-in is not configured for production (EMAIL_PROVIDER=${provider}${missing.length ? `, missing ${missing.join(', ')}` : ''})`);
+      process.exit(1);
+    }
   }
 }
 

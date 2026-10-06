@@ -19,14 +19,14 @@
       <div class="brand-mark">M</div>
       <div class="brand-name">Moco Admin</div>
     </div>
-    <p class="login-sub">Sign in with an admin phone number.</p>
+    <p class="login-sub">Sign in with your admin email address.</p>
 
     <div id="login-error" class="error-msg" hidden></div>
 
     <form id="phone-form">
       <div class="field">
-        <label for="phone">Phone number</label>
-        <input id="phone" type="tel" placeholder="+919876543210" autocomplete="tel" required>
+        <label for="login-email">Email address</label>
+        <input id="login-email" type="email" placeholder="admin@example.com" autocomplete="email" required>
       </div>
       <button class="btn-primary" type="submit">Send code</button>
     </form>
@@ -37,10 +37,10 @@
         <input id="code" inputmode="numeric" maxlength="8" placeholder="000000" required>
       </div>
       <button class="btn-primary" type="submit">Verify</button>
-      <button class="btn-ghost" type="button" id="back-btn" style="width:100%;margin-top:8px">Use a different number</button>
+      <button class="btn-ghost" type="button" id="back-btn" style="width:100%;margin-top:8px">Use a different email</button>
     </form>
 
-    <p class="hint">Access is limited to numbers in the server's ADMIN_PHONES list.</p>
+    <p class="hint">Access is limited to the server's admin allow-list (ADMIN_EMAILS / ADMIN_PHONES).</p>
   </div>
 </div>
 

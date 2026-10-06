@@ -17,8 +17,8 @@ class ListenerState {
     this.kycSubmittedAt,
     this.kycRejectionReason,
   }) // A private field cannot be a named parameter, hence the initializer.
-     // ignore: prefer_initializing_formals
-     : _blockers = blockers;
+    // ignore: prefer_initializing_formals
+    : _blockers = blockers;
 
   final bool isOnline;
   final String kycStatus;
@@ -55,7 +55,9 @@ class ListenerState {
       blockers: blockers is List
           ? blockers.map((b) => b.toString()).toList(growable: false)
           : null,
-      kycSubmittedAt: DateTime.tryParse(json['kycSubmittedAt'] as String? ?? ''),
+      kycSubmittedAt: DateTime.tryParse(
+        json['kycSubmittedAt'] as String? ?? '',
+      ),
       kycRejectionReason: json['kycRejectionReason'] as String?,
     );
   }
@@ -127,6 +129,7 @@ class MocoUser {
   const MocoUser({
     required this.id,
     required this.phone,
+    this.email,
     this.displayName,
     this.avatarUrl,
     this.language = 'en',
@@ -138,7 +141,12 @@ class MocoUser {
   });
 
   final int id;
+
+  /// Empty for an account that signed up by email and has no phone yet.
   final String phone;
+
+  /// The verified sign-in email, when the account has one.
+  final String? email;
   final String? displayName;
   final String? avatarUrl;
   final String language;
@@ -153,6 +161,7 @@ class MocoUser {
     return MocoUser(
       id: (json['id'] as num).toInt(),
       phone: json['phone'] as String? ?? '',
+      email: json['email'] as String?,
       displayName: json['displayName'] as String?,
       avatarUrl: json['avatarUrl'] as String?,
       language: json['language'] as String? ?? 'en',
@@ -175,6 +184,10 @@ class MocoUser {
 
   bool get canBeListener => role == 'listener' || role == 'both';
 
+  /// How the account is identified to its owner: the phone number, or the
+  /// email for an account that signed up by email.
+  String get contactLabel => phone.isNotEmpty ? phone : (email ?? '');
+
   MocoUser copyWith({
     String? displayName,
     String? avatarUrl,
@@ -188,6 +201,7 @@ class MocoUser {
     return MocoUser(
       id: id,
       phone: phone,
+      email: email,
       displayName: displayName ?? this.displayName,
       avatarUrl: avatarUrl ?? this.avatarUrl,
       language: language ?? this.language,
@@ -204,6 +218,7 @@ class MocoUser {
       other is MocoUser &&
       other.id == id &&
       other.phone == phone &&
+      other.email == email &&
       other.displayName == displayName &&
       other.avatarUrl == avatarUrl &&
       other.language == language &&
@@ -217,6 +232,7 @@ class MocoUser {
   int get hashCode => Object.hash(
     id,
     phone,
+    email,
     displayName,
     avatarUrl,
     language,
@@ -233,6 +249,7 @@ class AuthUser {
   const AuthUser({
     required this.id,
     required this.phone,
+    this.email,
     this.displayName,
     this.role = 'user',
     this.language = 'en',
@@ -241,6 +258,7 @@ class AuthUser {
 
   final int id;
   final String phone;
+  final String? email;
   final String? displayName;
   final String role;
   final String language;
@@ -250,6 +268,7 @@ class AuthUser {
     return AuthUser(
       id: (json['id'] as num).toInt(),
       phone: json['phone'] as String? ?? '',
+      email: json['email'] as String?,
       displayName: json['displayName'] as String?,
       role: json['role'] as String? ?? 'user',
       language: json['language'] as String? ?? 'en',

@@ -5,6 +5,7 @@
 
 import 'package:flutter/foundation.dart';
 
+import '../../shared/models/app_config.dart';
 import '../api/auth_api.dart';
 import '../api/users_api.dart';
 import '../errors/api_exception.dart';
@@ -75,14 +76,26 @@ class AuthController extends ValueNotifier<AuthState> {
     }
   }
 
-  Future<int> requestOtp(String phone) => _authApi.requestOtp(phone);
+  /// Sends a sign-in code by [channel] to [identifier] (an email address, or
+  /// an E.164 phone number for the phone channels).
+  Future<OtpSent> requestOtp({
+    required OtpChannel channel,
+    required String identifier,
+  }) => _authApi.sendOtp(channel: channel, identifier: identifier);
 
-  /// Verifies the OTP and establishes the session.
+  /// Verifies the code and establishes the session. Signing in and signing up
+  /// are the same step: a new email/phone gets a new account, and the normal
+  /// profile/onboarding flow follows.
   Future<AuthStatus> verifyOtp({
-    required String phone,
+    required OtpChannel channel,
+    required String identifier,
     required String code,
   }) async {
-    final session = await _authApi.verifyOtp(phone: phone, code: code);
+    final session = await _authApi.verifyOtp(
+      channel: channel,
+      identifier: identifier,
+      code: code,
+    );
     await _store.writeToken(session.token);
 
     // The verify response is a lighter shape than /users/me; re-read the

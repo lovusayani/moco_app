@@ -104,6 +104,34 @@ const env = {
     senderId: optional('SMS_SENDER_ID', 'MOCOAP'),
   },
 
+  /**
+   * Sign-in code delivery channels (src/modules/auth/otp/). A channel is
+   * offered to users only when its provider is configured; 'log' providers
+   * (which print the code) exist for local development and never run in
+   * production. Every secret here is backend-only.
+   */
+  email: {
+    // 'resend' (production) | 'log' (development).
+    provider: optional('EMAIL_PROVIDER', isProduction ? 'resend' : 'log'),
+    from: optional('EMAIL_FROM', ''),
+    resendApiKey: optional('RESEND_API_KEY', ''),
+  },
+
+  whatsapp: {
+    // WhatsApp Cloud API with an approved Authentication template.
+    accessToken: optional('WHATSAPP_ACCESS_TOKEN', ''),
+    phoneNumberId: optional('WHATSAPP_PHONE_NUMBER_ID', ''),
+    templateName: optional('WHATSAPP_OTP_TEMPLATE', ''),
+    templateLanguage: optional('WHATSAPP_OTP_TEMPLATE_LANGUAGE', 'en'),
+    graphVersion: optional('WHATSAPP_GRAPH_VERSION', 'v21.0'),
+  },
+
+  telegram: {
+    // Telegram Gateway API (gatewayapi.telegram.org): delivers a code to the
+    // Telegram account registered to a phone number. No bot linking needed.
+    gatewayToken: optional('TELEGRAM_GATEWAY_TOKEN', ''),
+  },
+
   fcm: {
     serverKey: optional('FCM_SERVER_KEY', ''),
   },
@@ -148,6 +176,10 @@ const env = {
     fixedCode: isProduction ? null : optional('OTP_FIXED_CODE', '123456'),
     ttlSeconds: int('OTP_TTL', 300),
     maxAttempts: int('OTP_MAX_ATTEMPTS', 5),
+    // Minimum gap between two codes to the same email/phone.
+    resendCooldownSeconds: int('OTP_RESEND_COOLDOWN', 30),
+    // Codes per email/phone per hour, across all channels.
+    maxSendsPerHour: int('OTP_MAX_SENDS_PER_HOUR', 5),
   },
 
   // Storage only — the same Supabase project used for Postgres, or a separate

@@ -26,6 +26,7 @@ function serializeUser(row) {
   return {
     id: row.id,
     phone: row.phone,
+    email: row.email,
     displayName: row.display_name,
     avatarUrl: row.avatar_url,
     language: row.language,
@@ -64,7 +65,7 @@ function serializeUser(row) {
 
 /** Columns serializeUser needs, shared by every query that returns a user. */
 const USER_SELECT = `
-  u.id, u.phone, u.display_name, u.avatar_url, u.language, u.gender, u.role,
+  u.id, u.phone, u.email, u.display_name, u.avatar_url, u.language, u.gender, u.role,
   u.free_trial_used, u.created_at,
   COALESCE(w.coin_balance, 0) AS coin_balance,
   lp.is_online, lp.kyc_status, lp.earnings_balance, lp.rating, lp.total_calls,
@@ -201,7 +202,7 @@ router.delete(
       await client.query(
         `UPDATE users
             SET status = 'deleted', display_name = NULL, avatar_url = NULL,
-                fcm_token = NULL, phone = 'deleted_' || id, updated_at = now()
+                fcm_token = NULL, phone = 'deleted_' || id, email = NULL, updated_at = now()
           WHERE id = $1`,
         [req.user.id],
       );

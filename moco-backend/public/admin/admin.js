@@ -18,7 +18,7 @@ const TOKEN_KEY = 'moco_admin_token';
 const PHONE_KEY = 'moco_admin_phone';
 
 let token = localStorage.getItem(TOKEN_KEY);
-let pendingPhone = '';
+let pendingIdentifier = '';
 
 /* =====================================================================
  * Core
@@ -483,9 +483,11 @@ function showLoginError(message) {
 document.getElementById('phone-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   loginErr.hidden = true;
-  pendingPhone = document.getElementById('phone').value.trim();
+  pendingIdentifier = document.getElementById('login-email').value.trim();
   try {
-    await api('/auth/otp/request', { method: 'POST', body: { phone: pendingPhone } });
+    // One sign-in flow for the whole product (POST /auth/otp/send); the
+    // console uses the email channel.
+    await api('/auth/otp/send', { method: 'POST', body: { channel: 'email', identifier: pendingIdentifier } });
     document.getElementById('phone-form').hidden = true;
     document.getElementById('code-form').hidden = false;
     document.getElementById('code').focus();
@@ -500,16 +502,16 @@ document.getElementById('code-form').addEventListener('submit', async (e) => {
   try {
     const result = await api('/auth/otp/verify', {
       method: 'POST',
-      body: { phone: pendingPhone, code: document.getElementById('code').value.trim() },
+      body: { channel: 'email', identifier: pendingIdentifier, code: document.getElementById('code').value.trim() },
     });
     token = result.token;
     localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem(PHONE_KEY, pendingPhone);
+    localStorage.setItem(PHONE_KEY, pendingIdentifier);
     await api('/admin/me'); // server-side allow-list check
     enterConsole();
   } catch (err) {
     if (err.status === 403) {
-      showLoginError('That number signed in, but it is not an admin (not in ADMIN_PHONES).');
+      showLoginError('That account signed in, but it is not an admin (not in ADMIN_EMAILS / ADMIN_PHONES).');
       token = null;
       localStorage.removeItem(TOKEN_KEY);
     } else showLoginError(err.message);

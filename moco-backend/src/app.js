@@ -8,6 +8,7 @@ const logger = require('./utils/logger');
 const { errorHandler, notFoundHandler } = require('./middleware/error');
 const { cors } = require('./middleware/cors');
 const { RATES, COIN_PACKS, FREE_TRIAL_SECONDS } = require('./utils/constants');
+const { DEFAULT_CHANNEL, availability: otpAvailability } = require('./modules/auth/otp.channels');
 
 const authRoutes = require('./modules/auth/auth.routes');
 const usersRoutes = require('./modules/users/users.routes');
@@ -96,6 +97,9 @@ function createApp() {
       // Surfaced so local tooling can show the fixed code. env.otp.fixedCode is
       // null in production, so this never leaks a real OTP.
       devOtp: env.otp.fixedCode,
+      // Sign-in methods: email by default; the others are offered only when
+      // their provider is configured on this deployment.
+      auth: { defaultChannel: DEFAULT_CHANNEL, channels: otpAvailability() },
     });
   });
 

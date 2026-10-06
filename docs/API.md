@@ -26,26 +26,60 @@ Errors share one shape. Clients should switch on `error.code`, never on the mess
 Liveness probe. `{ "ok": true, "uptime": 1234 }`
 
 ### `GET /api/config`
-Client bootstrap — rates, packs, languages, minimum app version. Call on launch.
+Client bootstrap — rates, packs, languages, minimum app version, and the
+sign-in methods this deployment offers. Call on launch.
+```json
+"auth": { "defaultChannel": "email",
+          "channels": [ { "id": "email",    "identity": "email", "available": true },
+                        { "id": "sms",      "identity": "phone", "available": false },
+                        { "id": "whatsapp", "identity": "phone", "available": false },
+                        { "id": "telegram", "identity": "phone", "available": false } ] }
+```
+A channel is `available` only when its provider is configured on the server.
+Clients must not offer an unavailable channel.
 
 ---
 
 ## Auth
 
-### `POST /api/auth/otp/request`
-`{ "phone": "+919876543210" }` → `{ "sent": true, "expiresIn": 300 }`
+Sign-in and registration are one flow: a one-time code to an email address
+(the default) or to a phone number by SMS, WhatsApp or Telegram. Verifying the
+code signs in to the account that owns that verified email or phone, or
+creates one (with a wallet) if none does. Responses never reveal whether an
+account already existed.
 
-Rate limited to 5 per phone per hour and 10 per IP per 5 minutes. Outside
-production the code is fixed (`OTP_FIXED_CODE`, default `123456`).
+### `POST /api/auth/otp/send`
+`{ "channel": "email", "identifier": "you@example.com" }` →
+`{ "sent": true, "channel": "email", "expiresIn": 300, "resendIn": 30 }`
+
+`identifier` is an email address for `email` (trimmed and lower-cased) and an
+E.164 number (`+919876543210`) for `sms`, `whatsapp` and `telegram`.
+
+| Error | When |
+| --- | --- |
+| 400 `invalid_email` / `invalid_phone` / `invalid_channel` | bad input |
+| 400 `channel_unavailable` | that channel is not configured here |
+| 429 `otp_cooldown` (`details.retryAfter`) | another code was sent < 30 s ago |
+| 429 `rate_limited` | 5 codes per email/phone per hour, or 10 sends per IP per 5 min |
+| 502 `otp_delivery_failed` | the provider could not deliver; nothing was sent, retry allowed |
+
+One live code per email/phone: a new code (on any channel) replaces the old.
+Outside production the code is fixed (`OTP_FIXED_CODE`, default `123456`).
 
 ### `POST /api/auth/otp/verify`
-`{ "phone": "+919876543210", "code": "123456" }` →
+`{ "channel": "email", "identifier": "you@example.com", "code": "123456" }` →
 ```json
 { "token": "<jwt>", "isNew": true,
-  "user": { "id": 1, "phone": "...", "displayName": null, "role": "user",
-            "language": "en", "profileComplete": false } }
+  "user": { "id": 1, "phone": null, "email": "you@example.com", "displayName": null,
+            "role": "user", "language": "en", "profileComplete": false } }
 ```
-Codes are single-use. The account and its wallet are created on first verify.
+Codes are single-use, expire after 5 minutes, and die after 5 wrong guesses
+(429). Errors: 401 `Incorrect code`, 400 `otp_expired`. 20 verifies per IP per
+5 minutes.
+
+### Legacy phone endpoints
+`POST /api/auth/otp/request { phone }` and `POST /api/auth/otp/verify { phone, code }`
+still work; they are the `sms` channel.
 
 ---
 

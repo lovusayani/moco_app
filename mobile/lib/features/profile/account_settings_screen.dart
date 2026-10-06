@@ -18,7 +18,9 @@ class AccountSettingsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final phone = ref.watch(authControllerProvider).user?.phone;
+    final user = ref.watch(authControllerProvider).user;
+    final phone = (user?.phone.isNotEmpty ?? false) ? user!.phone : null;
+    final email = user?.email;
 
     return Scaffold(
       backgroundColor: MocoColors.backgroundPrimary,
@@ -32,16 +34,29 @@ class AccountSettingsScreen extends ConsumerWidget {
           child: ListView(
             padding: const EdgeInsets.all(MocoSpacing.screenPadding),
             children: [
-              if (phone != null)
+              for (final (icon, value) in [
+                if (phone != null) (Icons.phone_outlined, phone),
+                if (email != null) (Icons.mail_outline_rounded, email),
+              ]) ...[
                 MocoGlassCard(
                   child: Row(
                     children: [
-                       Icon(Icons.phone_outlined, color: MocoColors.textMuted, size: 20),
+                      Icon(icon, color: MocoColors.textMuted, size: 20),
                       const SizedBox(width: MocoSpacing.md),
-                      Text(phone, style:  TextStyle(color: MocoColors.textSecondary, fontSize: 14)),
+                      Expanded(
+                        child: Text(
+                          value,
+                          style: TextStyle(
+                            color: MocoColors.textSecondary,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
+                const SizedBox(height: MocoSpacing.sm),
+              ],
               const SizedBox(height: MocoSpacing.xl),
               MocoSecondaryButton(
                 key: const Key('account_settings_logout'),
@@ -50,11 +65,11 @@ class AccountSettingsScreen extends ConsumerWidget {
                 onPressed: () => _confirmSignOut(context, ref),
               ),
               const SizedBox(height: MocoSpacing.xxl),
-               Divider(color: MocoColors.borderSubtle),
+              Divider(color: MocoColors.borderSubtle),
               const SizedBox(height: MocoSpacing.lg),
               Text(
                 'Danger zone',
-                style:  TextStyle(
+                style: TextStyle(
                   color: MocoColors.danger,
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
@@ -80,9 +95,14 @@ class AccountSettingsScreen extends ConsumerWidget {
       builder: (dialogContext) => AlertDialog(
         backgroundColor: MocoColors.backgroundElevated,
         title: const Text('Sign out?'),
-        content: const Text('You can sign back in any time with your phone number.'),
+        content: const Text(
+          'You can sign back in any time with a verification code.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             key: const Key('confirm_sign_out'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -108,11 +128,14 @@ class AccountSettingsScreen extends ConsumerWidget {
           'linked to an active account. This cannot be undone.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             key: const Key('confirm_delete_account'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child:  Text('Delete', style: TextStyle(color: MocoColors.danger)),
+            child: Text('Delete', style: TextStyle(color: MocoColors.danger)),
           ),
         ],
       ),
@@ -120,7 +143,9 @@ class AccountSettingsScreen extends ConsumerWidget {
 
     if (confirmed != true || !context.mounted) return;
 
-    final success = await ref.read(accountDeletionControllerProvider.notifier).confirmDeletion();
+    final success = await ref
+        .read(accountDeletionControllerProvider.notifier)
+        .confirmDeletion();
 
     if (!context.mounted) return;
     if (!success) {
@@ -128,7 +153,9 @@ class AccountSettingsScreen extends ConsumerWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            error != null ? ApiErrorMapper.from(error).message : 'Could not delete your account.',
+            error != null
+                ? ApiErrorMapper.from(error).message
+                : 'Could not delete your account.',
           ),
         ),
       );

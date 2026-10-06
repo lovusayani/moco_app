@@ -9,6 +9,7 @@ import 'package:moco/core/providers.dart';
 import 'package:moco/core/storage/secure_store.dart';
 import 'package:moco/core/theme/moco_theme.dart';
 import 'package:moco/shared/models/notification.dart';
+import 'package:moco/shared/models/app_config.dart';
 import 'package:moco/shared/models/user.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -130,11 +131,17 @@ class _StubUsersApi implements UsersApi {
 /// Never called in a signed-in-session test, but AuthController requires one.
 class _NoopAuthApi implements AuthApi {
   @override
-  Future<int> requestOtp(String phone) => throw UnimplementedError();
+  Future<OtpSent> sendOtp({
+    required OtpChannel channel,
+    required String identifier,
+  }) => throw UnimplementedError();
 
   @override
-  Future<AuthSession> verifyOtp({required String phone, required String code}) =>
-      throw UnimplementedError();
+  Future<AuthSession> verifyOtp({
+    required OtpChannel channel,
+    required String identifier,
+    required String code,
+  }) => throw UnimplementedError();
 }
 
 /// Wraps a screen that supplies its own Scaffold (onboarding, login, profile

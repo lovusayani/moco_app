@@ -45,6 +45,61 @@ class CallRates {
 ///
 /// Fetched on launch so rates, packs and supported languages always match the
 /// server, even if the app binary is older than the current pricing.
+/// How a sign-in code can be delivered (`GET /config` → `auth.channels`).
+enum OtpChannel {
+  email,
+  sms,
+  whatsapp,
+  telegram;
+
+  /// Email proves an email address; the others prove a phone number.
+  bool get usesPhone => this != OtpChannel.email;
+
+  String get label => switch (this) {
+    OtpChannel.email => 'Email',
+    OtpChannel.sms => 'SMS',
+    OtpChannel.whatsapp => 'WhatsApp',
+    OtpChannel.telegram => 'Telegram',
+  };
+
+  static OtpChannel? fromId(Object? id) {
+    for (final c in OtpChannel.values) {
+      if (c.name == id) return c;
+    }
+    return null;
+  }
+}
+
+/// Which sign-in methods this backend offers. A channel whose provider is not
+/// configured is listed as unavailable and must not be selectable.
+class AuthConfig {
+  const AuthConfig({
+    this.defaultChannel = OtpChannel.email,
+    this.available = const {OtpChannel.email},
+  });
+
+  final OtpChannel defaultChannel;
+  final Set<OtpChannel> available;
+
+  bool isAvailable(OtpChannel channel) => available.contains(channel);
+
+  factory AuthConfig.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return const AuthConfig();
+    final channels = json['channels'];
+    final available = <OtpChannel>{
+      if (channels is List)
+        for (final c in channels.whereType<Map>())
+          if (c['available'] == true && OtpChannel.fromId(c['id']) != null)
+            OtpChannel.fromId(c['id'])!,
+    };
+    return AuthConfig(
+      defaultChannel:
+          OtpChannel.fromId(json['defaultChannel']) ?? OtpChannel.email,
+      available: available,
+    );
+  }
+}
+
 class AppConfig {
   const AppConfig({
     required this.rates,
@@ -52,6 +107,7 @@ class AppConfig {
     this.freeTrialSeconds = 60,
     this.languages = const ['en', 'hi', 'te'],
     this.minAppVersion = '1.0.0',
+    this.auth = const AuthConfig(),
   });
 
   final CallRates rates;
@@ -59,6 +115,7 @@ class AppConfig {
   final int freeTrialSeconds;
   final List<String> languages;
   final String minAppVersion;
+  final AuthConfig auth;
 
   factory AppConfig.fromJson(Map<String, dynamic> json) {
     final packs = json['packs'];
@@ -78,6 +135,11 @@ class AppConfig {
           ? languages.map((e) => e.toString()).toList()
           : const ['en', 'hi', 'te'],
       minAppVersion: json['minAppVersion'] as String? ?? '1.0.0',
+      auth: AuthConfig.fromJson(
+        json['auth'] is Map
+            ? Map<String, dynamic>.from(json['auth'] as Map)
+            : null,
+      ),
     );
   }
 }

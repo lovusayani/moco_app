@@ -15,7 +15,7 @@ const router = express.Router();
 router.use(authenticate, requireAdmin);
 
 router.get('/me', (req, res) => {
-  res.json({ id: req.user.id, phone: req.user.phone, name: req.user.display_name, isAdmin: true });
+  res.json({ id: req.user.id, phone: req.user.phone, email: req.user.email, name: req.user.display_name, isAdmin: true });
 });
 
 router.use(require('./users.admin'));

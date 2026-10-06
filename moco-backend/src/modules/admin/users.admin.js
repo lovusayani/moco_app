@@ -5,7 +5,7 @@ const { z } = require('zod');
 const { query, withTransaction } = require('../../config/db');
 const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
-const { isAdminPhone } = require('../../middleware/auth');
+const { isAdminUser } = require('../../middleware/auth');
 const { notFound, badRequest, conflict } = require('../../utils/errors');
 const { USER_STATUS, listenerEligibleSql, listenerBlockers } = require('../../utils/constants');
 const audit = require('./audit.service');
@@ -57,7 +57,7 @@ router.get(
     else if (listener) where.add('lp.kyc_status = ?', listener);
 
     const { rows } = await query(
-      `SELECT u.id, u.phone, u.display_name, u.role, u.status, u.gender, u.language,
+      `SELECT u.id, u.phone, u.email, u.display_name, u.role, u.status, u.gender, u.language,
               u.created_at, COALESCE(w.coin_balance, 0) AS coin_balance,
               lp.kyc_status, lp.photo_count, lp.is_online,
               ${listenerEligibleSql('lp')} AS listener_eligible,
@@ -96,7 +96,7 @@ router.get(
               eligible: r.listener_eligible,
             }
           : null,
-        isAdmin: isAdminPhone(r.phone),
+        isAdmin: isAdminUser(r),
       })),
     );
   }),
@@ -180,7 +180,7 @@ router.get(
       createdAt: u.created_at,
       updatedAt: u.updated_at,
       lastActive: u.last_login,
-      isAdmin: isAdminPhone(u.phone),
+      isAdmin: isAdminUser(u),
       wallet: { coinBalance: Number(u.coin_balance) },
       listener: u.kyc_status
         ? {
@@ -274,7 +274,7 @@ router.post(
 
     const result = await withTransaction(async (client) => {
       const { rows: found } = await client.query(
-        'SELECT id, phone, status FROM users WHERE id = $1 FOR UPDATE',
+        'SELECT id, phone, email, status FROM users WHERE id = $1 FOR UPDATE',
         [id],
       );
       const target = found[0];
@@ -282,7 +282,7 @@ router.post(
       if (target.status === USER_STATUS.DELETED) {
         throw badRequest('account_deleted', 'Deleted accounts cannot be suspended or restored');
       }
-      if (status === USER_STATUS.SUSPENDED && isAdminPhone(target.phone)) {
+      if (status === USER_STATUS.SUSPENDED && isAdminUser(target)) {
         throw badRequest('admin_account', 'Admin accounts cannot be suspended from the console');
       }
       if (target.status === status) {

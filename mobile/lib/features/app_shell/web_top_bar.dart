@@ -13,11 +13,10 @@ import '../discovery/discovery_controller.dart';
 import '../notifications/notifications_controller.dart';
 
 /// The web top bar's centre capsule. Call and Video are Discovery's existing
-/// Audio/Video modes; Feed is the existing Feed; Live is an empty placeholder.
+/// Audio/Video modes; Live is an empty placeholder.
 enum WebTopItem {
   call('Call', Icons.call_rounded),
   live('Live', Icons.sensors_rounded),
-  feed('Feed', Icons.slow_motion_video_rounded),
   video('Video', Icons.videocam_rounded);
 
   const WebTopItem(this.label, this.icon);
@@ -28,22 +27,20 @@ enum WebTopItem {
   /// The item to highlight at [location], or null where none owns the page.
   static WebTopItem? forLocation(String location, CallMode mode) {
     if (location.startsWith(Routes.live)) return live;
-    if (location.startsWith(Routes.feed)) return feed;
     if (location.startsWith(Routes.discovery)) {
       return mode == CallMode.video ? video : call;
     }
     return null;
   }
 
-  /// Pages that show the top bar on web: the capsule's own destinations.
+  /// The top bar belongs to Discover only. Live is one of its capsule
+  /// items, so the bar stays up there too — otherwise Live would be a dead
+  /// end with no way back to Call/Video from the top.
   static bool showsOn(String location) =>
-      location.startsWith(Routes.discovery) ||
-      location.startsWith(Routes.live) ||
-      (location.startsWith(Routes.feed) &&
-          !location.startsWith(Routes.postCompose));
+      location.startsWith(Routes.discovery) || location.startsWith(Routes.live);
 }
 
-/// Web only: [ menu ]  [ call | live | feed | video ]  [ wallet ] [ bell ].
+/// Web only: [ menu ]  [ call | live | video ]  [ wallet ] [ bell ].
 class WebTopBar extends ConsumerWidget {
   const WebTopBar({super.key});
 
@@ -61,8 +58,6 @@ class WebTopBar extends ConsumerWidget {
         context.go(Routes.discovery);
       case WebTopItem.live:
         context.go(Routes.live);
-      case WebTopItem.feed:
-        context.go(Routes.feed);
     }
   }
 

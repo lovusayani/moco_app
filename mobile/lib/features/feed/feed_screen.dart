@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/errors/api_exception.dart';
-import '../../core/platform/platform_capabilities.dart';
 import '../../core/providers.dart';
 import '../../core/routing/app_router.dart';
 import '../../core/theme/moco_colors.dart';
@@ -111,12 +110,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
         // being changed here.
         Positioned(
           right: MocoSpacing.screenPadding,
-          // On web the top bar holds that corner, so Compose sits below it.
-          top:
-              MediaQuery.paddingOf(context).top +
-              (ref.watch(platformCapabilitiesProvider).isWeb
-                  ? MocoSpacing.md + 44 + MocoSpacing.sm
-                  : MocoSpacing.sm),
+          top: MediaQuery.paddingOf(context).top + MocoSpacing.sm,
           child: const _ComposeButton(),
         ),
       ],

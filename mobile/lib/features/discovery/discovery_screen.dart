@@ -125,7 +125,7 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Web: the shell's top bar sits here (menu, the
-                    // Call/Live/Feed/Video capsule, wallet, bell).
+                    // Call/Live/Video capsule, wallet, bell).
                     if (isWeb)
                       const SizedBox(
                         key: Key('discovery_web_header'),

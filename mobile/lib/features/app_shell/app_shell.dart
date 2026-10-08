@@ -210,7 +210,7 @@ class AppShell extends ConsumerWidget {
         child: Stack(
           children: [
             Positioned.fill(child: child),
-            // Web only: menu, the Call/Live/Feed/Video capsule, wallet, bell.
+            // Web only, on Discover: menu, Call/Live/Video capsule, wallet, bell.
             if (isWeb && WebTopItem.showsOn(location))
               Positioned(
                 left: MocoSpacing.screenPadding,

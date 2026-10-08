@@ -132,6 +132,15 @@ const env = {
     gatewayToken: optional('TELEGRAM_GATEWAY_TOKEN', ''),
   },
 
+  // Moco Live: Stripcash "Models API for aggregators". Both values are
+  // server-side only — never returned by any route or sent to a client.
+  // Either unset: Live is "not configured" (empty listing, sync skipped).
+  stripcash: {
+    apiKey: optional('STRIPCASH_API_KEY', ''),
+    userId: optional('STRIPCASH_USER_ID', ''),
+    baseUrl: optional('STRIPCASH_API_BASE', 'https://go.whitetrafsa.com'),
+  },
+
   fcm: {
     serverKey: optional('FCM_SERVER_KEY', ''),
   },

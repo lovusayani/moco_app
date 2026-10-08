@@ -26,6 +26,7 @@ const TOPICS = {
   PAYOUT: 'moco-payout',
   NOTIFICATION: 'moco-notification',
   PRESENCE: 'moco-presence',
+  LIVE: 'moco-live',
 };
 
 // Messages a consumer never acknowledges stop mattering after this. A billing
@@ -118,6 +119,27 @@ function ensureSweep(delaySeconds = TICK_INTERVAL_SECONDS) {
 
 const sendNotification = (job) => enqueue(TOPICS.NOTIFICATION, job);
 
+/** Moco Live: the provider list refreshes about every 30 seconds. */
+const LIVE_SYNC_INTERVAL_SECONDS = 30;
+
+/**
+ * Makes sure a Moco Live sync runs within `delaySeconds`. Keyed by 30-second
+ * bucket, so any number of callers in the same window share one message —
+ * the same pattern as ensureSweep. The sync re-schedules itself only while
+ * someone is browsing Live (src/workers/live.worker.js).
+ */
+function ensureLiveSync(delaySeconds = LIVE_SYNC_INTERVAL_SECONDS) {
+  const runAt = Date.now() + delaySeconds * 1000;
+  const bucket = Math.floor(runAt / (LIVE_SYNC_INTERVAL_SECONDS * 1000));
+  return enqueue(TOPICS.LIVE, { task: 'sync', bucket }, { delaySeconds, idempotencyKey: `live-sync-${bucket}` });
+}
+
+/** Daily Moco Live cleanup (deleted models, 30-day absence). */
+const liveCleanup = () => {
+  const day = new Date().toISOString().slice(0, 10);
+  return enqueue(TOPICS.LIVE, { task: 'cleanup', day }, { idempotencyKey: `live-cleanup-${day}` });
+};
+
 const processPayout = (payoutId) =>
   enqueue(TOPICS.PAYOUT, { payoutId: Number(payoutId) }, { idempotencyKey: `payout-${payoutId}` });
 
@@ -134,6 +156,9 @@ module.exports = {
   ensureSweep,
   sendNotification,
   processPayout,
+  ensureLiveSync,
+  liveCleanup,
+  LIVE_SYNC_INTERVAL_SECONDS,
   recordedJobs,
   clearRecordedJobs,
 };

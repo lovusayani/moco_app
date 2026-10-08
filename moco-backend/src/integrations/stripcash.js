@@ -1,0 +1,224 @@
+'use strict';
+
+const env = require('../config/env');
+const logger = require('../utils/logger');
+const { redis } = require('../config/redis');
+
+/**
+ * Stripcash "Models API for aggregators" — the provider behind Moco Live.
+ *
+ *   GET {base}/app/models-ext/models?userId=…           online models
+ *   GET {base}/app/models-ext/models/deleted?…          deleted models (≤ 90 days)
+ *   Authorization: Bearer <domain API key>
+ *
+ * Provider rules this module enforces:
+ *   - at most one request every 5 seconds — shared across every instance
+ *     through a Redis slot, and across both endpoints;
+ *   - images are the provider's URLs, never downloaded;
+ *   - secrets (API key, userId) never leave this module: they are not logged,
+ *     and errors carry only an HTTP status or a short code.
+ */
+
+const PROVIDER = 'stripcash';
+const MIN_INTERVAL_MS = 5000;
+const TIMEOUT_MS = 15000;
+const RATE_SLOT_KEY = 'live:stripcash:rate_slot';
+
+const isConfigured = () => Boolean(env.stripcash.apiKey && env.stripcash.userId);
+
+class StripcashError extends Error {
+  constructor(code, status) {
+    super(status ? `${code} (HTTP ${status})` : code);
+    this.code = code;
+    this.status = status;
+  }
+}
+
+/**
+ * Claims the provider's single request slot for the next 5 seconds. Returns
+ * false if a request (from any instance) was made less than 5 s ago.
+ */
+async function claimRequestSlot() {
+  const ok = await redis.set(RATE_SLOT_KEY, '1', 'PX', MIN_INTERVAL_MS, 'NX');
+  return ok === 'OK';
+}
+
+async function request(path, params) {
+  if (!isConfigured()) throw new StripcashError('not_configured');
+  if (!(await claimRequestSlot())) throw new StripcashError('rate_limited');
+
+  const url = new URL(path, env.stripcash.baseUrl);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
+  }
+
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: { Authorization: `Bearer ${env.stripcash.apiKey}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw new StripcashError(err.name === 'TimeoutError' ? 'timeout' : 'network_error');
+  }
+  if (response.status === 401 || response.status === 403) throw new StripcashError('auth_failed', response.status);
+  if (response.status === 429) throw new StripcashError('provider_rate_limited', response.status);
+  if (!response.ok) throw new StripcashError('http_error', response.status);
+  try {
+    return await response.json();
+  } catch {
+    throw new StripcashError('bad_json', response.status);
+  }
+}
+
+// --- normalization --------------------------------------------------------
+
+const str = (v, max = 2048) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+const int = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.trunc(Number(v))) : 0);
+const intOrNull = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Math.trunc(Number(v)));
+const lowerList = (v) =>
+  Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().toLowerCase()))] : [];
+const httpsUrl = (v) => {
+  const s = str(v);
+  if (!s) return null;
+  try {
+    const u = new URL(s);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Regional bans arrive as an object keyed by country ({"us": ["ny", "va"]});
+ * a flat list ("us.tx") is accepted too. Both become ['us.ny', 'us.va'].
+ */
+function normalizeRegions(value) {
+  const out = new Set();
+  if (Array.isArray(value)) {
+    for (const r of value) if (typeof r === 'string' && r.includes('.')) out.add(r.trim().toLowerCase());
+  } else if (value && typeof value === 'object') {
+    for (const [country, regions] of Object.entries(value)) {
+      const cc = country.trim().toLowerCase();
+      for (const r of Array.isArray(regions) ? regions : []) {
+        if (typeof r === 'string' && r.trim()) out.add(`${cc}.${r.trim().toLowerCase().replace(/^.*\./, '')}`);
+      }
+    }
+  }
+  return [...out];
+}
+
+const KNOWN_FIELDS = new Set([
+  'id', 'username', 'avatarUrl', 'popularSnapshotUrl', 'snapshotUrl', 'clickUrl', 'modelsCountry',
+  'gender', 'broadcastGender', 'previewUrlThumbSmall', 'tags', 'favoritedCount', 'viewersCount',
+  'broadcastVR', 'broadcastHD', 'geobans', 'status', 'goalMessage', 'neededForGoal', 'earnedForGoal', 'languages',
+]);
+
+/**
+ * One provider model → the shape stored in live_models. Returns null for a
+ * record without a usable username (it could never be matched or removed).
+ */
+function normalizeModel(raw, rank) {
+  if (!raw || typeof raw !== 'object') return null;
+  const username = str(raw.username, 128);
+  if (!username) return null;
+
+  const geobans = raw.geobans && typeof raw.geobans === 'object' ? raw.geobans : {};
+  const blockedRegions = normalizeRegions(geobans.blockedRegions);
+
+  const metadata = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!KNOWN_FIELDS.has(key) && (value === null || ['string', 'number', 'boolean'].includes(typeof value))) {
+      metadata[key] = value;
+    }
+  }
+
+  return {
+    provider: PROVIDER,
+    externalId: intOrNull(raw.id),
+    username,
+    avatarUrl: httpsUrl(raw.avatarUrl),
+    snapshotUrl: httpsUrl(raw.snapshotUrl),
+    popularSnapshotUrl: httpsUrl(raw.popularSnapshotUrl),
+    thumbUrl: httpsUrl(raw.previewUrlThumbSmall),
+    clickUrl: httpsUrl(raw.clickUrl),
+    country: str(raw.modelsCountry, 8)?.toLowerCase() ?? null,
+    languages: lowerList(raw.languages),
+    gender: str(raw.gender, 32),
+    broadcastGender: str(raw.broadcastGender, 32),
+    tags: lowerList(raw.tags),
+    viewersCount: int(raw.viewersCount),
+    favoritedCount: int(raw.favoritedCount),
+    isHd: raw.broadcastHD === true,
+    isVr: raw.broadcastVR === true,
+    status: str(raw.status, 32) ?? 'unknown',
+    geobans: {
+      blockedCountries: lowerList(geobans.blockedCountries),
+      blockedRegions: geobans.blockedRegions ?? {},
+      blockedLanguages: lowerList(geobans.blockedLanguages),
+    },
+    blockedCountries: lowerList(geobans.blockedCountries),
+    blockedRegions,
+    blockedRegionCountries: [...new Set(blockedRegions.map((r) => r.split('.')[0]))],
+    blockedLanguages: lowerList(geobans.blockedLanguages),
+    goalMessage: str(raw.goalMessage, 500),
+    goalNeeded: intOrNull(raw.neededForGoal),
+    goalEarned: intOrNull(raw.earnedForGoal),
+    providerRank: rank,
+    metadata,
+  };
+}
+
+/** `{ count, total, models }` → normalized models in provider (rating) order. */
+function parseModelsResponse(body) {
+  if (!body || typeof body !== 'object' || !Array.isArray(body.models)) {
+    throw new StripcashError('bad_response');
+  }
+  const models = [];
+  const seen = new Set();
+  body.models.forEach((raw, index) => {
+    const model = normalizeModel(raw, index + 1);
+    if (model && !seen.has(model.username)) {
+      seen.add(model.username);
+      models.push(model);
+    }
+  });
+  return { count: int(body.count), total: int(body.total), models };
+}
+
+/** Online models, normalized. Throws StripcashError. */
+async function fetchOnlineModels() {
+  const body = await request('/app/models-ext/models', { userId: env.stripcash.userId });
+  return parseModelsResponse(body);
+}
+
+/** Models deleted in [since, until] (RFC 3339). Throws StripcashError. */
+async function fetchDeletedModels({ since, until } = {}) {
+  const body = await request('/app/models-ext/models/deleted', {
+    deleted_since: since ? new Date(since).toISOString() : undefined,
+    deleted_until: until ? new Date(until).toISOString() : undefined,
+  });
+  if (!body || typeof body !== 'object' || !Array.isArray(body.models)) throw new StripcashError('bad_response');
+  return body.models
+    .map((m) => ({ username: str(m?.username, 128), deletedAt: m?.deletedAt ? new Date(m.deletedAt) : null, reason: str(m?.reason, 64) }))
+    .filter((m) => m.username);
+}
+
+/** Concise, secret-free log line for a provider failure. */
+function logFailure(err, what) {
+  const level = err.code === 'rate_limited' || err.code === 'not_configured' ? 'debug' : 'warn';
+  logger[level]({ provider: PROVIDER, code: err.code || 'error', status: err.status }, `stripcash ${what} failed`);
+}
+
+module.exports = {
+  PROVIDER,
+  MIN_INTERVAL_MS,
+  StripcashError,
+  isConfigured,
+  fetchOnlineModels,
+  fetchDeletedModels,
+  normalizeModel,
+  parseModelsResponse,
+  normalizeRegions,
+  logFailure,
+};

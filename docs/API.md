@@ -457,6 +457,37 @@ Same ownership rule as read. Permanent — there is no undo/archive state.
 
 ---
 
+## Live (external live models)
+
+### `GET /api/live/models`
+Signed-in users. Online, public-status models from the live provider
+(Stripcash), with the provider's geobans always applied for the viewer:
+country and region from the edge's geolocation headers, languages from
+`Accept-Language`. An unknown location hides every model with a country or
+regional ban. No parameter disables this.
+
+| Query | Default | Notes |
+|---|---|---|
+| `limit` | 24 | 1–60 |
+| `offset` | 0 | 0–1000 |
+| `sort` | `default` | `default` (provider rating), `viewers`, `favorites`, `hd` |
+| `language` | | model speaks it, e.g. `es` |
+| `country` | | model's country, e.g. `co` |
+| `tag` | | provider tag, e.g. `girls/latin` |
+
+```json
+{ "provider": "stripcash", "available": true, "updatedAt": "…", "limit": 24, "offset": 0, "sort": "default",
+  "models": [{ "id": 85, "provider": "stripcash", "username": "Luna_Rose",
+    "avatarUrl": "https://…", "snapshotUrl": "https://…", "thumbnailUrl": "https://…",
+    "country": "co", "languages": ["es", "en"], "gender": "female", "broadcastGender": "female",
+    "tags": ["girls", "girls/latin"], "viewers": 80, "favorites": 1200, "isHd": true, "isVr": false,
+    "goal": { "message": "Dance show", "needed": 500, "earned": 320 } }] }
+```
+
+`available: false` (and no models) means the provider is not configured.
+Images are the provider's URLs, used directly. The provider's stream link,
+geobans and API credentials are never returned.
+
 ## Admin
 
 Gated by an allow-list of phone numbers in `ADMIN_PHONES`, not a database role,

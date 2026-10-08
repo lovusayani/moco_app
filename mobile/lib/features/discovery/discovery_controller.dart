@@ -248,6 +248,11 @@ final discoveryControllerProvider =
 /// open. Live closes it; Search opens it.
 final discoveryWebSearchOpenProvider = StateProvider<bool>((ref) => false);
 
+/// Web only: whether Discover's top bar is showing. Discover hides it while
+/// the user scrolls down through listeners and brings it back on scroll up,
+/// at the top, or once scrolling has paused for a moment.
+final discoveryWebTopBarVisibleProvider = StateProvider<bool>((ref) => true);
+
 /// Web only: bumped on every Search tap, so tapping Search again re-focuses
 /// the field even when it is already open.
 final discoveryWebSearchFocusProvider = StateProvider<int>((ref) => 0);

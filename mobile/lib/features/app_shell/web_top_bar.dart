@@ -78,11 +78,13 @@ class WebTopBar extends ConsumerWidget {
           Expanded(
             child: Align(
               alignment: Alignment.centerLeft,
-              child: MocoIconButton(
-                key: const Key('topbar_menu'),
-                icon: Icons.menu_rounded,
-                size: 40,
-                onPressed: () => Scaffold.of(context).openDrawer(),
+              child: _Frosted(
+                child: MocoIconButton(
+                  key: const Key('topbar_menu'),
+                  icon: Icons.menu_rounded,
+                  size: 40,
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
               ),
             ),
           ),
@@ -100,7 +102,7 @@ class WebTopBar extends ConsumerWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (balance != null) ...[
-                      _WalletChip(balance: balance),
+                      _Frosted(child: _WalletChip(balance: balance)),
                       const SizedBox(width: MocoSpacing.xs),
                     ],
                     const _Bell(),
@@ -110,6 +112,25 @@ class WebTopBar extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The capsule's blur behind a pill-shaped control, so the menu, wallet and
+/// bell stay legible when the bar returns over scrolled listener cards.
+class _Frosted extends StatelessWidget {
+  const _Frosted({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(MocoRadius.pill),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: child,
       ),
     );
   }
@@ -288,11 +309,13 @@ class _Bell extends ConsumerWidget {
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        MocoIconButton(
-          key: const Key('topbar_notifications'),
-          icon: Icons.notifications_none_rounded,
-          size: 40,
-          onPressed: () => context.push(Routes.notifications),
+        _Frosted(
+          child: MocoIconButton(
+            key: const Key('topbar_notifications'),
+            icon: Icons.notifications_none_rounded,
+            size: 40,
+            onPressed: () => context.push(Routes.notifications),
+          ),
         ),
         if (unread > 0)
           Positioned(

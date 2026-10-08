@@ -128,10 +128,12 @@ class AppShell extends ConsumerWidget {
       searchOpen: ref.watch(discoveryWebSearchOpenProvider),
     );
     return _FloatingNavBar(
+      compact: true,
       items: [
         for (final tab in WebShellTab.values)
           _NavItem(
             key: Key('nav_${tab.name}'),
+            showLabel: false,
             label: tab.label,
             icon: tab.icon,
             activeIcon: tab.activeIcon,
@@ -216,14 +218,34 @@ class AppShell extends ConsumerWidget {
                 left: MocoSpacing.screenPadding,
                 right: MocoSpacing.screenPadding,
                 top: MediaQuery.paddingOf(context).top + MocoSpacing.md,
-                child: const WebTopBar(),
+                child: _AutoHide(
+                  // Only Discover hides it while scrolling.
+                  visible:
+                      !location.startsWith(Routes.discovery) ||
+                      ref.watch(discoveryWebTopBarVisibleProvider),
+                  child: const WebTopBar(),
+                ),
               ),
-            Positioned(
-              left: MocoSpacing.lg,
-              right: MocoSpacing.lg,
-              bottom: MocoSpacing.lg,
-              child: isWeb ? _webNav(context, ref) : _nativeNav(context),
-            ),
+            if (isWeb)
+              // Web: a compact, icon-only pill, centred and width-capped.
+              Positioned(
+                left: MocoSpacing.lg,
+                right: MocoSpacing.lg,
+                bottom: MocoSpacing.md,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 340),
+                    child: _webNav(context, ref),
+                  ),
+                ),
+              )
+            else
+              Positioned(
+                left: MocoSpacing.lg,
+                right: MocoSpacing.lg,
+                bottom: MocoSpacing.lg,
+                child: _nativeNav(context),
+              ),
           ],
         ),
       ),
@@ -241,9 +263,12 @@ class AppShell extends ConsumerWidget {
 /// unilaterally — matching the chrome first, as directed, and leaving the
 /// label question open.
 class _FloatingNavBar extends StatelessWidget {
-  const _FloatingNavBar({required this.items});
+  const _FloatingNavBar({required this.items, this.compact = false});
 
   final List<_NavItem> items;
+
+  /// Web: icon-only items in a slimmer bar.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -254,8 +279,10 @@ class _FloatingNavBar extends StatelessWidget {
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
           child: Container(
-            height: 64,
-            padding: const EdgeInsets.symmetric(horizontal: MocoSpacing.sm),
+            height: compact ? 52 : 64,
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? MocoSpacing.xs : MocoSpacing.sm,
+            ),
             decoration: BoxDecoration(
               color: MocoColors.surfaceGlass,
               borderRadius: BorderRadius.circular(MocoRadius.pill),
@@ -287,9 +314,11 @@ class _NavItem extends StatelessWidget {
     required this.activeIcon,
     required this.selected,
     required this.onTap,
+    this.showLabel = true,
   });
 
   final String label;
+  final bool showLabel;
   final IconData icon;
   final IconData activeIcon;
   final bool selected;
@@ -298,6 +327,47 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = selected ? MocoColors.accentPrimary : MocoColors.textMuted;
+
+    if (!showLabel) {
+      // Icon only; the label stays as the tooltip and screen-reader name.
+      return Expanded(
+        child: Semantics(
+          button: true,
+          selected: selected,
+          label: label,
+          excludeSemantics: true,
+          child: Tooltip(
+            message: label,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(MocoRadius.pill),
+                child: Center(
+                  child: AnimatedContainer(
+                    duration: MocoDuration.sheet,
+                    curve: Curves.easeOutCubic,
+                    width: 44,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? MocoColors.accentPrimary.withValues(alpha: 0.16)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(MocoRadius.pill),
+                    ),
+                    child: Icon(
+                      selected ? activeIcon : icon,
+                      color: color,
+                      size: 22,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return Expanded(
       child: Material(
@@ -324,6 +394,35 @@ class _NavItem extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Slides [child] up and fades it out when not [visible] — slowly, so the
+/// top bar drifts away and back rather than snapping.
+class _AutoHide extends StatelessWidget {
+  const _AutoHide({required this.visible, required this.child});
+
+  final bool visible;
+  final Widget child;
+
+  static const _duration = Duration(milliseconds: 650);
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: !visible,
+      child: AnimatedSlide(
+        duration: _duration,
+        curve: Curves.easeInOutCubic,
+        offset: visible ? Offset.zero : const Offset(0, -1.6),
+        child: AnimatedOpacity(
+          duration: _duration,
+          curve: Curves.easeInOut,
+          opacity: visible ? 1 : 0,
+          child: child,
         ),
       ),
     );

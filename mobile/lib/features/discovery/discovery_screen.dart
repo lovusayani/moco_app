@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -28,6 +31,7 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
   bool _searchOpen = false;
+  Timer? _topBarIdle;
 
   @override
   void initState() {
@@ -37,6 +41,7 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
     // before this screen existed, e.g. when arriving from another tab.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !ref.read(platformCapabilitiesProvider).isWeb) return;
+      _setTopBarVisible(true);
       if (ref.read(discoveryWebSearchOpenProvider)) {
         _searchController.text = ref
             .read(discoveryControllerProvider)
@@ -50,6 +55,7 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
 
   @override
   void dispose() {
+    _topBarIdle?.cancel();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _searchController.dispose();
@@ -73,9 +79,36 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
     ref.read(discoveryControllerProvider.notifier).setSearchQuery('');
   }
 
+  void _setTopBarVisible(bool visible) {
+    final notifier = ref.read(discoveryWebTopBarVisibleProvider.notifier);
+    if (notifier.state != visible) notifier.state = visible;
+  }
+
+  /// Web: scrolling down through listeners slides the top bar away; it comes
+  /// back on scroll up, near the top, or after scrolling pauses.
+  void _updateTopBar(ScrollPosition position) {
+    _topBarIdle?.cancel();
+    if (position.pixels <= 24) {
+      _setTopBarVisible(true);
+      return;
+    }
+    switch (position.userScrollDirection) {
+      case ScrollDirection.reverse:
+        _setTopBarVisible(false);
+      case ScrollDirection.forward:
+        _setTopBarVisible(true);
+      case ScrollDirection.idle:
+        break;
+    }
+    _topBarIdle = Timer(const Duration(milliseconds: 1600), () {
+      if (mounted) _setTopBarVisible(true);
+    });
+  }
+
   void _onScroll() {
     if (!_scrollController.hasClients) return;
     final position = _scrollController.position;
+    if (ref.read(platformCapabilitiesProvider).isWeb) _updateTopBar(position);
     // Prefetch before the user hits the bottom so paging feels continuous.
     if (position.pixels >= position.maxScrollExtent - 400) {
       ref.read(discoveryControllerProvider.notifier).loadMore();

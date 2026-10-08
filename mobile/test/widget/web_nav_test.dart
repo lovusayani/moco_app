@@ -106,12 +106,15 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// Web nav items are icon-only; the label lives on as the tooltip.
   String navLabel(WidgetTester tester, String key) => tester
-      .widgetList<Text>(
-        find.descendant(of: find.byKey(Key(key)), matching: find.byType(Text)),
+      .widget<Tooltip>(
+        find.descendant(
+          of: find.byKey(Key(key)),
+          matching: find.byType(Tooltip),
+        ),
       )
-      .single
-      .data!;
+      .message!;
 
   EditableText searchField(WidgetTester tester) => tester.widget<EditableText>(
     find.descendant(
@@ -297,6 +300,52 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('web_top_bar')), findsNothing);
       expect(WebShellTab.forLocation(Routes.wallet, searchOpen: false), isNull);
+    });
+
+    testWidgets('the top bar slides away on scroll down and comes back', (
+      tester,
+    ) async {
+      when(
+        () => listenersApi.discover(
+          filters: any(named: 'filters'),
+          offset: any(named: 'offset'),
+        ),
+      ).thenAnswer(
+        (_) async => DiscoveryPage(
+          listeners: [
+            for (var i = 1; i <= 30; i++)
+              ListenerSummary(id: i, audioRate: 6, videoRate: 12),
+          ],
+        ),
+      );
+      await pumpApp(tester, _web);
+      await openDiscover(tester);
+
+      Offset barOffset() => tester
+          .widget<AnimatedSlide>(
+            find.ancestor(
+              of: find.byKey(const Key('web_top_bar')),
+              matching: find.byType(AnimatedSlide),
+            ),
+          )
+          .offset;
+      expect(barOffset(), Offset.zero);
+
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -400));
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(barOffset(), isNot(Offset.zero), reason: 'hidden while scrolling');
+
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(barOffset(), Offset.zero, reason: 'back after a pause');
+
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(barOffset(), isNot(Offset.zero));
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, 120));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(barOffset(), Offset.zero, reason: 'back on scroll up');
+      await tester.pumpAndSettle(const Duration(seconds: 2));
     });
 
     testWidgets('the bell opens Notifications', (tester) async {

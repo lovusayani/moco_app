@@ -21,10 +21,23 @@ class MocoAppFrame extends StatelessWidget {
   final Widget child;
   final double maxWidth;
 
+  /// Screens that are designed edge-to-edge (the web login, whose background
+  /// must fill the window) raise this while they are on screen; the frame
+  /// then steps aside. A count, not a flag, so overlapping route transitions
+  /// can't leave it stuck.
+  static final ValueNotifier<int> fullBleedRequests = ValueNotifier(0);
+
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: fullBleedRequests,
+      builder: (context, requests, _) => _frame(context, requests > 0),
+    );
+  }
+
+  Widget _frame(BuildContext context, bool fullBleed) {
     final media = MediaQuery.of(context);
-    if (media.size.width <= maxWidth) return child;
+    if (fullBleed || media.size.width <= maxWidth) return child;
 
     return ColoredBox(
       key: const Key('moco_app_frame'),

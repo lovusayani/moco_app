@@ -22,6 +22,7 @@ router.use(require('./users.admin'));
 router.use(require('./listeners.admin'));
 router.use(require('./reports.admin'));
 router.use(require('./operations.admin'));
+router.use(require('../settings/login_background').router);
 
 /** Platform metrics for the admin dashboard. */
 router.get(

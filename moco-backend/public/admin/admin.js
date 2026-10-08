@@ -1529,6 +1529,166 @@ view('system', 'System / Reconcile', 'System', (el) => {
  * Boot
  * ===================================================================== */
 
+/* ---------- Settings ---------- */
+
+view('settings', 'Settings', 'System', (el) => {
+  el.innerHTML = head('Settings', 'App settings managed from the console. Every change is recorded in the audit log.') +
+    '<div id="lb"></div>';
+  renderLoginBackground(el.querySelector('#lb'));
+});
+
+/**
+ * Login screen background: Default / Image / Video. Files go straight to
+ * Storage with a backend-signed upload URL (no Storage credentials here);
+ * the server re-checks type, size and ownership before saving.
+ */
+async function renderLoginBackground(host) {
+  host.innerHTML = '<div class="panel"><h3>Login screen background</h3><div class="sub">Loading…</div></div>';
+  let s;
+  try {
+    s = await api('/admin/settings/login-background');
+  } catch (err) {
+    host.innerHTML = `<div class="panel"><h3>Login screen background</h3><div class="sub">! ${esc(err.message)}</div></div>`;
+    return;
+  }
+  const L = s.limits;
+  // Draft = what will be saved; preview URLs are local object URLs for new uploads.
+  const draft = { type: s.type, imagePath: s.imagePath, videoPath: s.videoPath, imageUrl: s.imageUrl, videoUrl: s.videoUrl };
+  const mb = (bytes) => `${Math.round(bytes / 1024 / 1024)} MB`;
+
+  host.innerHTML = `
+    <div class="panel lb-panel">
+      <h3>Login screen background</h3>
+      <p class="sub">Shown full-screen behind the web app's login. A video plays muted and looped; the image is also its fallback.</p>
+      <div class="lb-grid">
+        <div class="lb-controls">
+          <div class="lb-types" role="radiogroup" aria-label="Background type">
+            ${['default', 'image', 'video'].map((t) => `
+              <label class="lb-type"><input type="radio" name="lbtype" value="${t}" ${draft.type === t ? 'checked' : ''}>
+                ${t === 'default' ? 'Default' : t === 'image' ? 'Image' : 'Video'}</label>`).join('')}
+          </div>
+          <div class="field lb-row" data-row="image">
+            <label>Image <span class="sub">(JPEG, PNG or WebP, up to ${mb(L.image.maxBytes)})</span></label>
+            <input type="file" accept="${L.image.mimeTypes.join(',')}" data-file="image">
+            <div class="help" data-status="image">${draft.imagePath ? 'Current image set.' : 'No image yet.'}</div>
+          </div>
+          <div class="field lb-row" data-row="video">
+            <label>Video <span class="sub">(MP4, up to ${mb(L.video.maxBytes)}, ${L.video.maxSeconds}s max)</span></label>
+            <input type="file" accept="${L.video.mimeTypes.join(',')}" data-file="video">
+            <div class="help" data-status="video">${draft.videoPath ? 'Current video set.' : 'No video yet.'}</div>
+          </div>
+          <div class="error-msg" data-err hidden></div>
+          <div class="lb-actions">
+            <button class="btn-primary inline" data-save>Save</button>
+            ${s.type !== 'default' ? '<button class="btn-danger btn-sm" data-reset>Remove / revert to default</button>' : ''}
+          </div>
+          <div class="help">${s.updatedAt ? `Last changed ${esc(fmtDate(s.updatedAt))}.` : 'Using the app default.'}</div>
+        </div>
+        <div class="lb-phone" aria-label="Preview">
+          <div class="lb-media" data-preview></div>
+          <div class="lb-overlay"></div>
+          <div class="lb-mock"><div class="lb-mock-toggle"><span>Email</span><span>SMS</span></div>
+            <div class="lb-mock-input">Type Email Id</div><div class="lb-mock-btn">→</div></div>
+        </div>
+      </div>
+    </div>`;
+
+  const $ = (sel) => host.querySelector(sel);
+  const errEl = $('[data-err]');
+  const showErr = (m) => { errEl.textContent = m; errEl.hidden = !m; };
+
+  function renderPreview() {
+    const p = $('[data-preview]');
+    if (draft.type === 'video' && draft.videoUrl) {
+      p.innerHTML = `<video src="${esc(draft.videoUrl)}" muted autoplay loop playsinline ${draft.imageUrl ? `poster="${esc(draft.imageUrl)}"` : ''}></video>`;
+    } else if (draft.type !== 'default' && draft.imageUrl) {
+      p.innerHTML = `<img src="${esc(draft.imageUrl)}" alt="">`;
+    } else {
+      p.innerHTML = '<div class="lb-default">App default</div>';
+    }
+    host.querySelector('[data-row="image"]').style.opacity = draft.type === 'default' ? 0.45 : 1;
+    host.querySelector('[data-row="video"]').hidden = draft.type !== 'video';
+  }
+  renderPreview();
+
+  host.querySelectorAll('input[name=lbtype]').forEach((r) => r.addEventListener('change', () => {
+    draft.type = r.value;
+    showErr('');
+    renderPreview();
+  }));
+
+  const videoSeconds = (file) => new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.onloadedmetadata = () => { URL.revokeObjectURL(v.src); resolve(v.duration); };
+    v.onerror = () => resolve(NaN);
+    v.src = URL.createObjectURL(file);
+  });
+
+  host.querySelectorAll('[data-file]').forEach((input) => input.addEventListener('change', async () => {
+    const kind = input.dataset.file;
+    const file = input.files[0];
+    const status = $(`[data-status="${kind}"]`);
+    showErr('');
+    if (!file) return;
+    if (!L[kind].mimeTypes.includes(file.type)) { showErr(`Use ${L[kind].mimeTypes.join(', ')} for the ${kind}.`); input.value = ''; return; }
+    if (file.size > L[kind].maxBytes) { showErr(`That ${kind} is ${mb(file.size)}; the limit is ${mb(L[kind].maxBytes)}.`); input.value = ''; return; }
+    if (kind === 'video') {
+      const secs = await videoSeconds(file);
+      if (!Number.isFinite(secs)) { showErr('That video cannot be played in a browser. Use an H.264 MP4.'); input.value = ''; return; }
+      if (secs > L.video.maxSeconds) { showErr(`That video is ${Math.round(secs)}s; keep it to ${L.video.maxSeconds}s or less.`); input.value = ''; return; }
+    }
+    status.textContent = 'Uploading…';
+    try {
+      const up = await api('/admin/settings/login-background/upload-url', { method: 'POST', body: { kind, mimeType: file.type } });
+      const put = await fetch(up.uploadUrl, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${up.token}`, 'Content-Type': file.type, 'x-upsert': 'false' },
+        body: file,
+      });
+      if (!put.ok) throw new Error(`Upload failed (${put.status}).`);
+      draft[`${kind}Path`] = up.path;
+      draft[`${kind}Url`] = URL.createObjectURL(file);
+      if (draft.type === 'default') {
+        draft.type = kind;
+        host.querySelector(`input[name=lbtype][value=${kind}]`).checked = true;
+      }
+      status.textContent = `Uploaded ${file.name} — press Save to use it.`;
+      renderPreview();
+    } catch (err) {
+      status.textContent = '';
+      showErr(err.message);
+    }
+  }));
+
+  $('[data-save]').addEventListener('click', async (e) => {
+    showErr('');
+    e.target.disabled = true;
+    try {
+      await api('/admin/settings/login-background', {
+        method: 'PUT',
+        body: { type: draft.type, imagePath: draft.imagePath, videoPath: draft.videoPath },
+      });
+      toast(draft.type === 'default' ? 'Login background set to the default' : 'Login background saved');
+      renderLoginBackground(host);
+    } catch (err) {
+      showErr(err.message);
+      e.target.disabled = false;
+    }
+  });
+
+  $('[data-reset]')?.addEventListener('click', async () => {
+    const done = await dialog({
+      title: 'Revert the login background to the default?',
+      message: 'The current background media is deleted from storage. This is recorded in the audit log.',
+      confirmLabel: 'Revert to default',
+      danger: true,
+      onSubmit: () => api('/admin/settings/login-background', { method: 'DELETE' }),
+    });
+    if (done) { toast('Login background reverted to the default'); renderLoginBackground(host); }
+  });
+}
+
 (async () => {
   if (!token) return;
   try {

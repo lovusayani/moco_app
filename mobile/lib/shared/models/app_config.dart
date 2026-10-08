@@ -100,6 +100,31 @@ class AuthConfig {
   }
 }
 
+/// The admin-managed login screen background (`loginBackground` in
+/// /api/config). Absent means the app's default background. URLs are
+/// short-lived signed links; [imageUrl] doubles as the video's fallback.
+class LoginBackground {
+  const LoginBackground({required this.isVideo, this.imageUrl, this.videoUrl});
+
+  final bool isVideo;
+  final String? imageUrl;
+  final String? videoUrl;
+
+  static LoginBackground? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final image = json['imageUrl'] as String?;
+    final video = json['videoUrl'] as String?;
+    if ((image == null || image.isEmpty) && (video == null || video.isEmpty)) {
+      return null;
+    }
+    return LoginBackground(
+      isVideo: json['type'] == 'video' && video != null && video.isNotEmpty,
+      imageUrl: image,
+      videoUrl: video,
+    );
+  }
+}
+
 class AppConfig {
   const AppConfig({
     required this.rates,
@@ -108,6 +133,7 @@ class AppConfig {
     this.languages = const ['en', 'hi', 'te'],
     this.minAppVersion = '1.0.0',
     this.auth = const AuthConfig(),
+    this.loginBackground,
   });
 
   final CallRates rates;
@@ -116,6 +142,7 @@ class AppConfig {
   final List<String> languages;
   final String minAppVersion;
   final AuthConfig auth;
+  final LoginBackground? loginBackground;
 
   factory AppConfig.fromJson(Map<String, dynamic> json) {
     final packs = json['packs'];
@@ -140,6 +167,7 @@ class AppConfig {
             ? Map<String, dynamic>.from(json['auth'] as Map)
             : null,
       ),
+      loginBackground: LoginBackground.fromJson(json['loginBackground']),
     );
   }
 }

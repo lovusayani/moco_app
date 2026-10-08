@@ -10,6 +10,7 @@ const { cors } = require('./middleware/cors');
 const { RATES, COIN_PACKS, FREE_TRIAL_SECONDS } = require('./utils/constants');
 const { DEFAULT_CHANNEL, availability: otpAvailability } = require('./modules/auth/otp.channels');
 
+const { publicConfig: loginBackgroundConfig } = require('./modules/settings/login_background');
 const authRoutes = require('./modules/auth/auth.routes');
 const usersRoutes = require('./modules/users/users.routes');
 const walletRoutes = require('./modules/wallet/wallet.routes');
@@ -71,11 +72,15 @@ function createApp() {
       }
     })();
     const adminMediaSrc = ["'self'", 'data:', ...(storageOrigin ? [storageOrigin] : [])];
+    // blob: lets the settings page preview a picked file before it is saved.
+    const adminPreviewSrc = [...adminMediaSrc, 'blob:'];
     app.use(
       '/admin',
       helmet.contentSecurityPolicy({
         useDefaults: true,
-        directives: { 'img-src': adminMediaSrc, 'media-src': adminMediaSrc },
+        // connect-src: the console uploads login-background media straight to
+        // Storage with a backend-signed URL.
+        directives: { 'img-src': adminPreviewSrc, 'media-src': adminPreviewSrc, 'connect-src': adminMediaSrc },
       }),
       express.static(path.join(__dirname, '..', 'public', 'admin')),
     );
@@ -84,7 +89,9 @@ function createApp() {
   app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
 
   /** Client bootstrap: rates, packs and enabled languages in one call. */
-  app.get('/api/config', (req, res) => {
+  app.get('/api/config', async (req, res) => {
+    // Admin-managed login background; null = the app's default. Never fails.
+    const loginBackground = await loginBackgroundConfig();
     res.json({
       rates: {
         audio: RATES.audio.coinsPerMinute,
@@ -100,6 +107,7 @@ function createApp() {
       // Sign-in methods: email by default; the others are offered only when
       // their provider is configured on this deployment.
       auth: { defaultChannel: DEFAULT_CHANNEL, channels: otpAvailability() },
+      loginBackground,
     });
   });
 

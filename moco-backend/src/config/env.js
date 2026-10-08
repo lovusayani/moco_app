@@ -132,15 +132,24 @@ const env = {
     gatewayToken: optional('TELEGRAM_GATEWAY_TOKEN', ''),
   },
 
-  // Moco Live: Stripcash "Models API for aggregators". Either unset: Live is
-  // "not configured" (empty listing, sync skipped).
-  //   STRIPCASH_API_KEY — SECRET. Server-side only: never returned, never logged.
-  //   STRIPCASH_USER_ID — affiliate tracking id, not a secret. Exposed only to
-  //                       signed-in clients via GET /api/live/config, because
-  //                       the official Stripchat player needs it.
+  // Moco Live: Stripcash "Models API for aggregators". Without the API key
+  // and API user id Live is "not configured" (empty listing, sync skipped).
+  //   STRIPCASH_API_KEY        — SECRET. Server-side only: never returned, never logged.
+  //   STRIPCASH_API_USER_ID    — the short id the aggregator API takes as
+  //                              ?userId=. Server-side only (API requests).
+  //   STRIPCASH_PLAYER_USER_ID — the affiliate userId from the default link
+  //                              (64 hex in the provider's clickUrl), which the
+  //                              official player expects. Not secret; returned
+  //                              to signed-in clients only, for the player.
+  //   STRIPCASH_USER_ID        — DEPRECATED: the old single id. Still read as
+  //                              the API user id when STRIPCASH_API_USER_ID is
+  //                              unset; never used as the player id (they are
+  //                              different values).
   stripcash: {
     apiKey: optional('STRIPCASH_API_KEY', ''),
-    userId: optional('STRIPCASH_USER_ID', ''),
+    apiUserId: optional('STRIPCASH_API_USER_ID', '') || optional('STRIPCASH_USER_ID', ''),
+    usingDeprecatedUserId: !optional('STRIPCASH_API_USER_ID', '') && Boolean(optional('STRIPCASH_USER_ID', '')),
+    playerUserId: optional('STRIPCASH_PLAYER_USER_ID', ''),
     baseUrl: optional('STRIPCASH_API_BASE', 'https://go.whitetrafsa.com'),
     // The official StripchatPlayer script (from the affiliate dashboard's
     // player docs). Not secret. Unset = the app shows the player as unavailable.

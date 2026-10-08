@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const { query } = require('../../config/db');
 const { redis } = require('../../config/redis');
 const stripcash = require('../../integrations/stripcash');
@@ -17,8 +18,22 @@ const logger = require('../../utils/logger');
 
 const PROVIDER = stripcash.PROVIDER;
 
-/** A model counts as online if the last sync that saw it is this recent. */
-const ONLINE_WINDOW_SECONDS = 60;
+/**
+ * The online set is the latest successful sync's snapshot; it is trusted for
+ * this long. If syncs stop (provider down), the listing empties rather than
+ * showing a stale list.
+ */
+const ONLINE_WINDOW_SECONDS = 90;
+/** last_seen_at only feeds the 30-day absence rule, so an online model's row
+ * is touched for it at most this often instead of on every sync. */
+const SEEN_REFRESH_MS = 6 * 3600 * 1000;
+
+/**
+ * Statuses the provider reports for online models (observed in the real
+ * API). "All online" lists only these — a status the provider adds later
+ * stays hidden until it is reviewed and added here.
+ */
+const KNOWN_STATUSES = Object.freeze(['public', 'p2p', 'private', 'groupShow', 'virtualPrivate', 'p2pVoice']);
 /** A listing request triggers a sync itself when the data is older than this. */
 const STALE_AFTER_SECONDS = 45;
 /** Provider terms: remove everything about a model absent this long. */
@@ -56,7 +71,7 @@ async function upsertModels(models, seenAt) {
          provider, external_id, username, avatar_url, snapshot_url, popular_snapshot_url, thumb_url, click_url,
          country, languages, gender, broadcast_gender, tags, viewers_count, favorited_count, is_hd, is_vr, status,
          geobans, blocked_countries, blocked_regions, blocked_region_countries, blocked_languages,
-         goal_message, goal_needed, goal_earned, provider_rank, metadata, last_seen_at, last_synced_at)
+         goal_message, goal_needed, goal_earned, provider_rank, metadata, content_hash, last_seen_at, last_synced_at)
        SELECT m.provider, m."externalId", m.username, m."avatarUrl", m."snapshotUrl", m."popularSnapshotUrl",
               m."thumbUrl", m."clickUrl", m.country,
               ARRAY(SELECT jsonb_array_elements_text(m.languages)), m.gender, m."broadcastGender",
@@ -66,14 +81,14 @@ async function upsertModels(models, seenAt) {
               ARRAY(SELECT jsonb_array_elements_text(m."blockedRegions")),
               ARRAY(SELECT jsonb_array_elements_text(m."blockedRegionCountries")),
               ARRAY(SELECT jsonb_array_elements_text(m."blockedLanguages")),
-              m."goalMessage", m."goalNeeded", m."goalEarned", m."providerRank", m.metadata, $2, $2
+              m."goalMessage", m."goalNeeded", m."goalEarned", m."providerRank", m.metadata, m."contentHash", $2, $2
          FROM jsonb_to_recordset($1::jsonb) AS m(
               provider text, "externalId" bigint, username text, "avatarUrl" text, "snapshotUrl" text,
               "popularSnapshotUrl" text, "thumbUrl" text, "clickUrl" text, country text, languages jsonb,
               gender text, "broadcastGender" text, tags jsonb, "viewersCount" int, "favoritedCount" int,
               "isHd" boolean, "isVr" boolean, status text, geobans jsonb, "blockedCountries" jsonb,
               "blockedRegions" jsonb, "blockedRegionCountries" jsonb, "blockedLanguages" jsonb,
-              "goalMessage" text, "goalNeeded" int, "goalEarned" int, "providerRank" int, metadata jsonb)
+              "goalMessage" text, "goalNeeded" int, "goalEarned" int, "providerRank" int, metadata jsonb, "contentHash" text)
        ON CONFLICT (provider, username) DO UPDATE SET
          external_id = EXCLUDED.external_id, avatar_url = EXCLUDED.avatar_url,
          snapshot_url = EXCLUDED.snapshot_url, popular_snapshot_url = EXCLUDED.popular_snapshot_url,
@@ -85,7 +100,7 @@ async function upsertModels(models, seenAt) {
          blocked_region_countries = EXCLUDED.blocked_region_countries,
          blocked_languages = EXCLUDED.blocked_languages, goal_message = EXCLUDED.goal_message,
          goal_needed = EXCLUDED.goal_needed, goal_earned = EXCLUDED.goal_earned,
-         provider_rank = EXCLUDED.provider_rank, metadata = EXCLUDED.metadata,
+         provider_rank = EXCLUDED.provider_rank, metadata = EXCLUDED.metadata, content_hash = EXCLUDED.content_hash,
          last_seen_at = EXCLUDED.last_seen_at, last_synced_at = EXCLUDED.last_synced_at, updated_at = now()`,
       [JSON.stringify(batch), seenAt],
     );
@@ -93,14 +108,39 @@ async function upsertModels(models, seenAt) {
 }
 
 /**
- * One sync: fetch the provider's online list, upsert it, and mark every
- * stored model that was not in it offline. Never throws for provider
- * trouble: a failed or rate-limited fetch leaves the stored data as it was.
+ * The fields that make a model's row worth rewriting: identity, images (with
+ * the response-wide snapshot timestamp templated out), tags, status, geobans,
+ * goal text. Rank, viewers, favorites and goal progress change on nearly every
+ * fetch and live in the per-sync snapshot instead.
+ */
+function contentHash(m) {
+  const material = [
+    m.externalId, m.username, m.avatarUrl, m.snapshotUrl, m.thumbUrl, m.clickUrl, m.country, m.languages,
+    m.gender, m.broadcastGender, m.tags, m.isHd, m.isVr, m.status, m.blockedCountries, m.blockedRegions,
+    m.blockedLanguages, m.goalMessage,
+  ];
+  return crypto.createHash('sha1').update(JSON.stringify(material)).digest('hex');
+}
+
+/**
+ * One sync: fetch the provider's online list and write only what changed.
+ *
+ *   - rows: inserted when new, rewritten only when their content hash
+ *     changed; unchanged rows are not written (last_seen_at, used only by the
+ *     30-day rule, is refreshed in one statement at most every 6 hours);
+ *   - models absent from the list: marked offline in one statement;
+ *   - rank / viewers / favorites / goal progress for every online model, and
+ *     the snapshot image timestamp: one JSON document on the provider state
+ *     row, written once.
+ *
+ * Never throws for provider trouble: a failed or rate-limited fetch leaves
+ * the stored data as it was.
  */
 async function sync() {
   if (!stripcash.isConfigured()) return { status: 'not_configured' };
 
   let result;
+  const startedAt = Date.now();
   try {
     result = await stripcash.fetchOnlineModels();
   } catch (err) {
@@ -109,23 +149,63 @@ async function sync() {
     await recordState({ last_sync_at: new Date(), last_sync_ok: false, last_sync_error: err.code || 'error' }).catch(() => {});
     return { status: 'failed', error: err.code || 'error' };
   }
+  const fetchMs = Date.now() - startedAt;
 
   const seenAt = new Date();
-  await upsertModels(result.models, seenAt);
+  const { rows: stored } = await query('SELECT username, content_hash, last_seen_at FROM live_models WHERE provider = $1', [PROVIDER]);
+  const existing = new Map(stored.map((r) => [r.username, r]));
+
+  const changed = [];
+  const touch = [];
+  let inserted = 0;
+  for (const m of result.models) {
+    m.contentHash = contentHash(m);
+    const row = existing.get(m.username);
+    if (!row) inserted += 1;
+    if (!row || row.content_hash !== m.contentHash) changed.push(m);
+    else if (seenAt - new Date(row.last_seen_at) > SEEN_REFRESH_MS) touch.push(m.username);
+  }
+
+  await upsertModels(changed, seenAt);
+  if (touch.length) {
+    await query(
+      'UPDATE live_models SET last_seen_at = $2, last_synced_at = $2 WHERE provider = $1 AND username = ANY($3::text[])',
+      [PROVIDER, seenAt, touch],
+    );
+  }
+  const online = result.models.map((m) => m.username);
   const { rowCount: wentOffline } = await query(
     `UPDATE live_models SET status = 'offline', updated_at = now()
-      WHERE provider = $1 AND last_seen_at < $2 AND status <> 'offline'`,
-    [PROVIDER, seenAt],
+      WHERE provider = $1 AND status <> 'offline' AND NOT (username = ANY($2::text[]))`,
+    [PROVIDER, online],
   );
+
+  // username → [rank, viewers, favorites, goal needed, goal earned]
+  const snapshot = {};
+  for (const m of result.models) {
+    snapshot[m.username] = [m.providerRank, m.viewersCount, m.favoritedCount, m.goalNeeded ?? 0, m.goalEarned ?? 0];
+  }
   await recordState({
     last_sync_at: seenAt,
+    last_ok_sync_at: seenAt,
     last_sync_ok: true,
     last_sync_error: null,
     last_count: result.count,
     last_total: result.total,
+    live_snapshot: JSON.stringify(snapshot),
+    snapshot_ts: result.snapshotTs,
   });
-  logger.info({ provider: PROVIDER, models: result.models.length, wentOffline }, 'live models synced');
-  return { status: 'synced', models: result.models.length, count: result.count, total: result.total, wentOffline };
+
+  const counts = {
+    models: result.models.length,
+    inserted,
+    updated: changed.length - inserted,
+    unchanged: result.models.length - changed.length,
+    seenRefreshed: touch.length,
+    wentOffline,
+  };
+  logger.info({ provider: PROVIDER, fetchMs, ...counts }, 'live models synced');
+  return { status: 'synced', count: result.count, total: result.total, fetchMs, ...counts };
 }
 
 /** Marks that someone is browsing Live, so the sync chain keeps going. */
@@ -210,15 +290,36 @@ function geobanClause(viewer, params) {
 
 // --- listing ----------------------------------------------------------------
 
-const RANK = 'provider_rank ASC NULLS LAST, id ASC';
+const RANK = 'rank_now ASC NULLS LAST, id ASC';
 const SORTS = Object.freeze({
   default: RANK,
-  viewers: `viewers_count DESC, ${RANK}`,
-  favorites: `favorited_count DESC, ${RANK}`,
+  viewers: `viewers_now DESC, ${RANK}`,
+  favorites: `favorites_now DESC, ${RANK}`,
   hd: `is_hd DESC, ${RANK}`,
-  // Featured models first, in the admin's order; then provider order.
   featured: RANK,
 });
+
+/**
+ * Stored models joined to the latest successful sync's snapshot: only models
+ * in it (online now) are returned, with their current rank / viewers /
+ * favorites / goal progress and the snapshot timestamp. `$1` is the provider
+ * and `$2` the freshness window in seconds.
+ */
+const ONLINE_MODELS = `
+  SELECT m.*, s.ts AS snapshot_ts,
+         (s.snap -> m.username ->> 0)::int AS rank_now,
+         (s.snap -> m.username ->> 1)::int AS viewers_now,
+         (s.snap -> m.username ->> 2)::int AS favorites_now,
+         (s.snap -> m.username ->> 3)::int AS goal_needed_now,
+         (s.snap -> m.username ->> 4)::int AS goal_earned_now
+    FROM live_models m
+    JOIN (SELECT live_snapshot AS snap, snapshot_ts AS ts FROM live_provider_state
+           WHERE provider = $1 AND last_ok_sync_at > now() - make_interval(secs => $2)) s
+      ON s.snap ? m.username
+   WHERE m.provider = $1`;
+
+/** Fills the stored '{ts}' placeholder with the current snapshot timestamp. */
+const fillTs = (url, ts) => (url && url.includes('{ts}') ? (ts ? url.split('{ts}').join(String(ts)) : null) : url);
 
 /**
  * The client-facing shape. Never includes geobans, metadata or anything
@@ -226,27 +327,29 @@ const SORTS = Object.freeze({
  * id) is included only when the admin chose "open provider destination".
  */
 function serialize(row, { featured = [], clickBehavior = 'internal_player' } = {}) {
+  const goalNeeded = row.goal_needed_now ?? row.goal_needed;
+  const goalEarned = row.goal_earned_now ?? row.goal_earned;
   return {
     id: Number(row.id),
     provider: row.provider,
     username: row.username,
     avatarUrl: row.avatar_url,
-    snapshotUrl: row.snapshot_url,
+    snapshotUrl: fillTs(row.snapshot_url, row.snapshot_ts),
     thumbnailUrl: row.thumb_url,
     country: row.country,
     languages: row.languages,
     gender: row.gender,
     broadcastGender: row.broadcast_gender,
     tags: row.tags,
-    viewers: row.viewers_count,
-    favorites: row.favorited_count,
+    viewers: row.viewers_now ?? row.viewers_count,
+    favorites: row.favorites_now ?? row.favorited_count,
     isHd: row.is_hd,
     isVr: row.is_vr,
     status: row.status,
     featured: featured.includes(row.username),
     goal:
-      row.goal_needed > 0 || row.goal_message
-        ? { message: row.goal_message, needed: row.goal_needed, earned: row.goal_earned }
+      goalNeeded > 0 || row.goal_message
+        ? { message: row.goal_message, needed: goalNeeded, earned: goalEarned }
         : null,
     ...(clickBehavior === 'provider' ? { destinationUrl: row.click_url } : {}),
   };
@@ -281,9 +384,8 @@ async function list(viewer, { limit = 24, offset = 0, language, country, tag, so
     return `$${params.length}`;
   };
   const where = [
-    'provider = $1',
-    'last_seen_at > now() - make_interval(secs => $2)',
-    settings.status === 'any' ? `status <> 'offline'` : `status = 'public'`,
+    // "All online" is an explicit allowlist: unknown future statuses stay hidden.
+    settings.status === 'any' ? `status = ANY(${p([...KNOWN_STATUSES])}::text[])` : `status = 'public'`,
     geobanClause(viewer, params),
   ];
 
@@ -314,8 +416,9 @@ async function list(viewer, { limit = 24, offset = 0, language, country, tag, so
   const { rows } = await query(
     `SELECT id, provider, username, avatar_url, snapshot_url, thumb_url, click_url, country, languages, gender,
             broadcast_gender, tags, viewers_count, favorited_count, is_hd, is_vr, status,
-            goal_message, goal_needed, goal_earned
-       FROM live_models
+            goal_message, goal_needed, goal_earned, snapshot_ts, rank_now, viewers_now, favorites_now,
+            goal_needed_now, goal_earned_now
+       FROM (${ONLINE_MODELS}) o
       WHERE ${where.join(' AND ')}
       ORDER BY ${order.join(', ')}
       LIMIT ${limitParam} OFFSET ${offsetParam}`,
@@ -338,18 +441,22 @@ async function searchStored({ q, limit = 30 } = {}) {
   }
   params.push(limit);
   const { rows } = await query(
-    `SELECT id, username, thumb_url, avatar_url, snapshot_url, status, viewers_count, country, last_seen_at,
-            (last_seen_at > now() - make_interval(secs => $2)) AS online
-       FROM live_models
-      WHERE provider = $1 ${filter}
-      ORDER BY online DESC, provider_rank ASC NULLS LAST, username ASC
+    `SELECT m.id, m.username, m.thumb_url, m.avatar_url, m.snapshot_url, m.status, m.country, m.last_seen_at,
+            COALESCE((s.snap -> m.username ->> 1)::int, m.viewers_count) AS viewers_count, s.ts AS snapshot_ts,
+            (s.snap ? m.username) IS TRUE AS online,
+            (s.snap -> m.username ->> 0)::int AS rank_now
+       FROM live_models m
+       LEFT JOIN (SELECT live_snapshot AS snap, snapshot_ts AS ts FROM live_provider_state
+                   WHERE provider = $1 AND last_ok_sync_at > now() - make_interval(secs => $2)) s ON TRUE
+      WHERE m.provider = $1 ${filter.replace('username', 'm.username')}
+      ORDER BY online DESC, rank_now ASC NULLS LAST, m.username ASC
       LIMIT $${params.length}`,
     params,
   );
   return rows.map((r) => ({
     id: Number(r.id),
     username: r.username,
-    imageUrl: r.thumb_url || r.avatar_url || r.snapshot_url,
+    imageUrl: r.thumb_url || r.avatar_url || fillTs(r.snapshot_url, r.snapshot_ts),
     status: r.status,
     online: r.online,
     viewers: r.viewers_count,
@@ -362,9 +469,12 @@ async function searchStored({ q, limit = 30 } = {}) {
 async function storedCounts() {
   const { rows } = await query(
     `SELECT count(*)::int AS stored,
-            count(*) FILTER (WHERE last_seen_at > now() - make_interval(secs => $2))::int AS online,
-            count(*) FILTER (WHERE last_seen_at > now() - make_interval(secs => $2) AND status = 'public')::int AS public
-       FROM live_models WHERE provider = $1`,
+            count(*) FILTER (WHERE (s.snap ? m.username) IS TRUE)::int AS online,
+            count(*) FILTER (WHERE (s.snap ? m.username) IS TRUE AND m.status = 'public')::int AS public
+       FROM live_models m
+       LEFT JOIN (SELECT live_snapshot AS snap FROM live_provider_state
+                   WHERE provider = $1 AND last_ok_sync_at > now() - make_interval(secs => $2)) s ON TRUE
+      WHERE m.provider = $1`,
     [PROVIDER, ONLINE_WINDOW_SECONDS],
   );
   return rows[0];
@@ -428,6 +538,8 @@ async function cleanup({ now = new Date() } = {}) {
 
 module.exports = {
   ONLINE_WINDOW_SECONDS,
+  KNOWN_STATUSES,
+  contentHash,
   STALE_AFTER_SECONDS,
   ABSENT_RETENTION_DAYS,
   SORTS,

@@ -25,7 +25,8 @@ const { redis } = require('../src/config/redis');
 const { signToken } = require('../src/middleware/auth');
 
 const API_KEY = 'test-stripcash-key-0123456789';
-const USER_ID = 'test-affiliate-user-id-abcdef';
+const USER_ID = 'test-api-user-id-abcdef';
+const PLAYER_ID = 'f'.repeat(64);
 
 let server;
 let baseUrl;
@@ -36,7 +37,8 @@ let deletedReply;
 
 function model(username, extra = {}) {
   return {
-    id: Math.floor(Math.random() * 1e9),
+    // Stable per username, like the provider's own ids.
+    id: [...username].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 1e9, 7),
     username,
     avatarUrl: `https://img.example/${username}/avatar.jpg`,
     popularSnapshotUrl: `https://img.example/${username}/popular.jpg`,
@@ -65,7 +67,8 @@ const json = (status, body) => new Response(JSON.stringify(body), { status, head
 
 test.before(async () => {
   env.stripcash.apiKey = API_KEY;
-  env.stripcash.userId = USER_ID;
+  env.stripcash.apiUserId = USER_ID;
+  env.stripcash.playerUserId = PLAYER_ID;
   global.fetch = async (url, init) => {
     const href = String(url);
     if (href.startsWith(env.stripcash.baseUrl)) {
@@ -84,7 +87,8 @@ test.before(async () => {
 test.after(async () => {
   global.fetch = realFetch;
   env.stripcash.apiKey = '';
-  env.stripcash.userId = '';
+  env.stripcash.apiUserId = '';
+  env.stripcash.playerUserId = '';
   await new Promise((resolve) => server.close(resolve));
   await db.close();
   await redisConfig.close();
@@ -217,23 +221,83 @@ test('without credentials Live is "not configured" and makes no calls', async ()
 
 // --- sync -------------------------------------------------------------------
 
-test('sync upserts by username, updates last_seen_at, and marks absent models offline', async () => {
-  await syncWith([model('a', { viewersCount: 5 }), model('b')]);
-  const before = (await query(`SELECT last_seen_at FROM live_models WHERE username = 'a'`)).rows[0].last_seen_at;
+test('sync writes only changed rows, keeps counters in the snapshot, and marks absent models offline', async () => {
+  const first = await syncWith([model('a', { viewersCount: 5 }), model('b')]);
+  assert.deepEqual([first.inserted, first.updated, first.unchanged], [2, 0, 0]);
+  const before = (await query(`SELECT updated_at, last_seen_at FROM live_models WHERE username = 'a'`)).rows[0];
 
   await new Promise((r) => setTimeout(r, 20));
-  const result = await syncWith([model('a', { viewersCount: 50 }), model('c')]);
+  // a: only counters/rank change → no row write; c: new; b: gone.
+  const result = await syncWith([model('c'), model('a', { viewersCount: 50, favoritedCount: 7 })]);
   assert.equal(result.status, 'synced');
-  assert.equal(result.wentOffline, 1);
+  assert.deepEqual([result.inserted, result.updated, result.unchanged, result.wentOffline], [1, 0, 1, 1]);
 
-  const { rows } = await query('SELECT username, viewers_count, status, last_seen_at, provider_rank FROM live_models ORDER BY username');
+  const { rows } = await query('SELECT username, status, updated_at, last_seen_at FROM live_models ORDER BY username');
   assert.deepEqual(rows.map((r) => [r.username, r.status]), [['a', 'public'], ['b', 'offline'], ['c', 'public']]);
-  assert.equal(rows[0].viewers_count, 50);
-  assert.ok(rows[0].last_seen_at > before, 'last_seen_at moves forward');
-  assert.equal(rows[2].provider_rank, 2);
+  assert.equal(rows[0].updated_at.getTime(), before.updated_at.getTime(), 'unchanged row is not rewritten');
+  assert.equal(rows[0].last_seen_at.getTime(), before.last_seen_at.getTime(), 'last_seen_at is refreshed lazily');
+
   const state = await live.getState();
   assert.equal(state.last_sync_ok, true);
   assert.equal(state.last_total, 7);
+  assert.deepEqual(state.live_snapshot.a, [2, 50, 7, 0, 0], 'rank, viewers, favorites, goal');
+  assert.deepEqual(Object.keys(state.live_snapshot).sort(), ['a', 'c'], 'the snapshot is the online set');
+
+  // A meaningful change (tags) rewrites the row.
+  const third = await syncWith([model('c'), model('a', { tags: ['girls/new'] })]);
+  assert.deepEqual([third.updated, third.unchanged], [1, 1]);
+});
+
+test('last_seen_at is refreshed in bulk once it is older than the refresh interval', async () => {
+  await syncWith([model('a')]);
+  await query(`UPDATE live_models SET last_seen_at = now() - interval '7 hours' WHERE username = 'a'`);
+  const result = await syncWith([model('a')]);
+  assert.equal(result.seenRefreshed, 1);
+  const { rows } = await query(`SELECT last_seen_at FROM live_models WHERE username = 'a'`);
+  assert.ok(Date.now() - rows[0].last_seen_at.getTime() < 60_000);
+});
+
+test('snapshot image URLs: the response-wide timestamp is templated, not rewritten per row', async () => {
+  const shot = (ts, id) => `https://img.doppiocdn.com/thumbs/${ts}/${id}`;
+  await syncWith([model('a', { id: 11, snapshotUrl: shot(1791000000, 11) }), model('b', { id: 12, snapshotUrl: shot(1791000000, 12) })]);
+  const stored = (await query(`SELECT snapshot_url FROM live_models WHERE username = 'a'`)).rows[0].snapshot_url;
+  assert.equal(stored, 'https://img.doppiocdn.com/thumbs/{ts}/11');
+
+  const next = await syncWith([model('a', { id: 11, snapshotUrl: shot(1791000030, 11) }), model('b', { id: 12, snapshotUrl: shot(1791000030, 12) })]);
+  assert.equal(next.unchanged, 2, 'a new snapshot timestamp alone writes no rows');
+
+  const token = signToken(await createUser());
+  const res = await get('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
+  assert.equal(res.body.models.find((m) => m.username === 'a').snapshotUrl, shot(1791000030, 11), 'served with the current timestamp');
+});
+
+test('raw stream URLs and CDN hints are never stored', () => {
+  const m = stripcash.normalizeModel(
+    model('s', { stream: { url: 'https://x/hls/1.m3u8' }, hlsPlaylist: 'https://x/a.m3u8', CDNDefaultHost: 'cdn.x', note: 'https://x/live/hls/2' , other: 'kept' }),
+    1,
+  );
+  assert.deepEqual(Object.keys(m.metadata), ['other']);
+});
+
+test('"all online" is an allowlist: unknown future statuses stay hidden', async () => {
+  const liveSettings = require('../src/modules/live/live.settings');
+  await syncWith([
+    model('pub'), model('p2p_one', { status: 'p2p' }), model('grp', { status: 'groupShow' }),
+    model('vp', { status: 'virtualPrivate' }), model('voice', { status: 'p2pVoice' }), model('priv', { status: 'private' }),
+    model('future', { status: 'superShow' }),
+  ]);
+  const viewer = { country: 'de', region: null, languages: [] };
+  const all = await live.list(viewer, { limit: 50 }, { ...liveSettings.DEFAULTS, status: 'any' });
+  assert.deepEqual(all.map((m) => m.username).sort(), ['grp', 'p2p_one', 'priv', 'pub', 'voice', 'vp']);
+  const pub = await live.list(viewer, { limit: 50 }, liveSettings.DEFAULTS);
+  assert.deepEqual(pub.map((m) => m.username), ['pub'], 'default listing is public only');
+});
+
+test('a stale snapshot (syncs stopped) lists nothing', async () => {
+  await syncWith([model('a')]);
+  await query(`UPDATE live_provider_state SET last_ok_sync_at = now() - interval '10 minutes'`);
+  const out = await live.list({ country: 'de', region: null, languages: [] }, { limit: 10 });
+  assert.deepEqual(out, []);
 });
 
 test('the sync job re-schedules itself only while Live has viewers', async () => {
@@ -307,7 +371,8 @@ test('no query parameter can bypass geobans', async () => {
 
 test('listing: public and recently seen only, normalized fields, no provider secrets', async () => {
   await seedForListing();
-  await query(`UPDATE live_models SET last_seen_at = now() - interval '5 minutes' WHERE username = 'hindi'`);
+  // Not in the latest sync → not online.
+  await query(`UPDATE live_provider_state SET live_snapshot = live_snapshot - 'hindi'`);
   const token = signToken(await createUser());
 
   const res = await get('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
@@ -415,8 +480,9 @@ test('GET /api/live/config exposes the player userId and the age gate, never the
     enabled: true,
     provider: 'stripcash',
     ...liveSettings.clientView(liveSettings.DEFAULTS),
-    player: { type: 'stripchat-player', userId: USER_ID, strict: 1, autoplay: 'all', scriptUrl: null },
+    player: { type: 'stripchat-player', userId: PLAYER_ID, strict: 1, autoplay: 'all', scriptUrl: null },
   });
+  assert.equal(JSON.stringify(res.body).includes(USER_ID), false, 'the API user id stays server-side');
   assert.equal(res.body.requireAgeConfirmation, true);
   assert.equal('selection' in res.body, false, 'curation lists stay admin-side');
   assert.equal(JSON.stringify(res.body).includes(API_KEY), false);
@@ -637,6 +703,7 @@ test('public listing follows the saved settings; click behaviour controls the pr
 test('admin model search lists stored models for the pickers', async () => {
   await seedRanked();
   await query(`UPDATE live_models SET last_seen_at = now() - interval '2 days', status = 'offline' WHERE username = 'r1'`);
+  await query(`UPDATE live_provider_state SET live_snapshot = live_snapshot - 'r1'`);
   const token = await adminToken();
   const res = await send('GET', '/api/admin/live/models?q=r', token);
   assert.equal(res.status, 200);

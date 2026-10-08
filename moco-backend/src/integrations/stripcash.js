@@ -18,17 +18,26 @@ const { redis } = require('../config/redis');
  *   - the API key never leaves this module: it is not logged, and errors
  *     carry only an HTTP status or a short code.
  *
- * The affiliate userId is not a secret: it is a tracking id the official
- * Stripchat player needs in the browser, so playerConfig() exposes it (and
- * only it) to signed-in clients. It is still never logged.
+ * Two different ids: the short API user id (STRIPCASH_API_USER_ID) goes on
+ * aggregator requests only; the affiliate player id from the default link
+ * (STRIPCASH_PLAYER_USER_ID) is the one the official player needs, so
+ * playerConfig() exposes that one (and only it) to signed-in clients. Neither
+ * is logged.
  */
 
 const PROVIDER = 'stripcash';
 const MIN_INTERVAL_MS = 5000;
 const TIMEOUT_MS = 15000;
+/** The full online list is ~12k models / ~36 MB; reading it can take well
+ * over 15 s, and the timeout covers reading the body too. */
+const MODELS_TIMEOUT_MS = 60000;
 const RATE_SLOT_KEY = 'live:stripcash:rate_slot';
 
-const isConfigured = () => Boolean(env.stripcash.apiKey && env.stripcash.userId);
+const isConfigured = () => Boolean(env.stripcash.apiKey && env.stripcash.apiUserId);
+
+if (env.stripcash.usingDeprecatedUserId) {
+  logger.warn('STRIPCASH_USER_ID is deprecated: set STRIPCASH_API_USER_ID (API) and STRIPCASH_PLAYER_USER_ID (player) instead');
+}
 
 class StripcashError extends Error {
   constructor(code, status) {
@@ -47,7 +56,7 @@ async function claimRequestSlot() {
   return ok === 'OK';
 }
 
-async function request(path, params) {
+async function request(path, params, { timeoutMs = TIMEOUT_MS } = {}) {
   if (!isConfigured()) throw new StripcashError('not_configured');
   if (!(await claimRequestSlot())) throw new StripcashError('rate_limited');
 
@@ -60,7 +69,7 @@ async function request(path, params) {
   try {
     response = await fetch(url, {
       headers: { Authorization: `Bearer ${env.stripcash.apiKey}`, Accept: 'application/json' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
     throw new StripcashError(err.name === 'TimeoutError' ? 'timeout' : 'network_error');
@@ -70,7 +79,9 @@ async function request(path, params) {
   if (!response.ok) throw new StripcashError('http_error', response.status);
   try {
     return await response.json();
-  } catch {
+  } catch (err) {
+    // An abort while the body was still arriving is a timeout, not bad JSON.
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') throw new StripcashError('timeout');
     throw new StripcashError('bad_json', response.status);
   }
 }
@@ -112,6 +123,11 @@ function normalizeRegions(value) {
   return [...out];
 }
 
+/** Raw stream locations are never stored (provider: they change and are not
+ * a stable integration point); CDN host hints are ignored too. */
+const STREAM_KEY = /stream|hls|m3u8|playlist|cdn/i;
+const STREAM_VALUE = /\.m3u8(\?|$)|\/hls\//i;
+
 const KNOWN_FIELDS = new Set([
   'id', 'username', 'avatarUrl', 'popularSnapshotUrl', 'snapshotUrl', 'clickUrl', 'modelsCountry',
   'gender', 'broadcastGender', 'previewUrlThumbSmall', 'tags', 'favoritedCount', 'viewersCount',
@@ -132,9 +148,9 @@ function normalizeModel(raw, rank) {
 
   const metadata = {};
   for (const [key, value] of Object.entries(raw)) {
-    if (!KNOWN_FIELDS.has(key) && (value === null || ['string', 'number', 'boolean'].includes(typeof value))) {
-      metadata[key] = value;
-    }
+    if (KNOWN_FIELDS.has(key) || STREAM_KEY.test(key)) continue;
+    if (typeof value === 'string' && STREAM_VALUE.test(value)) continue;
+    if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) metadata[key] = value;
   }
 
   return {
@@ -173,6 +189,26 @@ function normalizeModel(raw, rank) {
   };
 }
 
+/**
+ * Snapshot image URLs carry one timestamp shared by the whole response
+ * (…/thumbs/<ts>/<id>), so every URL "changes" on every fetch. The dominant
+ * 10-digit path segment is that timestamp; it is replaced by '{ts}' in the
+ * stored URLs and kept once per sync (live_provider_state.snapshot_ts).
+ */
+const TS_SEGMENT = /\/(\d{10})(?=\/|$)/g;
+function dominantTimestamp(models) {
+  const counts = new Map();
+  for (const m of models) {
+    for (const match of String(m.snapshotUrl || '').matchAll(TS_SEGMENT)) {
+      counts.set(match[1], (counts.get(match[1]) || 0) + 1);
+    }
+  }
+  let best = null;
+  for (const [ts, n] of counts) if (!best || n > best[1]) best = [ts, n];
+  return best && best[1] >= Math.max(1, models.length / 2) ? best[0] : null;
+}
+const templateTs = (url, ts) => (url && ts ? url.split(`/${ts}`).join('/{ts}') : url);
+
 /** `{ count, total, models }` → normalized models in provider (rating) order. */
 function parseModelsResponse(body) {
   if (!body || typeof body !== 'object' || !Array.isArray(body.models)) {
@@ -187,12 +223,20 @@ function parseModelsResponse(body) {
       models.push(model);
     }
   });
-  return { count: int(body.count), total: int(body.total), models };
+  const snapshotTs = dominantTimestamp(models);
+  if (snapshotTs) {
+    for (const m of models) {
+      m.snapshotUrl = templateTs(m.snapshotUrl, snapshotTs);
+      m.popularSnapshotUrl = templateTs(m.popularSnapshotUrl, snapshotTs);
+      for (const [k, v] of Object.entries(m.metadata)) if (typeof v === 'string') m.metadata[k] = templateTs(v, snapshotTs);
+    }
+  }
+  return { count: int(body.count), total: int(body.total), models, snapshotTs: snapshotTs ? Number(snapshotTs) : null };
 }
 
 /** Online models, normalized. Throws StripcashError. */
 async function fetchOnlineModels() {
-  const body = await request('/app/models-ext/models', { userId: env.stripcash.userId });
+  const body = await request('/app/models-ext/models', { userId: env.stripcash.apiUserId }, { timeoutMs: MODELS_TIMEOUT_MS });
   return parseModelsResponse(body);
 }
 
@@ -214,9 +258,12 @@ async function fetchDeletedModels({ since, until } = {}) {
  * provider docs. modelName is chosen per model by the client.
  */
 function playerConfig() {
+  // Without the default-link affiliate id the player cannot attribute views;
+  // the app then shows its "player not available" state.
+  if (!env.stripcash.playerUserId) return null;
   return {
     type: 'stripchat-player',
-    userId: env.stripcash.userId,
+    userId: env.stripcash.playerUserId,
     strict: 1,
     autoplay: 'all',
     // The provider's player script. Null until configured: the app then

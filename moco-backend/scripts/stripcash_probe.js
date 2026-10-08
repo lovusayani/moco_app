@@ -37,9 +37,9 @@ function tally(models, pick) {
 
 async function main() {
   const key = (process.env.STRIPCASH_API_KEY || '').trim();
-  const userId = (process.env.STRIPCASH_USER_ID || '').trim();
+  const userId = (process.env.STRIPCASH_API_USER_ID || process.env.STRIPCASH_USER_ID || '').trim();
   if (!key || !userId) {
-    console.log('STRIPCASH_API_KEY / STRIPCASH_USER_ID not set — nothing sent.');
+    console.log('STRIPCASH_API_KEY / STRIPCASH_API_USER_ID not set — nothing sent.');
     process.exit(2);
   }
   const base = process.env.STRIPCASH_API_BASE || 'https://go.whitetrafsa.com';

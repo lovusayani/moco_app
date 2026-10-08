@@ -48,7 +48,7 @@
   /* ------------------------------------------------------------ labels */
 
   const L = {
-    status: { public: 'Public shows only', any: 'All online (public, group and private shows)' },
+    status: { public: 'Public shows only', any: 'All online — known show types only (public, p2p, private, group, virtual private, p2p voice)' },
     layout: { grid: 'Grid', large: 'Large cards', compact: 'Compact', mixed: 'Mixed' },
     aspect: { portrait: 'Portrait 3:4', square: 'Square 1:1', landscape: 'Landscape 4:3', wide: 'Wide 16:9' },
     density: { comfortable: 'Comfortable', cozy: 'Cozy', compact: 'Compact' },
@@ -125,7 +125,7 @@
       ? `${p.lastSyncOk === false ? badge('sync failing', 'red') : badge('connected', 'green')}
          <span class="sub">Last sync ${p.lastSyncAt ? esc(ago(p.lastSyncAt)) : 'never'}${p.lastSyncError ? ` · ${esc(p.lastSyncError)}` : ''}
          · ${fmtNum(p.online)} online (${fmtNum(p.public)} public) · ${fmtNum(p.stored)} stored</span>`
-      : `${badge('not configured', 'amber')} <span class="sub">STRIPCASH_API_KEY / STRIPCASH_USER_ID are not set on the server, so Live shows nothing.</span>`;
+      : `${badge('not configured', 'amber')} <span class="sub">STRIPCASH_API_KEY / STRIPCASH_API_USER_ID are not set on the server, so Live shows nothing.</span>`;
 
     const opt = (values, labels, current) =>
       values.map((v) => `<option value="${esc(v)}" ${String(current) === String(v) ? 'selected' : ''}>${esc(labels?.[v] ?? v)}</option>`).join('');

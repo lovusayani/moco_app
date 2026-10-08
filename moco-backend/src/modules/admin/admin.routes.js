@@ -23,6 +23,7 @@ router.use(require('./listeners.admin'));
 router.use(require('./reports.admin'));
 router.use(require('./operations.admin'));
 router.use(require('../settings/login_background').router);
+router.use(require('./deletion.admin'));
 
 /** Platform metrics for the admin dashboard. */
 router.get(
@@ -33,8 +34,8 @@ router.get(
         (SELECT count(*)::int FROM users WHERE status = 'active') AS active_users,
         (SELECT count(*)::int FROM users WHERE status = 'suspended') AS suspended_users,
         (SELECT count(*)::int FROM users WHERE created_at >= date_trunc('day', now())) AS new_users_today,
-        (SELECT count(*)::int FROM listener_profiles WHERE kyc_status = 'approved') AS approved_listeners,
-        (SELECT count(*)::int FROM listener_profiles lp WHERE ${listenerEligibleSql('lp')}) AS active_listeners,
+        (SELECT count(*)::int FROM listener_profiles lp WHERE lp.kyc_status = 'approved' AND lp.user_id IN (SELECT id FROM users WHERE status <> 'deleted')) AS approved_listeners,
+        (SELECT count(*)::int FROM listener_profiles lp WHERE ${listenerEligibleSql('lp')} AND lp.user_id IN (SELECT id FROM users WHERE status <> 'deleted')) AS active_listeners,
         (SELECT count(*)::int FROM listener_profiles WHERE is_online) AS online_listeners,
         (SELECT count(*)::int FROM calls WHERE status = 'active') AS live_calls,
         (SELECT count(*)::int FROM calls WHERE created_at >= date_trunc('day', now())) AS calls_today,
@@ -44,7 +45,7 @@ router.get(
           WHERE created_at >= date_trunc('day', now())) AS platform_revenue_today,
         (SELECT COALESCE(SUM(delta), 0)::bigint FROM coin_ledger
           WHERE reason = 'topup' AND created_at >= date_trunc('day', now())) AS coins_purchased_today,
-        (SELECT count(*)::int FROM listener_profiles WHERE kyc_status = 'pending') AS pending_kyc,
+        (SELECT count(*)::int FROM listener_profiles lp WHERE lp.kyc_status = 'pending' AND lp.user_id IN (SELECT id FROM users WHERE status <> 'deleted')) AS pending_kyc,
         (SELECT count(*)::int FROM payouts WHERE status = 'requested') AS pending_payouts,
         (SELECT count(*)::int FROM reports WHERE status IN ('open', 'reviewing')) AS open_reports,
         (SELECT count(*)::int FROM admin_audit_log WHERE created_at >= date_trunc('day', now())) AS admin_actions_today

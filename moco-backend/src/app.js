@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const helmet = require('helmet');
@@ -74,6 +76,21 @@ function createApp() {
     const adminMediaSrc = ["'self'", 'data:', ...(storageOrigin ? [storageOrigin] : [])];
     // blob: lets the settings page preview a picked file before it is saved.
     const adminPreviewSrc = [...adminMediaSrc, 'blob:'];
+    const adminDir = path.join(__dirname, '..', 'public', 'admin');
+    // The console page is served with content-hashed asset URLs and no-cache,
+    // so after an update a browser always loads a matching admin.js +
+    // admin.css pair — never a fresh one next to a stale one from its cache.
+    const assetVersion = (file) =>
+      crypto.createHash('sha1').update(fs.readFileSync(path.join(adminDir, file))).digest('hex').slice(0, 12);
+    const adminIndex = (req, res, next) => {
+      const url = req.originalUrl.split('?')[0];
+      if (req.method !== 'GET' || (url !== '/admin/' && url !== '/admin/index.html')) return next();
+      const html = fs
+        .readFileSync(path.join(adminDir, 'index.html'), 'utf8')
+        .replace('href="admin.css"', `href="admin.css?v=${assetVersion('admin.css')}"`)
+        .replace('src="admin.js"', `src="admin.js?v=${assetVersion('admin.js')}"`);
+      return res.set('Cache-Control', 'no-cache').type('html').send(html);
+    };
     app.use(
       '/admin',
       helmet.contentSecurityPolicy({
@@ -82,7 +99,8 @@ function createApp() {
         // Storage with a backend-signed URL.
         directives: { 'img-src': adminPreviewSrc, 'media-src': adminPreviewSrc, 'connect-src': adminMediaSrc },
       }),
-      express.static(path.join(__dirname, '..', 'public', 'admin')),
+      adminIndex,
+      express.static(adminDir),
     );
   }
 

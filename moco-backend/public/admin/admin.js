@@ -117,14 +117,14 @@ function duration(start, end) {
 }
 
 let toastTimer;
-function toast(message, ok = true) {
+function toast(message, ok = true, ms = 3600) {
   document.querySelector('.toast')?.remove();
   const el = document.createElement('div');
   el.className = `toast${ok ? '' : ' bad'}`;
   el.textContent = message;
   document.body.appendChild(el);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.remove(), 3600);
+  toastTimer = setTimeout(() => el.remove(), ms);
 }
 
 const empty = (mark, message) => `<div class="empty"><div class="empty-mark">${mark}</div>${esc(message)}</div>`;
@@ -257,7 +257,7 @@ function dataTable(host, cfg) {
       .map((c) => {
         const active = c.sort && st.sort === c.sort;
         const arrow = active ? `<span class="arrow">${st.dir === 'asc' ? '▲' : '▼'}</span>` : '';
-        return `<th class="${c.sort ? 'sortable' : ''} ${c.num ? 'num' : ''}" data-sort="${c.sort || ''}">${esc(c.label)}${arrow}</th>`;
+        return `<th class="${c.sort ? 'sortable' : ''} ${c.num ? 'num' : ''} ${c.pin ? 'col-pin' : ''}" data-sort="${c.sort || ''}">${esc(c.label)}${arrow}</th>`;
       })
       .join('')}</tr>`;
   }
@@ -291,7 +291,7 @@ function dataTable(host, cfg) {
       tbody.innerHTML = rows.length
         ? rows
             .map((r, i) => `<tr data-i="${i}" class="${cfg.onRow ? 'clickable' : ''}">${cfg.columns
-              .map((c) => `<td class="${c.num ? 'num' : ''}">${c.render(r)}</td>`)
+              .map((c) => `<td class="${c.num ? 'num' : ''} ${c.pin ? 'col-pin' : ''}">${c.render(r)}</td>`)
               .join('')}</tr>`)
             .join('')
         : `<tr><td colspan="${cfg.columns.length}">${empty('∅', cfg.emptyText || 'Nothing matches these filters.')}</td></tr>`;
@@ -384,7 +384,8 @@ const drawer = {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (document.getElementById('modal-root').innerHTML) document.getElementById('modal-root').innerHTML = '';
+  if (closeActiveDialog) closeActiveDialog();
+  else if (document.getElementById('modal-root').innerHTML) document.getElementById('modal-root').innerHTML = '';
   else drawer.close();
 });
 
@@ -398,86 +399,212 @@ document.addEventListener('keydown', (e) => {
  * the error is shown inside the dialog and it stays open — so a server
  * refusal (e.g. "needs 3 photos") is read in context, not lost in a toast.
  */
-function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', danger = false, onSubmit }) {
+/** Cancels the dialog on screen, if any (Escape uses it). */
+let closeActiveDialog = null;
+
+/**
+ * Why a rendered dialog is not genuinely usable, or null if it is. Checks
+ * what a person would see, not just that the element exists: real size,
+ * not hidden/transparent, and actually on top at its centre and at its
+ * confirm button (a hiding stylesheet, extension or covering layer fails
+ * this even though the DOM looks right).
+ */
+function dialogVisibilityProblem(modal) {
+  if (!modal) return 'dialog element missing';
+  const r = modal.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return `dialog has no size (${Math.round(r.width)}x${Math.round(r.height)})`;
+  if (r.bottom <= 0 || r.right <= 0 || r.top >= innerHeight || r.left >= innerWidth) return 'dialog is off-screen';
+  if (modal.checkVisibility && !modal.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
+    return 'dialog is hidden (display/visibility/opacity)';
+  }
+  const onTop = (el) => {
+    if (!el) return false;
+    const b = el.getBoundingClientRect();
+    const x = Math.min(Math.max(b.left + b.width / 2, 0), innerWidth - 1);
+    const y = Math.min(Math.max(b.top + b.height / 2, 0), innerHeight - 1);
+    // A transient toast may float over the footer; look through it.
+    const hit = document.elementsFromPoint(x, y).find((e) => !e.closest('.toast'));
+    return Boolean(hit && modal.contains(hit));
+  };
+  if (!onTop(modal)) return 'dialog is covered or not painted';
+  if (!onTop(modal.querySelector('button[type=submit]'))) return 'confirm button is not reachable';
+  return null;
+}
+
+/**
+ * Last-resort path when the styled dialog cannot be shown: the browser's own
+ * prompt/confirm boxes, which no page stylesheet or content blocker can
+ * hide. Same fields, same validation, same onSubmit — just plainer.
+ */
+async function nativeDialogFallback({ title, message, fields, confirmLabel, onSubmit }) {
+  const plain = (html) => { const d = document.createElement('div'); d.innerHTML = html || ''; return d.textContent.replace(/\s+/g, ' ').trim(); };
+  const values = {};
+  for (const f of fields) {
+    if (['checkbox', 'multi', 'select'].includes(f.type)) values[f.name] = f.value ?? (f.type === 'multi' ? [] : '');
+    else {
+      for (;;) {
+        const v = window.prompt(`${title}\n\n${f.label}${f.help ? ` (${f.help})` : ''}${f.required ? ' — required' : ''}`, f.value ?? '');
+        if (v === null) return null;
+        const t = v.trim();
+        if (f.required && !t) { window.alert(`${f.label} is required.`); continue; }
+        if (f.minLength && t.length < f.minLength) { window.alert(`${f.label} needs at least ${f.minLength} characters.`); continue; }
+        values[f.name] = t;
+        break;
+      }
+    }
+  }
+  if (!window.confirm(`${title}\n\n${plain(message).slice(0, 600)}\n\n${confirmLabel}?`)) return null;
+  try {
+    return (onSubmit ? await onSubmit(values) : values) ?? true;
+  } catch (err) {
+    window.alert(`${title}\n\nFailed: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * dialog({ title, message, fields, confirmLabel, danger, wide, onSubmit(values) })
+ * Resolves to onSubmit's result, or null if cancelled. If onSubmit throws,
+ * the error is shown inside the dialog and it stays open — so a server
+ * refusal (e.g. "needs 3 photos") is read in context, not lost in a toast.
+ *
+ * It can never leave the admin stuck behind a bare overlay: a rendering
+ * error removes the overlay and says so; a dialog that renders but is not
+ * genuinely visible (see dialogVisibilityProblem) is replaced by the
+ * browser's own prompts; Escape and a click on the backdrop cancel.
+ */
+function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', danger = false, wide = false, onSubmit }) {
   return new Promise((resolve) => {
     const root = document.getElementById('modal-root');
-    const fieldHtml = fields
-      .map((f) => {
-        const id = `f_${f.name}`;
-        const req = f.required ? ' *' : '';
-        let input;
-        if (f.type === 'textarea') {
-          input = `<textarea id="${id}" placeholder="${esc(f.placeholder || '')}">${esc(f.value || '')}</textarea>`;
-        } else if (f.type === 'select') {
-          input = `<select id="${id}">${f.options
-            .map(([v, l]) => `<option value="${esc(v)}" ${String(f.value ?? '') === String(v) ? 'selected' : ''}>${esc(l)}</option>`)
-            .join('')}</select>`;
-        } else if (f.type === 'checkbox') {
-          return `<div class="field"><label style="display:flex;gap:8px;align-items:center;font-weight:500">
-            <input id="${id}" type="checkbox" style="width:auto" ${f.value ? 'checked' : ''}> ${esc(f.label)}</label></div>`;
-        } else if (f.type === 'multi') {
-          return `<div class="field"><label>${esc(f.label)}${req}</label><div style="display:flex;gap:14px">${f.options
-            .map(([v, l]) => `<label style="display:flex;gap:6px;align-items:center;font-weight:500">
-              <input type="checkbox" style="width:auto" data-multi="${esc(f.name)}" value="${esc(v)}"
-              ${(f.value || []).includes(v) ? 'checked' : ''}> ${esc(l)}</label>`)
-            .join('')}</div></div>`;
-        } else {
-          input = `<input id="${id}" type="${f.type || 'text'}" placeholder="${esc(f.placeholder || '')}" value="${esc(f.value ?? '')}">`;
-        }
-        return `<div class="field"><label for="${id}">${esc(f.label)}${req}</label>${input}${
-          f.help ? `<div class="help">${esc(f.help)}</div>` : ''}</div>`;
-      })
-      .join('');
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      root.innerHTML = '';
+      closeActiveDialog = null;
+      resolve(value);
+    };
 
-    root.innerHTML = `
-      <div class="modal-backdrop">
-        <div class="modal" role="dialog" aria-label="${esc(title)}">
-          <h3>${esc(title)}</h3>
-          ${message ? `<p>${message}</p>` : ''}
-          <div class="error-msg" hidden></div>
-          <form>${fieldHtml}
-            <div class="modal-actions">
-              <button type="button" class="btn-ghost" data-cancel>Cancel</button>
-              <button type="submit" class="${danger ? 'btn-danger' : 'btn-primary inline'}">${esc(confirmLabel)}</button>
-            </div>
-          </form>
-        </div>
-      </div>`;
+    try {
+      const fieldHtml = fields
+        .map((f) => {
+          const id = `f_${f.name}`;
+          const req = f.required ? ' *' : '';
+          let input;
+          if (f.type === 'textarea') {
+            input = `<textarea id="${id}" placeholder="${esc(f.placeholder || '')}">${esc(f.value || '')}</textarea>`;
+          } else if (f.type === 'select') {
+            input = `<select id="${id}">${f.options
+              .map(([v, l]) => `<option value="${esc(v)}" ${String(f.value ?? '') === String(v) ? 'selected' : ''}>${esc(l)}</option>`)
+              .join('')}</select>`;
+          } else if (f.type === 'checkbox') {
+            return `<div class="field"><label style="display:flex;gap:8px;align-items:center;font-weight:500">
+              <input id="${id}" type="checkbox" style="width:auto" ${f.value ? 'checked' : ''}> ${esc(f.label)}</label></div>`;
+          } else if (f.type === 'multi') {
+            return `<div class="field"><label>${esc(f.label)}${req}</label><div style="display:flex;gap:14px">${f.options
+              .map(([v, l]) => `<label style="display:flex;gap:6px;align-items:center;font-weight:500">
+                <input type="checkbox" style="width:auto" data-multi="${esc(f.name)}" value="${esc(v)}"
+                ${(f.value || []).includes(v) ? 'checked' : ''}> ${esc(l)}</label>`)
+              .join('')}</div></div>`;
+          } else {
+            input = `<input id="${id}" type="${f.type || 'text'}" placeholder="${esc(f.placeholder || '')}" value="${esc(f.value ?? '')}">`;
+          }
+          return `<div class="field"><label for="${id}">${esc(f.label)}${req}</label>${input}${
+            f.help ? `<div class="help">${esc(f.help)}</div>` : ''}</div>`;
+        })
+        .join('');
 
-    const errEl = root.querySelector('.error-msg');
-    const close = (value) => { root.innerHTML = ''; resolve(value); };
-    root.querySelector('[data-cancel]').addEventListener('click', () => close(null));
-    root.querySelector('form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const values = {};
-      for (const f of fields) {
-        if (f.type === 'multi') {
-          values[f.name] = [...root.querySelectorAll(`[data-multi="${f.name}"]:checked`)].map((c) => c.value);
-        } else if (f.type === 'checkbox') {
-          values[f.name] = root.querySelector(`#f_${f.name}`).checked;
-        } else {
-          values[f.name] = root.querySelector(`#f_${f.name}`).value.trim();
-        }
-        const v = values[f.name];
-        if (f.required && (v === '' || (Array.isArray(v) && v.length === 0))) {
-          errEl.textContent = `${f.label} is required.`;
-          errEl.hidden = false;
-          return;
-        }
-      }
-      const btn = root.querySelector('button[type=submit]');
-      btn.disabled = true;
-      try {
-        const result = onSubmit ? await onSubmit(values) : values;
-        close(result ?? true);
-      } catch (err) {
-        errEl.textContent = err.message;
+      root.innerHTML = `
+        <div class="modal-backdrop">
+          <div class="modal${wide ? ' wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+            <form class="modal-form">
+              <div class="modal-head"><h3>${esc(title)}</h3></div>
+              <div class="modal-body">
+                ${message ? `<div class="modal-msg">${message}</div>` : ''}
+                <div class="error-msg" hidden></div>
+                ${fieldHtml}
+              </div>
+              <div class="modal-actions">
+                <button type="button" class="btn-ghost" data-cancel>Cancel</button>
+                <button type="submit" class="${danger ? 'btn-danger' : 'btn-primary inline'}">${esc(confirmLabel)}</button>
+              </div>
+            </form>
+          </div>
+        </div>`;
+
+      const errEl = root.querySelector('.error-msg');
+      const showError = (text) => {
+        errEl.textContent = text;
         errEl.hidden = false;
-        btn.disabled = false;
-      }
-    });
-    root.querySelector('input, textarea, select')?.focus();
+        errEl.scrollIntoView({ block: 'nearest' });
+      };
+      closeActiveDialog = () => finish(null);
+      root.querySelector('[data-cancel]').addEventListener('click', () => finish(null));
+      // A click on the dim backdrop itself (not inside the dialog) cancels.
+      const backdrop = root.querySelector('.modal-backdrop');
+      backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) finish(null); });
+      root.querySelector('form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const values = {};
+        for (const f of fields) {
+          if (f.type === 'multi') {
+            values[f.name] = [...root.querySelectorAll(`[data-multi="${f.name}"]:checked`)].map((c) => c.value);
+          } else if (f.type === 'checkbox') {
+            values[f.name] = root.querySelector(`#f_${f.name}`).checked;
+          } else {
+            values[f.name] = root.querySelector(`#f_${f.name}`).value.trim();
+          }
+          const v = values[f.name];
+          if (f.required && (v === '' || (Array.isArray(v) && v.length === 0))) {
+            showError(`${f.label} is required.`);
+            return;
+          }
+          if (f.minLength && typeof v === 'string' && v.length < f.minLength) {
+            showError(`${f.label} needs at least ${f.minLength} characters.`);
+            return;
+          }
+        }
+        const btn = root.querySelector('button[type=submit]');
+        btn.disabled = true;
+        try {
+          const result = onSubmit ? await onSubmit(values) : values;
+          finish(result ?? true);
+        } catch (err) {
+          showError(err.message);
+          btn.disabled = false;
+        }
+      });
+      root.querySelector('input, textarea, select')?.focus();
+    } catch (err) {
+      // Never leave an overlay without a dialog on it.
+      console.error('dialog failed to render', err);
+      finish(null);
+      toast(`Could not open "${title}": ${err.message}`, false, 9000);
+      return;
+    }
+
+    // After layout and paint: is the dialog really there for a person?
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (settled) return;
+      const problem = dialogVisibilityProblem(root.querySelector('.modal'));
+      if (!problem) return;
+      console.error(`dialog "${title}" is not visible: ${problem}`);
+      settled = true;
+      root.innerHTML = '';
+      closeActiveDialog = null;
+      toast('The dialog could not be displayed (a browser extension or an outdated page may be hiding it) — using the browser\'s own prompts instead.', false, 9000);
+      nativeDialogFallback({ title, message, fields, confirmLabel, onSubmit }).then(resolve);
+    }));
   });
+}
+
+// The console uses no service worker. One scoped to /admin (left over from
+// an earlier build served here) could keep serving stale console files, so
+// remove it; root-scoped workers belong to other apps and are left alone.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations()
+    .then((regs) => regs.filter((r) => new URL(r.scope).pathname.startsWith('/admin')).forEach((r) => r.unregister()))
+    .catch(() => {});
 }
 
 /* =====================================================================
@@ -648,6 +775,178 @@ async function changeUserStatus(user, status) {
   });
 }
 
+/* ---------- Permanent deletion ---------- */
+
+/** Must match REASON in deletion.admin.js — the server re-checks it. */
+const REASON_MIN = 3;
+const deleteReasonField = () => ({
+  name: 'reason', label: 'Reason', type: 'textarea', required: true, minLength: REASON_MIN,
+  help: `At least ${REASON_MIN} characters. Recorded in the audit log.`,
+});
+
+const countList = (obj) => Object.entries(obj)
+  .map(([k, v]) => `<li>${esc(k.replace(/([A-Z])/g, ' $1').toLowerCase())}: <b>${esc(typeof v === 'number' ? num(v) : String(v ?? '—'))}</b></li>`)
+  .join('');
+
+/**
+ * Permanently deletes an account after showing exactly what goes and what
+ * stays. The server re-checks everything (admin, blockers, typed id); this
+ * dialog only makes the consequences impossible to miss.
+ */
+async function deleteAccount(id, label) {
+  let preview;
+  try {
+    preview = await api(`/admin/users/${id}/deletion-preview`);
+  } catch (err) {
+    toast(`Could not load the deletion preview: ${err.message}`, false);
+    return null;
+  }
+  if (preview.blockers.length) {
+    await dialog({
+      title: `${label} cannot be deleted yet`,
+      message: `<ul class="del-list">${preview.blockers.map((b) => `<li>${esc(b.message)}</li>`).join('')}</ul>`,
+      confirmLabel: 'OK',
+    });
+    return null;
+  }
+  const result = await dialog({
+    title: `Permanently delete ${label}?`,
+    message: `<b class="del-warn">This cannot be undone.</b>
+      <div class="del-cols">
+        <div><h4>Deleted (rows and stored files)</h4><ul class="del-list">${countList(preview.deleted)}</ul></div>
+        <div><h4>Anonymised</h4><ul class="del-list">${countList(preview.anonymized)}</ul></div>
+        <div><h4>Retained for accounting and audit</h4><ul class="del-list">${countList(preview.retained)}</ul></div>
+      </div>`,
+    fields: [
+      deleteReasonField(),
+      { name: 'confirm', label: `Type the account id (${id}) to confirm`, required: true },
+    ],
+    confirmLabel: 'Delete permanently',
+    danger: true,
+    wide: true,
+    onSubmit: (v) => api(`/admin/users/${id}`, { method: 'DELETE', body: { reason: v.reason, confirm: v.confirm } }),
+  });
+  if (result && result.status === 'deleted') {
+    const files = Object.values(result.storageObjectsRemoved).reduce((a, b) => a + b, 0);
+    toast(`Account #${id} deleted — ${files} stored file(s) removed, financial history kept (audit #${result.auditId})`, true, 9000);
+  }
+  return result;
+}
+
+/** Permanently deletes one upload (post, creator photo or chat photo). */
+/** What a post is, for the delete dialog: ID, author, media type, caption.
+ * Only fields already shown in the Content table — nothing extra. */
+function postDeleteDetails(p) {
+  const caption = (p.caption || '').trim();
+  return [
+    ['Post', `#${p.id}`],
+    ['Author', `${p.author_name || '—'} (#${p.author_id})`],
+    ['Media', p.media_type === 'video' ? 'Video' : 'Image'],
+    ['Status', p.status === 'removed' ? (p.removed_by_admin ? 'Removed by admin' : 'Removed by author') : 'Active'],
+    ['Caption', caption ? (caption.length > 140 ? `${caption.slice(0, 140)}…` : caption) : '—'],
+  ];
+}
+
+async function deleteUpload(kind, id, details = null) {
+  const spec = {
+    post: { path: `/admin/posts/${id}`, what: `post #${id}`, note: 'The post and its image/video file are deleted. Use "Remove" instead if it may need restoring.' },
+    photo: { path: `/admin/listener-photos/${id}`, what: `creator photo #${id}`, note: 'The photo and its file are deleted. A creator left below the photo minimum is taken offline.' },
+    chat: { path: `/admin/chat-media/${id}`, what: `chat photo (message #${id})`, note: 'The message, its reactions and the stored image are deleted from the conversation.' },
+  }[kind];
+  const result = await dialog({
+    title: `Permanently delete ${spec.what}?`,
+    message: `<b class="del-warn">This cannot be undone.</b> ${esc(spec.note)}${
+      details ? `<dl class="del-details">${details.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : ''}`,
+    fields: [deleteReasonField()],
+    confirmLabel: 'Delete permanently',
+    danger: true,
+    onSubmit: (v) => api(spec.path, { method: 'DELETE', body: { reason: v.reason } }),
+  });
+  if (result && result.deleted) {
+    const files = result.storageObjectsRemoved ? `${result.storageObjectsRemoved} file removed` : 'file was already gone';
+    toast(`Deleted ${spec.what} (${files}${result.takenOffline ? '; creator taken offline' : ''})`, true, 9000);
+  }
+  return result;
+}
+
+/** The "Uploads" panel in a user drawer: every post, creator photo and chat
+ * photo the account owns, each with its own permanent delete. */
+async function renderUploads(host, userId) {
+  host.innerHTML = '<div class="sub">Loading uploads…</div>';
+  let up;
+  try {
+    up = await api(`/admin/users/${userId}/uploads`);
+  } catch (err) {
+    host.innerHTML = `<div class="sub">! ${esc(err.message)}</div>`;
+    return;
+  }
+  const tile = (media, meta, kind, id) => `
+    <div class="upload-tile">${media}<div class="sub">${meta}</div>
+      ${kind === 'chat' ? `<button class="btn-ghost btn-sm" data-view-chat="${id}">View photo</button>` : ''}
+      <button class="btn-danger btn-sm" data-del="${kind}" data-id="${id}">Delete permanently</button></div>`;
+  const posts = up.posts.map((p) => tile(postPreview(p), `Post #${p.id} · ${badge(p.media_type)} ${p.status !== 'active' ? badge(p.status) : ''}`, 'post', p.id)).join('');
+  const photos = up.photos.map((p) => tile(
+    p.url ? `<img src="${esc(p.url)}" alt="" class="thumb" style="width:64px;height:64px" loading="lazy">` : postPreview({}),
+    `Photo #${p.id}`, 'photo', p.id)).join('');
+  const chat = up.chatPhotos.map((m) => tile(
+    '<div class="ph" style="width:64px;height:64px;border-radius:8px;display:grid;place-items:center;color:var(--text-faint);font-size:11px;border:1px solid var(--border)">private</div>',
+    `Message #${m.id} · to #${m.other_user_id} · ${when(m.created_at)}`, 'chat', m.id)).join('');
+  host.innerHTML = `
+    <h4>Feed posts (${up.posts.length})</h4><div class="upload-grid">${posts || '<span class="sub">None.</span>'}</div>
+    <h4>Creator photos (${up.photos.length})</h4><div class="upload-grid">${photos || '<span class="sub">None.</span>'}</div>
+    <h4>Chat photos sent (${up.chatPhotos.length}) <span class="sub">— not previewed; private messages</span></h4>
+    <div class="upload-grid">${chat || '<span class="sub">None.</span>'}</div>`;
+  host.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (await deleteUpload(b.dataset.del, b.dataset.id)) renderUploads(host, userId);
+  }));
+  host.querySelectorAll('[data-view-chat]').forEach((b) => b.addEventListener('click', () => openChatPhoto(b.dataset.viewChat, userId)));
+}
+
+/** Inspector for ONE chat photo: the image itself (a 5-minute signed URL;
+ * every view is audit-logged server-side), who sent it to whom, and the
+ * permanent delete. Opened only by an explicit click — chat photos are
+ * never previewed in bulk. */
+function openChatPhoto(messageId, backToUserId) {
+  drawer.open(`Chat photo · message #${messageId}`, async (body) => {
+    const m = await api(`/admin/chat-media/${messageId}`);
+    body.innerHTML = `
+      <div class="drawer-actions">
+        <button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>
+        ${backToUserId ? '<button class="btn-ghost btn-sm" data-act="back">Back to user</button>' : ''}
+      </div>
+      <div class="panel">${m.url
+        ? `<img src="${esc(m.url)}" alt="chat photo" style="max-width:100%;max-height:480px;border-radius:10px;display:block">`
+        : '<div class="empty">The stored image could not be loaded.</div>'}</div>
+      <div class="panel"><h3>Message</h3>${kv([
+        ['Sent by', `${esc(m.sender.name || '—')} #${m.sender.id}`],
+        ['Sent to', `${esc(m.recipient.name || '—')} #${m.recipient.id}`],
+        ['Conversation', `#${m.conversationId}`],
+        ['Sent', esc(fmtDate(m.createdAt))],
+        ['Note', 'Private message. This view was recorded in the audit log.'],
+      ])}</div>`;
+    body.querySelector('[data-act=delete]').addEventListener('click', async () => {
+      if (!(await deleteUpload('chat', m.id))) return;
+      if (backToUserId) openUser(backToUserId); else drawer.close();
+    });
+    body.querySelector('[data-act=back]')?.addEventListener('click', () => openUser(backToUserId));
+  });
+}
+
+/** A visible per-row Delete for account tables. Admin accounts and
+ * already-deleted ones get none (the server refuses admins regardless). */
+function rowDeleteButton(id, label, { isAdmin = false, deleted = false } = {}) {
+  if (isAdmin) return '<span class="sub">admin</span>';
+  if (deleted) return '<span class="sub">deleted</span>';
+  return `<button class="btn-danger btn-sm" data-row-del="${id}" data-label="${esc(label || `#${id}`)}" title="Permanently delete account #${id}">Delete</button>`;
+}
+
+function wireRowDeletes(tbody, onDone) {
+  tbody.querySelectorAll('[data-row-del]').forEach((b) => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (await deleteAccount(b.dataset.rowDel, b.dataset.label)) onDone();
+  }));
+}
+
 function openUser(id) {
   drawer.open(`User #${id}`, async (body) => {
     const u = await api(`/admin/users/${id}`);
@@ -658,6 +957,7 @@ function openUser(id) {
         ${u.status === 'suspended' ? '<button class="btn-ok btn-sm" data-act="restore">Restore account</button>' : ''}
         ${L ? '<button class="btn-ghost btn-sm" data-act="listener">Open creator profile</button>' : ''}
         ${typeof openWallet === 'function' ? '<button class="btn-ghost btn-sm" data-act="wallet">Wallet & ledger</button>' : ''}
+        ${!u.isAdmin ? '<button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>' : ''}
       </div>
       <div class="cols-2">
         <div class="panel"><h3>Profile</h3>${kv([
@@ -711,8 +1011,13 @@ function openUser(id) {
         { label: 'Status', render: (r) => badge(r.status) },
         { label: 'When', render: (r) => when(r.created_at) },
       ], u.reports, 'No reports.')}</div>
+      <div class="panel"><h3>Uploads</h3><div data-uploads></div></div>
       <div class="panel"><h3>Admin history</h3>${timeline(u.history)}</div>`;
 
+    renderUploads(body.querySelector('[data-uploads]'), u.id);
+    body.querySelector('[data-act=delete]')?.addEventListener('click', async () => {
+      if (await deleteAccount(u.id, u.name || `user #${u.id}`)) drawer.refresh();
+    });
     body.querySelector('[data-act=suspend]')?.addEventListener('click', async () => {
       if (await changeUserStatus(u, 'suspended')) { toast('Account suspended'); drawer.refresh(); }
     });
@@ -764,6 +1069,7 @@ function openListener(id) {
         ${k.status === 'pending' ? '<button class="btn-ok btn-sm" data-act="approve">Approve application</button><button class="btn-danger btn-sm" data-act="reject">Reject</button>' : ''}
         ${k.status === 'approved' ? '<button class="btn-danger btn-sm" data-act="reject">Revoke approval</button>' : ''}
         <button class="btn-ghost btn-sm" data-act="user">Open user account</button>
+        <button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>
       </div>
       <div class="cols-2">
         <div class="panel"><h3>Status</h3>${kv([
@@ -784,9 +1090,9 @@ function openListener(id) {
         ])}</div>
       </div>
       <div class="panel"><h3>Photos (${l.photos.length})</h3>${l.photos.length
-        ? `<div class="photo-grid">${l.photos.map((p) => p.url
+        ? `<div class="photo-grid">${l.photos.map((p) => `<div class="photo-cell">${p.url
             ? `<a href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.url)}" alt="photo ${p.id}" loading="lazy"></a>`
-            : '<div class="ph"></div>').join('')}</div>`
+            : '<div class="ph"></div>'}<button class="btn-danger btn-sm" data-photo-del="${p.id}">Delete photo #${p.id}</button></div>`).join('')}</div>`
         : '<div class="empty" style="padding:14px">No photos uploaded yet.</div>'}</div>
       <div class="panel"><h3>KYC (admin only)</h3>${kv([
         ['Status', badge(k.status)],
@@ -829,6 +1135,12 @@ function openListener(id) {
     body.querySelector('[data-act=approve]')?.addEventListener('click', () => reviewKyc(l, true, () => drawer.refresh()));
     body.querySelector('[data-act=reject]')?.addEventListener('click', () => reviewKyc(l, false, () => drawer.refresh()));
     body.querySelector('[data-act=user]').addEventListener('click', () => openUser(l.id));
+    body.querySelectorAll('[data-photo-del]').forEach((b) => b.addEventListener('click', async () => {
+      if (await deleteUpload('photo', b.dataset.photoDel)) drawer.refresh();
+    }));
+    body.querySelector('[data-act=delete]').addEventListener('click', async () => {
+      if (await deleteAccount(l.id, l.name || `creator #${l.id}`)) drawer.refresh();
+    });
     body.querySelectorAll('[data-report]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();
       openReport(a.dataset.report);
@@ -965,8 +1277,10 @@ view('users', 'Users', 'Operate', (el) => {
       { label: 'Coins', sort: 'balance', num: true, render: (r) => coins(r.coinBalance) },
       { label: 'Joined', sort: 'created', render: (r) => when(r.createdAt) },
       { label: 'Last sign-in', sort: 'lastActive', render: (r) => when(r.lastActive) },
+      { label: 'Actions', pin: true, render: (r) => rowDeleteButton(r.id, r.name || r.phone, { isAdmin: r.isAdmin, deleted: r.status === 'deleted' }) },
     ],
     onRow: (r) => openUser(r.id),
+    afterLoad: (rows, tbody) => wireRowDeletes(tbody, () => table.reload()),
   });
   el.querySelector('[data-create]').addEventListener('click', async () => {
     const created = await dialog({
@@ -1026,8 +1340,10 @@ view('listeners', 'Creators / Listeners', 'Operate', (el) => {
       { label: 'Rating', sort: 'rating', num: true, render: (r) => r.rating.toFixed(1) },
       { label: 'Account', render: (r) => badge(r.accountStatus) },
       { label: 'Created', sort: 'created', render: (r) => when(r.createdAt) },
+      { label: 'Actions', pin: true, render: (r) => rowDeleteButton(r.id, r.name || `creator #${r.id}`, { deleted: r.accountStatus === 'deleted' }) },
     ],
     onRow: (r) => openListener(r.id),
+    afterLoad: (rows, tbody) => wireRowDeletes(tbody, () => table.reload()),
   });
   el.querySelector('[data-create]').addEventListener('click', async () => {
     const created = await dialog({
@@ -1219,7 +1535,7 @@ function postPreview(p, big = false) {
 /* ---------- Content ---------- */
 
 view('content', 'Content / Posts', 'Activity', (el) => {
-  el.innerHTML = head('Content / Posts', 'Feed posts. Removing hides a post but keeps its media so it can be restored; posts their author deleted cannot be restored. Every action needs a reason and is audit-logged.') + '<div id="t"></div>';
+  el.innerHTML = head('Content / Posts', 'Feed posts. Removing hides a post but keeps its media so it can be restored; posts their author deleted cannot be restored. Delete permanently (in a post) erases the post and its stored file for good. Every action needs a reason and is audit-logged.') + '<div id="t"></div>';
   const table = dataTable(el.querySelector('#t'), {
     endpoint: '/admin/posts',
     search: 'Caption, author, phone or #id…',
@@ -1238,9 +1554,15 @@ view('content', 'Content / Posts', 'Activity', (el) => {
       { label: 'Author reports', sort: 'reports', num: true, render: (p) => num(p.author_reports) },
       { label: 'Status', render: (p) => (p.status === 'removed' ? `${badge('removed')}<span class="sub">${p.removed_by_admin ? 'by admin' : 'by author'}</span>` : badge('active')) },
       { label: 'Posted', sort: 'created', render: (p) => when(p.created_at) },
+      { label: 'Actions', pin: true, render: (p) => `<button class="btn-danger btn-sm" data-post-del="${p.id}" title="Permanently delete post #${p.id} and its file">Delete</button>` },
     ],
     onRow: (p) => openPost(p, () => table.reload()),
     afterLoad: (rows, tbody) => {
+      tbody.querySelectorAll('[data-post-del]').forEach((b) => b.addEventListener('click', async (e) => {
+        const post = rows.find((r) => String(r.id) === b.dataset.postDel);
+        e.stopPropagation();
+        if (await deleteUpload('post', b.dataset.postDel, post ? postDeleteDetails(post) : null)) table.reload();
+      }));
       tbody.querySelectorAll('[data-author]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openUser(a.dataset.author); }));
     },
   });
@@ -1252,6 +1574,7 @@ function openPost(p, onChange) {
       <div class="drawer-actions">
         ${p.status === 'active' ? '<button class="btn-danger btn-sm" data-act="remove">Remove post</button>' : ''}
         ${p.restorable ? '<button class="btn-ok btn-sm" data-act="restore">Restore post</button>' : ''}
+        <button class="btn-danger btn-sm" data-act="purge">Delete permanently</button>
         <button class="btn-ghost btn-sm" data-act="author">Open author</button>
       </div>
       <div class="panel">${postPreview(p, true)}</div>
@@ -1278,6 +1601,9 @@ function openPost(p, onChange) {
     };
     body.querySelector('[data-act=remove]')?.addEventListener('click', act('remove'));
     body.querySelector('[data-act=restore]')?.addEventListener('click', act('restore'));
+    body.querySelector('[data-act=purge]').addEventListener('click', async () => {
+      if (await deleteUpload('post', p.id, postDeleteDetails(p))) { drawer.close(); onChange?.(); }
+    });
     body.querySelector('[data-act=author]').addEventListener('click', () => openUser(p.author_id));
   });
 }

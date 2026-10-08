@@ -6,6 +6,7 @@ import 'api/chat_api.dart';
 import 'api/config_api.dart';
 import 'api/feed_api.dart';
 import 'api/listeners_api.dart';
+import 'api/live_api.dart';
 import 'api/notifications_api.dart';
 import 'api/payouts_api.dart';
 import 'api/safety_api.dart';
@@ -48,6 +49,9 @@ final chatApiProvider = Provider<ChatApi>(
 );
 final feedApiProvider = Provider<FeedApi>(
   (ref) => FeedApi(ref.watch(apiClientProvider)),
+);
+final liveApiProvider = Provider<LiveApi>(
+  (ref) => LiveApi(ref.watch(apiClientProvider)),
 );
 final safetyApiProvider = Provider<SafetyApi>(
   (ref) => SafetyApi(ref.watch(apiClientProvider)),

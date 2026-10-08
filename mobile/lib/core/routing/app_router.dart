@@ -23,7 +23,9 @@ import '../../features/profile/ledger_screen.dart';
 import '../../features/notifications/notifications_screen.dart';
 import '../../features/profile/profile_screen.dart';
 import '../../features/listener_profile/listener_profile_screen.dart';
+import '../../features/live/live_player_screen.dart';
 import '../../features/live/live_screen.dart';
+import '../../shared/models/live.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/profile_setup/profile_setup_screen.dart';
 import '../../features/wallet/wallet_screen.dart';
@@ -55,6 +57,12 @@ class Routes {
 
   /// Web only: the top bar's Live item — an empty placeholder for now.
   static const live = '/live';
+
+  /// Web only: the internal player for one provider model (not a Moco
+  /// account — the username is the provider's).
+  static const liveWatch = '/live/watch/:username';
+  static String liveWatchPath(String username) =>
+      '/live/watch/${Uri.encodeComponent(username)}';
 
   /// Deep-link safe: the listener id is a path segment, so
   /// `moco://listener/42` maps cleanly once deep links are enabled.
@@ -184,6 +192,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: Routes.postCompose,
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const PostComposerScreen(),
+      ),
+      GoRoute(
+        path: Routes.liveWatch,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => LivePlayerScreen(
+          username: state.pathParameters['username'] ?? '',
+          model: state.extra is LiveModel ? state.extra as LiveModel : null,
+        ),
       ),
       GoRoute(
         path: Routes.notifications,

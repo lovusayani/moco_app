@@ -26,7 +26,7 @@ enum WebTopItem {
 
   /// The item to highlight at [location], or null where none owns the page.
   static WebTopItem? forLocation(String location, CallMode mode) {
-    if (location.startsWith(Routes.live)) return live;
+    if (location == Routes.live) return live;
     if (location.startsWith(Routes.discovery)) {
       return mode == CallMode.video ? video : call;
     }
@@ -37,7 +37,7 @@ enum WebTopItem {
   /// items, so the bar stays up there too — otherwise Live would be a dead
   /// end with no way back to Call/Video from the top.
   static bool showsOn(String location) =>
-      location.startsWith(Routes.discovery) || location.startsWith(Routes.live);
+      location.startsWith(Routes.discovery) || location == Routes.live;
 }
 
 /// Web only: [ menu ]  [ call | live | video ]  [ wallet ] [ bell ].

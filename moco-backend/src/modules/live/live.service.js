@@ -288,12 +288,9 @@ async function list(viewer, { limit = 24, offset = 0, language, country, tag, so
   ];
 
   // Selection: all eligible / selected only / all except hidden.
-  if (sel.mode === 'selected') {
-    where.push(`username = ANY(${p(sel.selected)}::text[])`);
-    if (sel.hidden.length) where.push(`NOT (username = ANY(${p(sel.hidden)}::text[]))`);
-  } else if (sel.mode === 'all_except_blocked' && sel.hidden.length) {
-    where.push(`NOT (username = ANY(${p(sel.hidden)}::text[]))`);
-  }
+  if (sel.mode === 'selected') where.push(`username = ANY(${p(sel.selected)}::text[])`);
+  // An explicitly hidden model stays hidden in every mode — "all" included.
+  if (sel.hidden.length) where.push(`NOT (username = ANY(${p(sel.hidden)}::text[]))`);
 
   if (language) where.push(`${p(language)}::text = ANY(languages)`);
   if (country) where.push(`country = ${p(country)}`);

@@ -57,6 +57,7 @@ class AppPreferences {
   static const _themeModeKey = 'moco_theme_mode';
   static const _fontChoiceKey = 'moco_font_choice';
   static const _discoveryColumnsKey = 'moco_discovery_columns';
+  static const _liveAgeConfirmedKey = 'moco_live_age_confirmed';
 
   static Future<AppPreferences> create() async =>
       AppPreferences(await SharedPreferences.getInstance());
@@ -97,4 +98,12 @@ class AppPreferences {
 
   Future<void> setDiscoveryColumns(int value) =>
       _prefs.setInt(_discoveryColumnsKey, value);
+
+  /// Whether this browser/device already confirmed Live's 18+ gate. Asked
+  /// once per device, not on every visit; the backend still requires a
+  /// signed-in account for every Live request.
+  bool get liveAgeConfirmed => _prefs.getBool(_liveAgeConfirmedKey) ?? false;
+
+  Future<void> setLiveAgeConfirmed(bool value) =>
+      _prefs.setBool(_liveAgeConfirmedKey, value);
 }

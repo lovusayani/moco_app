@@ -214,7 +214,15 @@ async function fetchDeletedModels({ since, until } = {}) {
  * provider docs. modelName is chosen per model by the client.
  */
 function playerConfig() {
-  return { type: 'stripchat-player', userId: env.stripcash.userId, strict: 1, autoplay: 'all' };
+  return {
+    type: 'stripchat-player',
+    userId: env.stripcash.userId,
+    strict: 1,
+    autoplay: 'all',
+    // The provider's player script. Null until configured: the app then
+    // shows a "player not available" state rather than guessing a URL.
+    scriptUrl: env.stripcash.playerScriptUrl || null,
+  };
 }
 
 /** Concise, secret-free log line for a provider failure. */

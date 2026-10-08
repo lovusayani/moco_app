@@ -223,7 +223,14 @@ class AppShell extends ConsumerWidget {
                   visible:
                       !location.startsWith(Routes.discovery) ||
                       ref.watch(discoveryWebTopBarVisibleProvider),
-                  child: const WebTopBar(),
+                  // Live goes full-width on desktop; the bar stays a sensible width.
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1200),
+                      child: const WebTopBar(),
+                    ),
+                  ),
                 ),
               ),
             if (isWeb)

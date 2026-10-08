@@ -142,6 +142,9 @@ const env = {
     apiKey: optional('STRIPCASH_API_KEY', ''),
     userId: optional('STRIPCASH_USER_ID', ''),
     baseUrl: optional('STRIPCASH_API_BASE', 'https://go.whitetrafsa.com'),
+    // The official StripchatPlayer script (from the affiliate dashboard's
+    // player docs). Not secret. Unset = the app shows the player as unavailable.
+    playerScriptUrl: optional('STRIPCASH_PLAYER_SCRIPT_URL', ''),
   },
 
   fcm: {

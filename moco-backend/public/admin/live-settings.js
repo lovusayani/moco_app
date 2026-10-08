@@ -291,7 +291,7 @@
     /* ---------------- featured / hidden / selected */
 
     const MODE_HELP = {
-      all: 'Every eligible model is shown. The hidden list is kept but not applied in this mode.',
+      all: 'Every eligible model is shown, except any on the Hidden list (hidden models stay hidden in every mode).',
       selected: 'Only models on the Selected list are shown (minus any on the Hidden list).',
       all_except_blocked: 'Every eligible model except those on the Hidden list.',
     };
@@ -302,7 +302,7 @@
         const names = draft.selection[list];
         $(`[data-count="${list}"]`).textContent = `${names.length}/${maxList}`;
         const inactive =
-          (list === 'hidden' && draft.selection.mode === 'all') || (list === 'selected' && draft.selection.mode !== 'selected');
+          list === 'selected' && draft.selection.mode !== 'selected';
         $(`[data-list="${list}"]`).classList.toggle('ls-inactive', inactive);
         $(`[data-tags="${list}"]`).innerHTML = names.length
           ? names

@@ -5,6 +5,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:moco/core/api/chat_api.dart';
 import 'package:moco/core/api/feed_api.dart';
 import 'package:moco/core/api/listeners_api.dart';
+import 'package:moco/core/api/live_api.dart';
 import 'package:moco/core/platform/platform_capabilities.dart';
 import 'package:moco/core/providers.dart';
 import 'package:moco/core/routing/app_router.dart';
@@ -12,6 +13,7 @@ import 'package:moco/core/theme/moco_theme.dart';
 import 'package:moco/features/app_shell/app_shell.dart';
 import 'package:moco/shared/models/feed.dart';
 import 'package:moco/shared/models/listener.dart';
+import 'package:moco/shared/models/live.dart';
 import 'package:moco/shared/models/user.dart';
 
 import '../support/harness.dart';
@@ -26,6 +28,16 @@ class _MockListenersApi extends Mock implements ListenersApi {}
 class _MockFeedApi extends Mock implements FeedApi {}
 
 class _MockChatApi extends Mock implements ChatApi {}
+
+/// Live switched off: this file is about navigation, not Live's content.
+class _OffLiveApi implements LiveApi {
+  @override
+  Future<LiveConfig> config() async => const LiveConfig(enabled: false);
+
+  @override
+  Future<LiveModelsPage> models({required int limit, int offset = 0}) async =>
+      const LiveModelsPage(available: false, models: []);
+}
 
 const _web = PlatformCapabilities(isWeb: true);
 const _native = PlatformCapabilities(isWeb: false);
@@ -94,6 +106,7 @@ void main() {
           listenersApiProvider.overrideWithValue(listenersApi),
           feedApiProvider.overrideWithValue(feedApi),
           chatApiProvider.overrideWithValue(chatApi),
+          liveApiProvider.overrideWithValue(_OffLiveApi()),
         ],
         child: Consumer(
           builder: (context, ref, _) => MaterialApp.router(
@@ -268,19 +281,19 @@ void main() {
       expect(discoverCalls().last.callType, 'video');
     });
 
-    testWidgets('Live opens an empty placeholder', (tester) async {
+    testWidgets('Live opens the Live screen', (tester) async {
       await pumpApp(tester, _web);
       await tester.tap(find.byKey(const Key('nav_live')));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('topbar_live')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('live_empty')), findsOneWidget);
+      expect(find.byKey(const Key('live_unavailable')), findsOneWidget);
       expect(selectedTopItem(tester), 'live');
 
       await tester.tap(find.byKey(const Key('topbar_call')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('live_empty')), findsNothing);
+      expect(find.byKey(const Key('live_unavailable')), findsNothing);
       expect(selectedTopItem(tester), 'call');
     });
 

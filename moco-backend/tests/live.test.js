@@ -415,7 +415,7 @@ test('GET /api/live/config exposes the player userId and the age gate, never the
     enabled: true,
     provider: 'stripcash',
     ...liveSettings.clientView(liveSettings.DEFAULTS),
-    player: { type: 'stripchat-player', userId: USER_ID, strict: 1, autoplay: 'all' },
+    player: { type: 'stripchat-player', userId: USER_ID, strict: 1, autoplay: 'all', scriptUrl: null },
   });
   assert.equal(res.body.requireAgeConfirmation, true);
   assert.equal('selection' in res.body, false, 'curation lists stay admin-side');
@@ -574,7 +574,7 @@ test('selection modes, featured and hidden', async () => {
   // r4 is a group show (public only by default); r5 is geobanned for DE.
   assert.deepEqual(await preview({}), ['r1', 'r2', 'r3']);
   assert.deepEqual(await preview({ status: 'any' }), ['r1', 'r2', 'r3', 'r4']);
-  assert.deepEqual(await preview({ selection: { mode: 'all', featured: [], hidden: ['r2'], selected: [] } }), ['r1', 'r2', 'r3'], 'hidden list not applied in "all"');
+  assert.deepEqual(await preview({ selection: { mode: 'all', featured: [], hidden: ['r2'], selected: [] } }), ['r1', 'r3'], 'an explicitly hidden model stays hidden in "all" too');
   assert.deepEqual(await preview({ selection: { mode: 'all_except_blocked', featured: [], hidden: ['r2'], selected: [] } }), ['r1', 'r3']);
   assert.deepEqual(await preview({ selection: { mode: 'selected', featured: [], hidden: ['r3'], selected: ['r3', 'r2'] } }), ['r2']);
   assert.deepEqual(

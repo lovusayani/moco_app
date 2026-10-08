@@ -48,6 +48,11 @@ dependencies:
   in_app_purchase: ^3.3.0
   google_fonts: ^8.2.1
 
+  # Web-only interop (Live: opening provider links, hosting the official
+  # Stripchat player). Already a transitive dependency; declared because it is
+  # imported directly behind a conditional import.
+  web: ^1.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

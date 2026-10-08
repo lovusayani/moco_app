@@ -11,7 +11,7 @@ const presence = require('../../realtime/presence');
 const socketServer = require('../../realtime/socket.server');
 const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
-const { isAdminPhone } = require('../../middleware/auth');
+const { isAdminUser } = require('../../middleware/auth');
 const { AppError, notFound, badRequest, conflict } = require('../../utils/errors');
 const logger = require('../../utils/logger');
 const {
@@ -133,7 +133,7 @@ async function trackedDeletion(req, { targetType, targetId }, fn) {
 async function deletionBlockers(run, user, adminId) {
   const blockers = [];
   if (Number(user.id) === Number(adminId)) blockers.push({ code: 'self', message: 'You cannot delete your own account.' });
-  if (isAdminPhone(user.phone)) blockers.push({ code: 'admin_account', message: 'Admin accounts cannot be deleted from the console.' });
+  if (isAdminUser(user)) blockers.push({ code: 'admin_account', message: 'Admin accounts cannot be deleted from the console.' });
   const { rows } = await run(
     `SELECT
        (SELECT count(*)::int FROM calls
@@ -204,7 +204,7 @@ async function deletionSummary(run, userId) {
       notifications: r.notifications,
     },
     anonymized: {
-      account: 'phone, name, avatar, gender and push token cleared; status deleted',
+      account: 'phone, email, name, avatar, gender and push token cleared; status deleted',
       creatorProfile: 'bio, KYC name, KYC document link, UPI ID and review note cleared; offline',
       ratingsGiven: r.ratings_given,
       signInEvents: r.auth_events,
@@ -229,7 +229,7 @@ router.get(
   '/users/:id/deletion-preview',
   validate(idParam, 'params'),
   asyncHandler(async (req, res) => {
-    const { rows } = await query('SELECT id, phone, status FROM users WHERE id = $1', [req.params.id]);
+    const { rows } = await query('SELECT id, phone, email, status FROM users WHERE id = $1', [req.params.id]);
     const user = rows[0];
     if (!user) throw notFound('User');
     res.json({
@@ -263,7 +263,7 @@ router.delete(
       throw badRequest('confirmation_mismatch', `Type the account id (${id}) to confirm permanent deletion`);
     }
 
-    const { rows: found } = await query('SELECT id, phone, status FROM users WHERE id = $1', [id]);
+    const { rows: found } = await query('SELECT id, phone, email, status FROM users WHERE id = $1', [id]);
     if (!found[0]) throw notFound('User');
     const pre = await deletionBlockers(query, found[0], req.user.id);
     if (pre.length) throw conflict(pre[0].code, pre[0].message);
@@ -276,7 +276,7 @@ router.delete(
     const result = await trackedDeletion(req, { targetType: 'user', targetId: id }, ({ remove, sweep, removed }) =>
       withTransaction(async (client) => {
         const { rows } = await client.query(
-          'SELECT id, phone, status, role FROM users WHERE id = $1 FOR UPDATE',
+          'SELECT id, phone, email, status, role FROM users WHERE id = $1 FOR UPDATE',
           [id],
         );
         const user = rows[0];
@@ -335,9 +335,9 @@ router.delete(
         // Records that must stay for accounting or moderation: anonymised.
         await client.query('UPDATE call_ratings SET comment = NULL WHERE rater_id = $1', [id]);
         await client.query(
-          `UPDATE auth_events SET phone = 'deleted_' || $1::text, ip = NULL
-            WHERE user_id = $1 OR phone = $2`,
-          [id, user.phone],
+          `UPDATE auth_events SET phone = 'deleted_' || $1::text, email = NULL, ip = NULL
+            WHERE user_id = $1 OR phone = $2 OR (email IS NOT NULL AND email = $3)`,
+          [id, user.phone, user.email],
         );
         await client.query(
           `UPDATE listener_profiles
@@ -350,7 +350,7 @@ router.delete(
         // request, so every outstanding token stops working at COMMIT.
         await client.query(
           `UPDATE users
-              SET status = $2, phone = 'deleted_' || id, display_name = NULL, avatar_url = NULL,
+              SET status = $2, phone = 'deleted_' || id, email = NULL, display_name = NULL, avatar_url = NULL,
                   gender = NULL, fcm_token = NULL, updated_at = now()
             WHERE id = $1`,
           [id, USER_STATUS.DELETED],

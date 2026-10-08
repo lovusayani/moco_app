@@ -432,34 +432,81 @@ function dialogVisibilityProblem(modal) {
 }
 
 /**
- * Last-resort path when the styled dialog cannot be shown: the browser's own
- * prompt/confirm boxes, which no page stylesheet or content blocker can
- * hide. Same fields, same validation, same onSubmit — just plainer.
+ * Last-resort path when the styled dialog cannot be shown: the same dialog
+ * rebuilt as a native <dialog> opened with showModal(). That puts it in the
+ * browser's top layer — above every z-index, overlay or stray stylesheet —
+ * and its look is inline, so nothing the console's CSS does can hide it.
+ * Same fields, validation, loading state and in-dialog errors; never the
+ * browser's alert/prompt/confirm boxes.
  */
-async function nativeDialogFallback({ title, message, fields, confirmLabel, onSubmit }) {
-  const plain = (html) => { const d = document.createElement('div'); d.innerHTML = html || ''; return d.textContent.replace(/\s+/g, ' ').trim(); };
-  const values = {};
-  for (const f of fields) {
-    if (['checkbox', 'multi', 'select'].includes(f.type)) values[f.name] = f.value ?? (f.type === 'multi' ? [] : '');
-    else {
-      for (;;) {
-        const v = window.prompt(`${title}\n\n${f.label}${f.help ? ` (${f.help})` : ''}${f.required ? ' — required' : ''}`, f.value ?? '');
-        if (v === null) return null;
-        const t = v.trim();
-        if (f.required && !t) { window.alert(`${f.label} is required.`); continue; }
-        if (f.minLength && t.length < f.minLength) { window.alert(`${f.label} needs at least ${f.minLength} characters.`); continue; }
-        values[f.name] = t;
-        break;
+function topLayerDialog({ title, message, fields, confirmLabel, danger, onSubmit }) {
+  return new Promise((resolve) => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'toplayer-dialog';
+    dlg.setAttribute('aria-label', title);
+    const box = 'width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;padding:0;border:1px solid #3a2a33;border-radius:14px;background:#1d1419;color:#f3e9ee;font:14px/1.45 system-ui,sans-serif;box-shadow:0 20px 60px rgba(0,0,0,.6)';
+    const input = 'width:100%;box-sizing:border-box;padding:9px 10px;border-radius:9px;border:1px solid #4a3540;background:#140e11;color:#f3e9ee;font:inherit';
+    dlg.style.cssText = box;
+    const fieldHtml = fields.map((f) => {
+      const id = `tl_${f.name}`;
+      if (f.type === 'checkbox') {
+        return `<label style="display:flex;gap:8px;align-items:center;margin:10px 0"><input id="${id}" type="checkbox" ${f.value ? 'checked' : ''}> ${esc(f.label)}</label>`;
       }
-    }
-  }
-  if (!window.confirm(`${title}\n\n${plain(message).slice(0, 600)}\n\n${confirmLabel}?`)) return null;
-  try {
-    return (onSubmit ? await onSubmit(values) : values) ?? true;
-  } catch (err) {
-    window.alert(`${title}\n\nFailed: ${err.message}`);
-    return null;
-  }
+      let control;
+      if (f.type === 'textarea') control = `<textarea id="${id}" rows="3" style="${input}">${esc(f.value || '')}</textarea>`;
+      else if (f.type === 'select') control = `<select id="${id}" style="${input}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${String(f.value ?? '') === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+      else if (f.type === 'multi') control = f.options.map(([v, l]) => `<label style="margin-right:12px"><input type="checkbox" data-multi="${esc(f.name)}" value="${esc(v)}" ${(f.value || []).includes(v) ? 'checked' : ''}> ${esc(l)}</label>`).join('');
+      else if (f.type === 'file') control = `<input id="${id}" type="file" accept="${esc(f.accept || '')}" style="${input}">`;
+      else control = `<input id="${id}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" style="${input}">`;
+      return `<div style="margin:12px 0"><label for="${id}" style="display:block;font-weight:600;margin-bottom:5px">${esc(f.label)}${f.required ? ' *' : ''}</label>${control}${f.help ? `<div style="opacity:.7;font-size:12px;margin-top:4px">${esc(f.help)}</div>` : ''}</div>`;
+    }).join('');
+    dlg.innerHTML = `<form method="dialog" style="margin:0">
+      <div style="padding:16px 18px;border-bottom:1px solid #3a2a33;font-weight:700;font-size:16px">${esc(title)}</div>
+      <div style="padding:6px 18px 4px">${message ? `<div style="margin:10px 0">${message}</div>` : ''}
+        <div data-err role="alert" hidden style="margin:10px 0;padding:9px 11px;border-radius:9px;background:#4a1c27;color:#ffd5de"></div>${fieldHtml}</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #3a2a33">
+        <button type="button" data-cancel style="padding:8px 14px;border-radius:9px;border:1px solid #4a3540;background:transparent;color:inherit;font:inherit;cursor:pointer">Cancel</button>
+        <button type="submit" data-ok style="padding:8px 14px;border-radius:9px;border:0;background:${danger ? '#c2364f' : '#d6407a'};color:#fff;font:inherit;font-weight:600;cursor:pointer">${esc(confirmLabel)}</button>
+      </div></form>`;
+    let settled = false;
+    const finish = (v) => { if (settled) return; settled = true; dlg.close(); dlg.remove(); resolve(v); };
+    const err = dlg.querySelector('[data-err]');
+    const ok = dlg.querySelector('[data-ok]');
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); finish(null); });
+    dlg.querySelector('[data-cancel]').addEventListener('click', () => finish(null));
+    dlg.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const values = {};
+      for (const f of fields) {
+        if (f.type === 'multi') values[f.name] = [...dlg.querySelectorAll(`[data-multi="${f.name}"]:checked`)].map((c) => c.value);
+        else if (f.type === 'checkbox') values[f.name] = dlg.querySelector(`#tl_${f.name}`).checked;
+        else if (f.type === 'file') values[f.name] = dlg.querySelector(`#tl_${f.name}`).files[0] || null;
+        else values[f.name] = dlg.querySelector(`#tl_${f.name}`).value.trim();
+        const v = values[f.name];
+        const missing = f.required && (v === '' || v === null || (Array.isArray(v) && v.length === 0));
+        const short = f.minLength && typeof v === 'string' && v.length < f.minLength;
+        if (missing || short) {
+          err.textContent = missing ? `${f.label} is required.` : `${f.label} needs at least ${f.minLength} characters.`;
+          err.hidden = false;
+          return;
+        }
+      }
+      const label = ok.textContent;
+      ok.disabled = true;
+      ok.textContent = 'Working…';
+      try {
+        finish((onSubmit ? await onSubmit(values) : values) ?? true);
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.hidden = false;
+        ok.disabled = false;
+        ok.textContent = label;
+      }
+    });
+    document.body.appendChild(dlg);
+    dlg.showModal();
+    dlg.querySelector('input, textarea, select')?.focus();
+  });
 }
 
 /**
@@ -506,6 +553,8 @@ function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', da
                 <input type="checkbox" style="width:auto" data-multi="${esc(f.name)}" value="${esc(v)}"
                 ${(f.value || []).includes(v) ? 'checked' : ''}> ${esc(l)}</label>`)
               .join('')}</div></div>`;
+          } else if (f.type === 'file') {
+            input = `<input id="${id}" type="file" accept="${esc(f.accept || '')}">`;
           } else {
             input = `<input id="${id}" type="${f.type || 'text'}" placeholder="${esc(f.placeholder || '')}" value="${esc(f.value ?? '')}">`;
           }
@@ -517,7 +566,7 @@ function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', da
       root.innerHTML = `
         <div class="modal-backdrop">
           <div class="modal${wide ? ' wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-            <form class="modal-form">
+            <form class="modal-form" novalidate>
               <div class="modal-head"><h3>${esc(title)}</h3></div>
               <div class="modal-body">
                 ${message ? `<div class="modal-msg">${message}</div>` : ''}
@@ -551,11 +600,13 @@ function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', da
             values[f.name] = [...root.querySelectorAll(`[data-multi="${f.name}"]:checked`)].map((c) => c.value);
           } else if (f.type === 'checkbox') {
             values[f.name] = root.querySelector(`#f_${f.name}`).checked;
+          } else if (f.type === 'file') {
+            values[f.name] = root.querySelector(`#f_${f.name}`).files[0] || null;
           } else {
             values[f.name] = root.querySelector(`#f_${f.name}`).value.trim();
           }
           const v = values[f.name];
-          if (f.required && (v === '' || (Array.isArray(v) && v.length === 0))) {
+          if (f.required && (v === '' || v === null || (Array.isArray(v) && v.length === 0))) {
             showError(`${f.label} is required.`);
             return;
           }
@@ -565,13 +616,16 @@ function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', da
           }
         }
         const btn = root.querySelector('button[type=submit]');
+        const label = btn.textContent;
         btn.disabled = true;
+        btn.textContent = 'Working…';
         try {
           const result = onSubmit ? await onSubmit(values) : values;
           finish(result ?? true);
         } catch (err) {
           showError(err.message);
           btn.disabled = false;
+          btn.textContent = label;
         }
       });
       root.querySelector('input, textarea, select')?.focus();
@@ -592,8 +646,7 @@ function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', da
       settled = true;
       root.innerHTML = '';
       closeActiveDialog = null;
-      toast('The dialog could not be displayed (a browser extension or an outdated page may be hiding it) — using the browser\'s own prompts instead.', false, 9000);
-      nativeDialogFallback({ title, message, fields, confirmLabel, onSubmit }).then(resolve);
+      topLayerDialog({ title, message, fields, confirmLabel, danger, onSubmit }).then(resolve);
     }));
   });
 }
@@ -932,18 +985,170 @@ function openChatPhoto(messageId, backToUserId) {
   });
 }
 
+/* ---------- Edit dialogs (users, creators, posts) and call records ---------- */
+
+const LANG_OPTIONS = [['en', 'English'], ['hi', 'Hindi'], ['te', 'Telugu']];
+
+/** Only the fields that changed; '' clears an optional one. */
+function changedFields(original, values) {
+  const out = {};
+  for (const [k, v] of Object.entries(values)) {
+    const before = original[k] ?? '';
+    if (Array.isArray(v) ? JSON.stringify(v) !== JSON.stringify(before) : String(v) !== String(before)) out[k] = v;
+  }
+  return out;
+}
+
+/** Edit an account: name, sign-in identity (phone/email), avatar URL,
+ * language, gender. The server checks uniqueness and keeps at least one
+ * identity; an admin's own identity is refused there. */
+async function editUser(u) {
+  const original = {
+    displayName: u.name || '', email: u.email || '', phone: u.phone || '',
+    avatarUrl: u.avatarUrl || '', language: u.language || 'en', gender: u.gender || '',
+  };
+  const done = await dialog({
+    title: `Edit ${u.name || `user #${u.id}`}`,
+    message: `<dl class="del-details"><dt>Account</dt><dd>#${u.id}</dd><dt>Status</dt><dd>${esc(u.status || '—')}</dd></dl>`
+      + (u.isAdmin ? '<p class="help">This is an admin account: its phone and email cannot be changed here.</p>' : ''),
+    wide: true,
+    fields: [
+      { name: 'displayName', label: 'Name', value: original.displayName },
+      { name: 'phone', label: 'Mobile', value: original.phone, placeholder: '+919876543210', help: 'International format. Must not belong to another account. Leave empty to remove (an email must remain).' },
+      { name: 'email', label: 'Email', type: 'email', value: original.email, help: 'Must not belong to another account. Leave empty to remove (a phone must remain).' },
+      { name: 'avatarUrl', label: 'Avatar URL', value: original.avatarUrl, placeholder: 'https://…', help: 'Leave empty to remove the avatar.' },
+      { name: 'language', label: 'App language', type: 'select', value: original.language, options: LANG_OPTIONS },
+      { name: 'gender', label: 'Gender', type: 'select', value: original.gender, options: [['', '—'], ['female', 'Female'], ['male', 'Male'], ['other', 'Other']] },
+      deleteReasonField(),
+    ],
+    confirmLabel: 'Save changes',
+    onSubmit: async (v) => {
+      const { reason, ...rest } = v;
+      const changes = changedFields(original, rest);
+      if (Object.keys(changes).length === 0) throw new Error('Nothing was changed.');
+      return api(`/admin/users/${u.id}`, { method: 'PATCH', body: { ...changes, reason } });
+    },
+  });
+  if (done) toast(`Saved account #${u.id} (${done.changed.join(', ')})`);
+  return done;
+}
+
+/** Edit a creator's profile: bio, languages, call types they accept. */
+async function editCreator(l) {
+  const original = {
+    bio: l.bio || '', languages: l.languages || [],
+    acceptsAudio: Boolean(l.capabilities?.acceptsAudio), acceptsVideo: Boolean(l.capabilities?.acceptsVideo),
+  };
+  const done = await dialog({
+    title: `Edit creator ${l.name || `#${l.id}`}`,
+    message: '<p class="help">Rates, KYC identity and payout details are not editable here. Name, mobile and email: use Edit account.</p>',
+    wide: true,
+    fields: [
+      { name: 'bio', label: 'Bio', type: 'textarea', value: original.bio },
+      { name: 'languages', label: 'Languages', type: 'multi', value: original.languages, options: LANG_OPTIONS, required: true },
+      { name: 'acceptsAudio', label: 'Accepts audio calls', type: 'checkbox', value: original.acceptsAudio },
+      { name: 'acceptsVideo', label: 'Accepts video calls', type: 'checkbox', value: original.acceptsVideo },
+      deleteReasonField(),
+    ],
+    confirmLabel: 'Save changes',
+    onSubmit: async (v) => {
+      const { reason, ...rest } = v;
+      if (!rest.acceptsAudio && !rest.acceptsVideo) throw new Error('A creator must accept audio, video or both.');
+      const changes = changedFields(original, rest);
+      if (Object.keys(changes).length === 0) throw new Error('Nothing was changed.');
+      return api(`/admin/listeners/${l.id}/profile`, { method: 'PATCH', body: { ...changes, reason } });
+    },
+  });
+  if (done) toast(`Saved creator #${l.id} (${done.changed.join(', ')})`);
+  return done;
+}
+
+/** Upload a creator photo on their behalf (JPEG/PNG/WebP, 8 MB max). */
+async function addCreatorPhoto(l) {
+  const done = await dialog({
+    title: `Add a photo for ${l.name || `creator #${l.id}`}`,
+    message: `<p class="help">${l.photoCount} of ${l.maxPhotos} photos used.</p>`,
+    fields: [
+      { name: 'file', label: 'Photo', type: 'file', accept: 'image/jpeg,image/png,image/webp', required: true },
+      deleteReasonField(),
+    ],
+    confirmLabel: 'Upload photo',
+    onSubmit: async (v) => {
+      const file = v.file;
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Choose a JPEG, PNG or WebP image.');
+      if (file.size > 8 * 1024 * 1024) throw new Error('That photo is larger than 8 MB.');
+      const up = await api(`/admin/listeners/${l.id}/photos/upload-url`, { method: 'POST', body: { mimeType: file.type } });
+      const put = await fetch(up.uploadUrl, { method: 'PUT', headers: { Authorization: `Bearer ${up.token}`, 'Content-Type': file.type }, body: file });
+      if (!put.ok) throw new Error(`Upload failed (${put.status}). Try again.`);
+      return api(`/admin/listeners/${l.id}/photos`, { method: 'POST', body: { path: up.path, reason: v.reason } });
+    },
+  });
+  if (done) toast(`Photo added to creator #${l.id} (${done.photoCount} now)`);
+  return done;
+}
+
+async function editPostCaption(p) {
+  const done = await dialog({
+    title: `Edit caption of post #${p.id}`,
+    message: `<dl class="del-details"><dt>Author</dt><dd>${esc(p.author_name || '—')} (#${p.author_id})</dd><dt>Media</dt><dd>${p.media_type === 'video' ? 'Video' : 'Image'}</dd></dl>`,
+    fields: [
+      { name: 'caption', label: 'Caption', type: 'textarea', value: p.caption || '', help: 'Leave empty to remove the caption.' },
+      deleteReasonField(),
+    ],
+    confirmLabel: 'Save caption',
+    onSubmit: (v) => {
+      if (v.caption === (p.caption || '')) throw new Error('Nothing was changed.');
+      return api(`/admin/posts/${p.id}`, { method: 'PATCH', body: { caption: v.caption, reason: v.reason } });
+    },
+  });
+  if (done) toast(`Caption of post #${p.id} saved`);
+  return done;
+}
+
+/** A call row that never connected or billed (the server re-checks). */
+const callLooksUnbilled = (c) => !c.started_at && Number(c.coins_spent) === 0 && Number(c.listener_earned) === 0
+  && Number(c.billed_minutes) === 0 && (c.status === 'ended' || c.status === 'failed');
+
+async function deleteCallRecord(c) {
+  const done = await dialog({
+    title: `Delete call record #${c.id}?`,
+    message: `<b class="del-warn">This cannot be undone.</b> Only calls that never connected and never billed can be deleted; billing history always stays.
+      <dl class="del-details"><dt>Call</dt><dd>#${c.id} · ${esc(c.type)} · ${esc(c.status)}</dd>
+      <dt>Caller</dt><dd>${esc(c.caller_name || '—')} (#${c.caller_id})</dd><dt>Listener</dt><dd>${esc(c.listener_name || '—')} (#${c.listener_id})</dd>
+      <dt>End reason</dt><dd>${esc(c.end_reason || '—')}</dd></dl>`,
+    fields: [deleteReasonField()],
+    confirmLabel: 'Delete call record',
+    danger: true,
+    onSubmit: (v) => api(`/admin/calls/${c.id}`, { method: 'DELETE', body: { reason: v.reason } }),
+  });
+  if (done) toast(`Deleted call record #${c.id}`);
+  return done;
+}
+
 /** A visible per-row Delete for account tables. Admin accounts and
  * already-deleted ones get none (the server refuses admins regardless). */
-function rowDeleteButton(id, label, { isAdmin = false, deleted = false } = {}) {
-  if (isAdmin) return '<span class="sub">admin</span>';
+function rowDeleteButton(id, label, { isAdmin = false, deleted = false, edit = 'user' } = {}) {
   if (deleted) return '<span class="sub">deleted</span>';
-  return `<button class="btn-danger btn-sm" data-row-del="${id}" data-label="${esc(label || `#${id}`)}" title="Permanently delete account #${id}">Delete</button>`;
+  const editBtn = `<button class="btn-ghost btn-sm" data-row-edit="${id}" data-kind="${edit}" title="Edit #${id}">Edit</button>`;
+  if (isAdmin) return `<span class="row-actions">${editBtn}<span class="sub">admin</span></span>`;
+  return `<span class="row-actions">${editBtn}<button class="btn-danger btn-sm" data-row-del="${id}" data-label="${esc(label || `#${id}`)}" title="Permanently delete account #${id}">Delete</button></span>`;
 }
 
 function wireRowDeletes(tbody, onDone) {
   tbody.querySelectorAll('[data-row-del]').forEach((b) => b.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (await deleteAccount(b.dataset.rowDel, b.dataset.label)) onDone();
+  }));
+  tbody.querySelectorAll('[data-row-edit]').forEach((b) => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try {
+      const done = b.dataset.kind === 'creator'
+        ? await editCreator(await api(`/admin/listeners/${b.dataset.rowEdit}`))
+        : await editUser(await api(`/admin/users/${b.dataset.rowEdit}`));
+      if (done) onDone();
+    } catch (err) {
+      toast(err.message, false);
+    }
   }));
 }
 
@@ -957,12 +1162,15 @@ function openUser(id) {
         ${u.status === 'suspended' ? '<button class="btn-ok btn-sm" data-act="restore">Restore account</button>' : ''}
         ${L ? '<button class="btn-ghost btn-sm" data-act="listener">Open creator profile</button>' : ''}
         ${typeof openWallet === 'function' ? '<button class="btn-ghost btn-sm" data-act="wallet">Wallet & ledger</button>' : ''}
-        ${!u.isAdmin ? '<button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>' : ''}
+        ${u.status !== 'deleted' ? '<button class="btn-ghost btn-sm" data-act="edit">Edit details</button>' : ''}
+        ${!u.isAdmin && u.status !== 'deleted' ? '<button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>' : ''}
       </div>
       <div class="cols-2">
         <div class="panel"><h3>Profile</h3>${kv([
           ['Name', esc(u.name || '—')],
-          ['Phone', `<span class="mono">${esc(u.phone)}</span>${u.isAdmin ? ' ' + badge('admin') : ''}`],
+          ['Phone', `<span class="mono">${esc(u.phone || '—')}</span>${u.isAdmin ? ' ' + badge('admin') : ''}`],
+          ['Email', `<span class="mono">${esc(u.email || '—')}</span>`],
+          ['Avatar', u.avatarUrl ? `<a href="${esc(u.avatarUrl)}" target="_blank" rel="noopener noreferrer">open ↗</a>` : '—'],
           ['Account status', badge(u.status)],
           ['Role', badge(u.role)],
           ['Language / gender', `${esc(u.language || '—')} / ${esc(u.gender || '—')}`],
@@ -1015,6 +1223,9 @@ function openUser(id) {
       <div class="panel"><h3>Admin history</h3>${timeline(u.history)}</div>`;
 
     renderUploads(body.querySelector('[data-uploads]'), u.id);
+    body.querySelector('[data-act=edit]')?.addEventListener('click', async () => {
+      if (await editUser(u)) drawer.refresh();
+    });
     body.querySelector('[data-act=delete]')?.addEventListener('click', async () => {
       if (await deleteAccount(u.id, u.name || `user #${u.id}`)) drawer.refresh();
     });
@@ -1069,7 +1280,10 @@ function openListener(id) {
         ${k.status === 'pending' ? '<button class="btn-ok btn-sm" data-act="approve">Approve application</button><button class="btn-danger btn-sm" data-act="reject">Reject</button>' : ''}
         ${k.status === 'approved' ? '<button class="btn-danger btn-sm" data-act="reject">Revoke approval</button>' : ''}
         <button class="btn-ghost btn-sm" data-act="user">Open user account</button>
-        <button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>
+        ${l.accountStatus !== 'deleted' ? `<button class="btn-ghost btn-sm" data-act="edit">Edit profile</button>
+        <button class="btn-ghost btn-sm" data-act="edit-account">Edit account</button>
+        ${l.photoCount < l.maxPhotos ? '<button class="btn-ghost btn-sm" data-act="add-photo">Add photo</button>' : ''}
+        <button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>` : ''}
       </div>
       <div class="cols-2">
         <div class="panel"><h3>Status</h3>${kv([
@@ -1081,7 +1295,8 @@ function openListener(id) {
         ])}</div>
         <div class="panel"><h3>Profile</h3>${kv([
           ['Name', esc(l.name || '—')],
-          ['Phone', `<span class="mono">${esc(l.phone)}</span>`],
+          ['Phone', `<span class="mono">${esc(l.phone || '—')}</span>`],
+          ['Email', `<span class="mono">${esc(l.email || '—')}</span>`],
           ['Languages', esc((l.languages || []).join(', '))],
           ['Capabilities', `${l.capabilities.acceptsAudio ? badge('audio') : ''} ${l.capabilities.acceptsVideo ? badge('video') : ''}`],
           ['Rates (coins/min)', `audio ${l.capabilities.audioRate} · video ${l.capabilities.videoRate}`],
@@ -1138,8 +1353,19 @@ function openListener(id) {
     body.querySelectorAll('[data-photo-del]').forEach((b) => b.addEventListener('click', async () => {
       if (await deleteUpload('photo', b.dataset.photoDel)) drawer.refresh();
     }));
-    body.querySelector('[data-act=delete]').addEventListener('click', async () => {
+    body.querySelector('[data-act=delete]')?.addEventListener('click', async () => {
       if (await deleteAccount(l.id, l.name || `creator #${l.id}`)) drawer.refresh();
+    });
+    body.querySelector('[data-act=edit]')?.addEventListener('click', async () => {
+      if (await editCreator(l)) drawer.refresh();
+    });
+    body.querySelector('[data-act=edit-account]')?.addEventListener('click', async () => {
+      try {
+        if (await editUser(await api(`/admin/users/${l.id}`))) drawer.refresh();
+      } catch (err) { toast(err.message, false); }
+    });
+    body.querySelector('[data-act=add-photo]')?.addEventListener('click', async () => {
+      if (await addCreatorPhoto(l)) drawer.refresh();
     });
     body.querySelectorAll('[data-report]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();
@@ -1340,7 +1566,7 @@ view('listeners', 'Creators / Listeners', 'Operate', (el) => {
       { label: 'Rating', sort: 'rating', num: true, render: (r) => r.rating.toFixed(1) },
       { label: 'Account', render: (r) => badge(r.accountStatus) },
       { label: 'Created', sort: 'created', render: (r) => when(r.createdAt) },
-      { label: 'Actions', pin: true, render: (r) => rowDeleteButton(r.id, r.name || `creator #${r.id}`, { deleted: r.accountStatus === 'deleted' }) },
+      { label: 'Actions', pin: true, render: (r) => rowDeleteButton(r.id, r.name || `creator #${r.id}`, { deleted: r.accountStatus === 'deleted', edit: 'creator' }) },
     ],
     onRow: (r) => openListener(r.id),
     afterLoad: (rows, tbody) => wireRowDeletes(tbody, () => table.reload()),
@@ -1487,11 +1713,14 @@ function openWallet(userId) {
   else go('wallet');
 }
 
-function openCall(id) {
+function openCall(id, onChange) {
   drawer.open(`Call #${id}`, async (body) => {
-    const c = await api(`/admin/calls/${id}`);
+    const [c, del] = await Promise.all([api(`/admin/calls/${id}`), api(`/admin/calls/${id}/deletability`)]);
     body.innerHTML = `
-      <div class="panel"><h3>Call (read-only)</h3>${kv([
+      <div class="drawer-actions">${del.deletable
+        ? '<button class="btn-danger btn-sm" data-act="delete-call">Delete call record</button><span class="sub">Never connected or billed, so it can be removed.</span>'
+        : `<span class="sub">Read-only: ${esc(del.blocker?.message || 'billing history')}</span>`}</div>
+      <div class="panel"><h3>Call</h3>${kv([
         ['Type / status', `${badge(c.type)} ${badge(c.status)}`],
         ['Caller', `<a href="#" data-user="${c.caller_id}">${esc(c.caller_name || '—')} #${c.caller_id}</a> <span class="sub mono">${esc(c.caller_phone)}</span>`],
         ['Listener', `<a href="#" data-listener="${c.listener_id}">${esc(c.listener_name || '—')} #${c.listener_id}</a> <span class="sub mono">${esc(c.listener_phone)}</span>`],
@@ -1521,6 +1750,9 @@ function openCall(id) {
     body.querySelectorAll('[data-user]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openUser(a.dataset.user); }));
     body.querySelectorAll('[data-listener]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openListener(a.dataset.listener); }));
     body.querySelectorAll('[data-report]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openReport(a.dataset.report); }));
+    body.querySelector('[data-act=delete-call]')?.addEventListener('click', async () => {
+      if (await deleteCallRecord(c)) { drawer.close(); onChange?.(); }
+    });
   });
 }
 
@@ -1554,7 +1786,7 @@ view('content', 'Content / Posts', 'Activity', (el) => {
       { label: 'Author reports', sort: 'reports', num: true, render: (p) => num(p.author_reports) },
       { label: 'Status', render: (p) => (p.status === 'removed' ? `${badge('removed')}<span class="sub">${p.removed_by_admin ? 'by admin' : 'by author'}</span>` : badge('active')) },
       { label: 'Posted', sort: 'created', render: (p) => when(p.created_at) },
-      { label: 'Actions', pin: true, render: (p) => `<button class="btn-danger btn-sm" data-post-del="${p.id}" title="Permanently delete post #${p.id} and its file">Delete</button>` },
+      { label: 'Actions', pin: true, render: (p) => `<span class="row-actions"><button class="btn-ghost btn-sm" data-post-edit="${p.id}" title="Edit the caption of post #${p.id}">Edit</button><button class="btn-danger btn-sm" data-post-del="${p.id}" title="Permanently delete post #${p.id} and its file">Delete</button></span>` },
     ],
     onRow: (p) => openPost(p, () => table.reload()),
     afterLoad: (rows, tbody) => {
@@ -1562,6 +1794,11 @@ view('content', 'Content / Posts', 'Activity', (el) => {
         const post = rows.find((r) => String(r.id) === b.dataset.postDel);
         e.stopPropagation();
         if (await deleteUpload('post', b.dataset.postDel, post ? postDeleteDetails(post) : null)) table.reload();
+      }));
+      tbody.querySelectorAll('[data-post-edit]').forEach((b) => b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const post = rows.find((r) => String(r.id) === b.dataset.postEdit);
+        if (post && (await editPostCaption(post))) table.reload();
       }));
       tbody.querySelectorAll('[data-author]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openUser(a.dataset.author); }));
     },
@@ -1574,6 +1811,7 @@ function openPost(p, onChange) {
       <div class="drawer-actions">
         ${p.status === 'active' ? '<button class="btn-danger btn-sm" data-act="remove">Remove post</button>' : ''}
         ${p.restorable ? '<button class="btn-ok btn-sm" data-act="restore">Restore post</button>' : ''}
+        <button class="btn-ghost btn-sm" data-act="edit">Edit caption</button>
         <button class="btn-danger btn-sm" data-act="purge">Delete permanently</button>
         <button class="btn-ghost btn-sm" data-act="author">Open author</button>
       </div>
@@ -1592,7 +1830,7 @@ function openPost(p, onChange) {
       const done = await dialog({
         title: action === 'remove' ? `Remove post #${p.id}?` : `Restore post #${p.id}?`,
         message: action === 'remove' ? 'It disappears from the feed immediately. Its media is kept so it can be restored.' : 'It returns to the feed.',
-        fields: [{ name: 'reason', label: 'Reason', type: 'textarea', required: true }],
+        fields: [deleteReasonField()],
         confirmLabel: action === 'remove' ? 'Remove' : 'Restore',
         danger: action === 'remove',
         onSubmit: (v) => api(`/admin/posts/${p.id}`, { method: 'POST', body: { action, reason: v.reason } }),
@@ -1604,6 +1842,9 @@ function openPost(p, onChange) {
     body.querySelector('[data-act=purge]').addEventListener('click', async () => {
       if (await deleteUpload('post', p.id, postDeleteDetails(p))) { drawer.close(); onChange?.(); }
     });
+    body.querySelector('[data-act=edit]').addEventListener('click', async () => {
+      if (await editPostCaption(p)) { drawer.close(); onChange?.(); }
+    });
     body.querySelector('[data-act=author]').addEventListener('click', () => openUser(p.author_id));
   });
 }
@@ -1611,8 +1852,8 @@ function openPost(p, onChange) {
 /* ---------- Calls ---------- */
 
 view('calls', 'Calls', 'Activity', (el) => {
-  el.innerHTML = head('Calls', 'Read-only call and billing history. Nothing here edits historical billing.') + '<div id="t"></div>';
-  dataTable(el.querySelector('#t'), {
+  el.innerHTML = head('Calls', 'Call and billing history is read-only. Only a call that never connected and never billed (missed, declined, failed) can be deleted; the server re-checks every time.') + '<div id="t"></div>';
+  const table = dataTable(el.querySelector('#t'), {
     endpoint: '/admin/calls',
     search: 'Caller/listener name, phone or call #…',
     sort: 'created',
@@ -1634,8 +1875,18 @@ view('calls', 'Calls', 'Activity', (el) => {
       { label: 'Listener earned', sort: 'earned', num: true, render: (c) => rupees(c.listener_earned) },
       { label: 'End reason', render: (c) => esc(c.end_reason || '—') },
       { label: 'Status', render: (c) => badge(c.status === 'active' ? 'live' : c.status) },
+      { label: 'Actions', pin: true, render: (c) => (callLooksUnbilled(c)
+        ? `<button class="btn-danger btn-sm" data-call-del="${c.id}" title="Delete never-billed call record #${c.id}">Delete</button>`
+        : '<span class="sub" title="Billing history stays read-only">read-only</span>') },
     ],
-    onRow: (c) => openCall(c.id),
+    onRow: (c) => openCall(c.id, () => table.reload()),
+    afterLoad: (rows, tbody) => {
+      tbody.querySelectorAll('[data-call-del]').forEach((b) => b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const c = rows.find((r) => String(r.id) === b.dataset.callDel);
+        if (c && (await deleteCallRecord(c))) table.reload();
+      }));
+    },
   });
 });
 

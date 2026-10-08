@@ -24,6 +24,7 @@ router.use(require('./reports.admin'));
 router.use(require('./operations.admin'));
 router.use(require('../settings/login_background').router);
 router.use(require('./deletion.admin'));
+router.use(require('./edit.admin'));
 
 /** Platform metrics for the admin dashboard. */
 router.get(

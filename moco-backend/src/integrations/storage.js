@@ -191,8 +191,27 @@ async function listPrefix(bucket, prefix) {
   return paths;
 }
 
+/** Folder names directly under `prefix` (top level when empty) — for the
+ * dev cleanup's orphan scan, which walks `<userId>/` folders. */
+async function listFolders(bucket, prefix = '') {
+  if (!isConfigured()) return [];
+  const names = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await client.storage.from(bucket).list(prefix, { limit: 1000, offset });
+    if (error) {
+      throw Object.assign(new Error(`Storage refused to list ${bucket}/${prefix}: ${error.message}`), {
+        code: 'storage_list_failed',
+      });
+    }
+    names.push(...data.filter((object) => !object.id).map((object) => object.name));
+    if (data.length < 1000) break;
+  }
+  return names;
+}
+
 module.exports = {
   isConfigured,
+  listFolders,
   createUploadUrl,
   createViewUrl,
   createViewUrls,

@@ -17,7 +17,8 @@
     "smoke": "node scripts/supabase_smoke_test.js",
     "build:vercel": "node scripts/vercel_build.js",
     "e2e:admin-content-delete": "node scripts/admin_content_delete_e2e.js",
-    "e2e:admin-dialog-visibility": "node scripts/admin_dialog_visibility_e2e.js"
+    "e2e:admin-dialog-visibility": "node scripts/admin_dialog_visibility_e2e.js",
+    "e2e:admin-manage": "node scripts/admin_manage_e2e.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

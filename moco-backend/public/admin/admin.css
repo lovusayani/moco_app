@@ -292,3 +292,7 @@ td .sub { display: block; color: var(--text-faint); font-size: 11.5px; }
 .del-details { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 12px 0 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-input); font-size: 12.5px; }
 .del-details dt { color: var(--text-faint); }
 .del-details dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+
+/* Edit + Delete side by side in an Actions cell. */
+.row-actions { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.toplayer-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }

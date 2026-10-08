@@ -170,10 +170,22 @@ async function main() {
     await openContentDelete();
     await sleep(300);
     const bareOverlay = await page.$('.modal-backdrop');
-    const toast = await page.$eval('.toast', (t) => t.textContent).catch(() => '');
     check('hidden dialog: the overlay is removed, never left on its own', !bareOverlay);
-    check('hidden dialog: the admin is told and gets the browser\'s own prompt instead',
-      /could not be displayed/.test(toast) && nativeDialogs.some((x) => x.startsWith('prompt')), { toast, nativeDialogs });
+    const top = await page.evaluate(() => {
+      const d = document.querySelector('dialog.toplayer-dialog');
+      if (!d) return null;
+      const r = d.getBoundingClientRect();
+      return { open: d.open, modal: d.matches(':modal'), text: d.textContent, w: r.width, h: r.height };
+    });
+    check('hidden dialog: an in-app top-layer dialog replaces it (no browser prompt)',
+      top && top.open && top.modal && top.w > 100 && /delete post/i.test(top.text) && nativeDialogs.length === 0, { top, nativeDialogs });
+    // Its validation, and Cancel, work like the styled dialog's.
+    await page.click('dialog.toplayer-dialog [data-ok]');
+    const err = await page.$eval('dialog.toplayer-dialog [data-err]', (e) => (e.hidden ? '' : e.textContent)).catch(() => '');
+    check(`top-layer dialog validates the reason ("${err}")`, /reason/i.test(err));
+    await page.click('dialog.toplayer-dialog [data-cancel]');
+    await sleep(200);
+    check('top-layer dialog Cancel closes it', !(await page.$('dialog.toplayer-dialog')));
 
     check('no uncaught JavaScript errors', uncaught.length === 0, uncaught);
   } finally {

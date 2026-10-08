@@ -176,7 +176,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const { rows } = await query(
-      `SELECT u.id, u.display_name, u.phone, u.status AS account_status, u.avatar_url, u.gender,
+      `SELECT u.id, u.display_name, u.phone, u.email, u.status AS account_status, u.avatar_url, u.gender,
               u.created_at AS user_created_at, lp.*, ${ELIGIBLE} AS eligible,
               reviewer.phone AS reviewer_phone
          FROM listener_profiles lp
@@ -227,6 +227,7 @@ router.get(
       id: l.id,
       name: l.display_name,
       phone: l.phone,
+      email: l.email,
       avatarUrl: l.avatar_url,
       gender: l.gender,
       accountStatus: l.account_status,

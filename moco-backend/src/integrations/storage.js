@@ -140,12 +140,84 @@ async function remove(bucket, path) {
   }
 }
 
+/**
+ * Permanently removes `bucket`/`paths` and THROWS if Storage refuses — the
+ * strict counterpart to [remove], for admin permanent deletion, where the
+ * caller runs it inside its database transaction so a Storage failure rolls
+ * the row deletion back instead of leaving an orphaned object. Removing a
+ * path that no longer exists is not an error, so a retry is always safe.
+ */
+async function removeStrict(bucket, paths) {
+  const unique = [...new Set(paths.filter(Boolean))];
+  if (unique.length === 0) return { removed: [] };
+  if (!isConfigured()) {
+    throw Object.assign(new Error('Storage is not configured, so stored media cannot be removed'), {
+      code: 'storage_not_configured',
+    });
+  }
+  const removed = [];
+  for (let i = 0; i < unique.length; i += 100) {
+    const batch = unique.slice(i, i + 100);
+    const { data, error } = await client.storage.from(bucket).remove(batch);
+    if (error) {
+      throw Object.assign(new Error(`Storage refused to remove objects from ${bucket}: ${error.message}`), {
+        code: 'storage_remove_failed',
+      });
+    }
+    removed.push(...(data || []).map((object) => object.name));
+  }
+  return { removed };
+}
+
+/**
+ * Every object directly under `prefix/` in `bucket` (uploads are stored as
+ * `<userId>/<file>`, one level deep). Used to find uploads that were never
+ * registered against a row, so deleting an account leaves nothing behind.
+ */
+async function listPrefix(bucket, prefix) {
+  if (!isConfigured() || !prefix) return [];
+  const paths = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await client.storage.from(bucket).list(prefix, { limit: 1000, offset });
+    if (error) {
+      throw Object.assign(new Error(`Storage refused to list ${bucket}/${prefix}: ${error.message}`), {
+        code: 'storage_list_failed',
+      });
+    }
+    // Folder placeholders have no id; only real objects are returned.
+    paths.push(...data.filter((object) => object.id).map((object) => `${prefix}/${object.name}`));
+    if (data.length < 1000) break;
+  }
+  return paths;
+}
+
+/** Folder names directly under `prefix` (top level when empty) — for the
+ * dev cleanup's orphan scan, which walks `<userId>/` folders. */
+async function listFolders(bucket, prefix = '') {
+  if (!isConfigured()) return [];
+  const names = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await client.storage.from(bucket).list(prefix, { limit: 1000, offset });
+    if (error) {
+      throw Object.assign(new Error(`Storage refused to list ${bucket}/${prefix}: ${error.message}`), {
+        code: 'storage_list_failed',
+      });
+    }
+    names.push(...data.filter((object) => !object.id).map((object) => object.name));
+    if (data.length < 1000) break;
+  }
+  return names;
+}
+
 module.exports = {
   isConfigured,
+  listFolders,
   createUploadUrl,
   createViewUrl,
   createViewUrls,
   health,
   statObject,
   remove,
+  removeStrict,
+  listPrefix,
 };

@@ -144,6 +144,7 @@ const SECRET_NAMES = [
   'PAYMENT_WEBHOOK_SECRET',
   'SMS_API_KEY',
   'FCM_SERVICE_ACCOUNT_JSON',
+  'STRIPCASH_API_KEY',
 ];
 const secrets = SECRET_NAMES.map((n) => [n, (process.env[n] || '').trim()]).filter(([, v]) => v.length >= 8);
 function* walk(dir) {

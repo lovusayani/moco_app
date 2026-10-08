@@ -83,7 +83,7 @@ writeFileSync(
 
 // No server-side secret may end up in the static output. Vercel exposes every
 // project variable to the build process, so check the values that exist here.
-const SECRET_NAMES = ['DATABASE_URL', 'REDIS_PASSWORD', 'JWT_SECRET', 'CRON_SECRET', 'SUPABASE_SERVICE_ROLE_KEY', 'AGORA_APP_CERTIFICATE', 'PAYMENT_KEY_SECRET', 'SMS_API_KEY', 'FCM_SERVICE_ACCOUNT_JSON'];
+const SECRET_NAMES = ['DATABASE_URL', 'REDIS_PASSWORD', 'JWT_SECRET', 'CRON_SECRET', 'SUPABASE_SERVICE_ROLE_KEY', 'AGORA_APP_CERTIFICATE', 'PAYMENT_KEY_SECRET', 'SMS_API_KEY', 'FCM_SERVICE_ACCOUNT_JSON', 'STRIPCASH_API_KEY'];
 const secrets = SECRET_NAMES.map((n) => [n, (process.env[n] || '').trim()]).filter(([, v]) => v.length >= 8);
 for (const f of readdirSync(out)) {
   const text = readFileSync(join(out, f), 'latin1');

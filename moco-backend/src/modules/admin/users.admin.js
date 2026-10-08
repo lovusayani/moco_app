@@ -172,6 +172,7 @@ router.get(
     res.json({
       id: u.id,
       phone: u.phone,
+      email: u.email,
       name: u.display_name,
       avatarUrl: u.avatar_url,
       role: u.role,

@@ -105,6 +105,9 @@ router.get(
       .maybe(accountStatus, 'u.status = ?')
       .dateRange('lp.created_at', from, to);
 
+    // Permanently deleted accounts keep an anonymised creator row for the
+    // earnings ledger; they are listed only when asked for explicitly.
+    if (!accountStatus) where.add("u.status <> 'deleted'");
     if (capability === 'audio') where.add('lp.accepts_audio');
     if (capability === 'video') where.add('lp.accepts_video');
     if (photos === 'complete') where.add('lp.photo_count >= ?', LISTENER_PHOTOS.minCount);
@@ -173,7 +176,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const { rows } = await query(
-      `SELECT u.id, u.display_name, u.phone, u.status AS account_status, u.avatar_url, u.gender,
+      `SELECT u.id, u.display_name, u.phone, u.email, u.status AS account_status, u.avatar_url, u.gender,
               u.created_at AS user_created_at, lp.*, ${ELIGIBLE} AS eligible,
               reviewer.phone AS reviewer_phone
          FROM listener_profiles lp
@@ -224,6 +227,7 @@ router.get(
       id: l.id,
       name: l.display_name,
       phone: l.phone,
+      email: l.email,
       avatarUrl: l.avatar_url,
       gender: l.gender,
       accountStatus: l.account_status,
@@ -380,6 +384,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const { q, status, from, to, sort, dir } = req.query;
     const where = new Where().dateRange('lp.kyc_submitted_at', from, to);
+    // A deleted account's KYC data is wiped — nothing left to review.
+    where.add("u.status <> 'deleted'");
     if (status !== 'all') where.add('lp.kyc_status = ?', status);
     if (q) {
       const term = likeTerm(q);

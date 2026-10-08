@@ -19,6 +19,7 @@ const HANDLERS = {
   [TOPICS.PAYOUT]: () => require('../workers/payout.worker').handlePayout,
   [TOPICS.NOTIFICATION]: () => require('../workers/notification.worker').handleNotification,
   [TOPICS.PRESENCE]: () => require('../workers/presence.worker').handlePresenceCheck,
+  [TOPICS.LIVE]: () => require('../workers/live.worker').handleLive,
 };
 
 /**

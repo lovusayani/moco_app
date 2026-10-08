@@ -1,0 +1,92 @@
+/* Settings → Live (live-settings.js). Uses admin.css tokens. */
+
+.ls-tabs { display: flex; gap: 6px; margin: 0 0 14px; border-bottom: 1px solid var(--border); }
+.ls-tab { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--text-dim);
+  padding: 8px 12px; font-weight: 600; cursor: pointer; border-radius: 0; }
+.ls-tab:hover { color: var(--text); }
+.ls-tab.active { color: var(--text); border-bottom-color: var(--rose); }
+
+.ls-wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1180px) { .ls-wrap { grid-template-columns: minmax(0, 1fr); } }
+.ls-preview-col { position: sticky; top: 12px; }
+.ls-provider .sub { margin-left: 6px; }
+
+.ls-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ls-row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 640px) { .ls-row, .ls-row3 { grid-template-columns: 1fr; } }
+
+.ls-switch { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text); margin: 4px 0 12px; cursor: pointer; }
+.ls-switch input, .ls-check input, .ls-chip input { width: auto; margin: 0; }
+.ls-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px 12px; }
+.ls-check { display: flex; align-items: center; gap: 7px; font-weight: 500; color: var(--text-dim); margin: 0; cursor: pointer; }
+.ls-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.ls-chip { display: flex; align-items: center; gap: 6px; padding: 6px 11px; border: 1px solid var(--border); border-radius: 999px;
+  cursor: pointer; font-weight: 500; color: var(--text-dim); margin: 0; }
+.ls-chip:has(input:checked) { border-color: var(--rose); color: var(--text); background: var(--bg-hover); }
+
+.ls-lists { display: grid; gap: 10px; margin: 6px 0 12px; }
+.ls-list { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; }
+.ls-list.ls-inactive { opacity: .55; }
+.ls-list-head { display: flex; gap: 6px; align-items: baseline; margin-bottom: 6px; flex-wrap: wrap; }
+.ls-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.ls-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 99px;
+  background: var(--bg-hover); border: 1px solid var(--border); font-family: var(--mono); font-size: 12px; }
+.ls-tag em { font-style: normal; color: var(--rose); font-weight: 700; }
+.ls-x { background: transparent; border: 0; color: var(--text-faint); padding: 0 5px; cursor: pointer; font-size: 13px; }
+.ls-x:hover { color: var(--text); }
+.ls-results { display: grid; gap: 4px; margin-top: 8px; max-height: 320px; overflow: auto; }
+.ls-result { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 8px; align-items: center;
+  padding: 5px 6px; border-radius: 8px; }
+.ls-result:hover { background: var(--bg-hover); }
+.ls-result img, .ls-noimg { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; background: var(--bg-input); }
+.ls-result-main { min-width: 0; display: flex; flex-direction: column; }
+.ls-result-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-result-actions { display: flex; gap: 4px; }
+
+.ls-savebar { position: sticky; bottom: 0; display: flex; gap: 8px; align-items: center; justify-content: flex-end;
+  padding: 10px 12px; margin: 4px 0 6px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); z-index: 2; }
+.ls-savebar [data-dirty] { margin-right: auto; }
+.ls-unsaved { color: var(--amber) !important; font-weight: 600; }
+
+.ls-devices { display: flex; gap: 6px; margin-bottom: 10px; }
+.ls-device { background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 4px 10px; border-radius: 99px; cursor: pointer; font-size: 12px; }
+.ls-device.active { border-color: var(--rose); color: var(--text); background: var(--bg-hover); }
+.ls-frame-wrap { overflow: auto; max-height: 72vh; border: 1px solid var(--border-strong); border-radius: 14px; background: #0d070c; padding: 10px; }
+.ls-frame { margin: 0 auto; --gap: 10px; --pad: 8px; --r: 12px; --ar: 3 / 4; }
+.ls-empty { padding: 30px 12px; text-align: center; color: var(--text-faint); }
+.ls-click-note { margin-top: 10px; font-size: 11.5px; color: var(--text-faint); text-align: center; }
+
+/* Presets */
+.ld-comfortable { --gap: 12px; --pad: 10px; }
+.ld-cozy { --gap: 8px; --pad: 7px; }
+.ld-compact { --gap: 5px; --pad: 5px; }
+.lr-none { --r: 0px; } .lr-small { --r: 6px; } .lr-medium { --r: 12px; } .lr-large { --r: 20px; }
+.la-portrait { --ar: 3 / 4; } .la-square { --ar: 1 / 1; } .la-landscape { --ar: 4 / 3; } .la-wide { --ar: 16 / 9; }
+
+.lc-grid { display: grid; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); gap: var(--gap); }
+.lc { background: #1a0f17; border-radius: var(--r); overflow: hidden; border: 1px solid rgba(255,255,255,.06); min-width: 0; }
+.lc.lc-featured { border-color: rgba(229, 79, 154, .55); }
+.lc-media { position: relative; aspect-ratio: var(--ar); background: #24131f; }
+.lc-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lc-live { position: absolute; top: 6px; left: 6px; background: #e5374f; color: #fff; font-size: 9.5px; font-weight: 800; letter-spacing: .06em; padding: 2px 6px; border-radius: 4px; }
+.lc-hd { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,.6); color: #fff; font-size: 9.5px; font-weight: 800; padding: 2px 5px; border-radius: 4px; }
+.lc-star { position: absolute; bottom: 6px; right: 6px; color: #ffd36b; font-size: 14px; text-shadow: 0 1px 2px #000; }
+.lc-body { padding: var(--pad); display: grid; gap: 4px; }
+.lc-body:empty { display: none; }
+.lc-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.lc-name strong { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-avatar { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; flex: none; }
+.lc-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 11px; color: var(--text-faint); }
+.lc-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.lc-tags span { font-size: 10px; padding: 1px 6px; border-radius: 99px; background: rgba(255,255,255,.07); color: var(--text-dim); }
+.lc-goal { height: 4px; border-radius: 99px; background: rgba(255,255,255,.1); overflow: hidden; }
+.lc-goal div { height: 100%; background: linear-gradient(90deg, var(--rose-700), var(--rose)); }
+
+/* Large cards: bigger type. */
+.lg-large .lc-name strong { font-size: 14.5px; }
+.lg-large .lc-meta { font-size: 12px; }
+/* Compact: horizontal rows — thumbnail left, details right. */
+.lg-compact .lc { display: grid; grid-template-columns: 38% minmax(0, 1fr); align-items: center; }
+.lg-compact .lc-media { aspect-ratio: 1 / 1; }
+/* Mixed: every seventh card spans two columns. */
+.lg-mixed .lc-big { grid-column: span 2; }

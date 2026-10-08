@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const helmet = require('helmet');
@@ -10,6 +12,7 @@ const { cors } = require('./middleware/cors');
 const { RATES, COIN_PACKS, FREE_TRIAL_SECONDS } = require('./utils/constants');
 const { DEFAULT_CHANNEL, availability: otpAvailability } = require('./modules/auth/otp.channels');
 
+const { publicConfig: loginBackgroundConfig } = require('./modules/settings/login_background');
 const authRoutes = require('./modules/auth/auth.routes');
 const usersRoutes = require('./modules/users/users.routes');
 const walletRoutes = require('./modules/wallet/wallet.routes');
@@ -18,6 +21,8 @@ const callsRoutes = require('./modules/calls/calls.routes');
 const chatRoutes = require('./modules/chat/chat.routes');
 const feedRoutes = require('./modules/feed/feed.routes');
 const notificationsRoutes = require('./modules/notifications/notifications.routes');
+const { router: liveRoutes } = require('./modules/live/live.routes');
+const liveAdminRoutes = require('./modules/live/live.admin');
 const purchasesRoutes = require('./modules/purchases/purchases.routes');
 const payoutsRoutes = require('./modules/payouts/payouts.routes');
 const safetyRoutes = require('./modules/safety/safety.routes');
@@ -71,20 +76,46 @@ function createApp() {
       }
     })();
     const adminMediaSrc = ["'self'", 'data:', ...(storageOrigin ? [storageOrigin] : [])];
+    // blob: lets the settings page preview a picked file before it is saved.
+    const adminPreviewSrc = [...adminMediaSrc, 'blob:'];
+    // Live settings preview shows provider-hosted model images (https only).
+    const adminImageSrc = [...adminPreviewSrc, 'https:'];
+    const adminDir = path.join(__dirname, '..', 'public', 'admin');
+    // The console page is served with content-hashed asset URLs and no-cache,
+    // so after an update a browser always loads a matching admin.js +
+    // admin.css pair — never a fresh one next to a stale one from its cache.
+    const assetVersion = (file) =>
+      crypto.createHash('sha1').update(fs.readFileSync(path.join(adminDir, file))).digest('hex').slice(0, 12);
+    const adminIndex = (req, res, next) => {
+      const url = req.originalUrl.split('?')[0];
+      if (req.method !== 'GET' || (url !== '/admin/' && url !== '/admin/index.html')) return next();
+      const html = fs
+        .readFileSync(path.join(adminDir, 'index.html'), 'utf8')
+        .replace('href="admin.css"', `href="admin.css?v=${assetVersion('admin.css')}"`)
+        .replace('src="admin.js"', `src="admin.js?v=${assetVersion('admin.js')}"`)
+        .replace('href="live-settings.css"', `href="live-settings.css?v=${assetVersion('live-settings.css')}"`)
+        .replace('src="live-settings.js"', `src="live-settings.js?v=${assetVersion('live-settings.js')}"`);
+      return res.set('Cache-Control', 'no-cache').type('html').send(html);
+    };
     app.use(
       '/admin',
       helmet.contentSecurityPolicy({
         useDefaults: true,
-        directives: { 'img-src': adminMediaSrc, 'media-src': adminMediaSrc },
+        // connect-src: the console uploads login-background media straight to
+        // Storage with a backend-signed URL.
+        directives: { 'img-src': adminImageSrc, 'media-src': adminPreviewSrc, 'connect-src': adminMediaSrc },
       }),
-      express.static(path.join(__dirname, '..', 'public', 'admin')),
+      adminIndex,
+      express.static(adminDir),
     );
   }
 
   app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
 
   /** Client bootstrap: rates, packs and enabled languages in one call. */
-  app.get('/api/config', (req, res) => {
+  app.get('/api/config', async (req, res) => {
+    // Admin-managed login background; null = the app's default. Never fails.
+    const loginBackground = await loginBackgroundConfig();
     res.json({
       rates: {
         audio: RATES.audio.coinsPerMinute,
@@ -100,6 +131,7 @@ function createApp() {
       // Sign-in methods: email by default; the others are offered only when
       // their provider is configured on this deployment.
       auth: { defaultChannel: DEFAULT_CHANNEL, channels: otpAvailability() },
+      loginBackground,
     });
   });
 
@@ -111,9 +143,11 @@ function createApp() {
   app.use('/api/chat', chatRoutes);
   app.use('/api/feed', feedRoutes);
   app.use('/api/notifications', notificationsRoutes);
+  app.use('/api/live', liveRoutes);
   app.use('/api/purchases', purchasesRoutes);
   app.use('/api/payouts', payoutsRoutes);
   app.use('/api/safety', safetyRoutes);
+  app.use('/api/admin/live', liveAdminRoutes);
   app.use('/api/admin', adminRoutes);
 
   app.use(notFoundHandler);

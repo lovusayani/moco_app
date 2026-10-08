@@ -23,6 +23,9 @@ import '../../features/profile/ledger_screen.dart';
 import '../../features/notifications/notifications_screen.dart';
 import '../../features/profile/profile_screen.dart';
 import '../../features/listener_profile/listener_profile_screen.dart';
+import '../../features/live/live_player_screen.dart';
+import '../../features/live/live_screen.dart';
+import '../../shared/models/live.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/profile_setup/profile_setup_screen.dart';
 import '../../features/wallet/wallet_screen.dart';
@@ -51,6 +54,15 @@ class Routes {
   static const coinLedger = '/profile/ledger/coins';
   static const earningsLedger = '/profile/ledger/earnings';
   static const notifications = '/notifications';
+
+  /// Web only: the top bar's Live item — an empty placeholder for now.
+  static const live = '/live';
+
+  /// Web only: the internal player for one provider model (not a Moco
+  /// account — the username is the provider's).
+  static const liveWatch = '/live/watch/:username';
+  static String liveWatchPath(String username) =>
+      '/live/watch/${Uri.encodeComponent(username)}';
 
   /// Deep-link safe: the listener id is a path segment, so
   /// `moco://listener/42` maps cleanly once deep links are enabled.
@@ -93,7 +105,9 @@ final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
 final routerProvider = Provider<GoRouter>((ref) {
   final auth = ref.watch(authActionsProvider);
-  final callingSupported = ref.watch(platformCapabilitiesProvider).supportsCalling;
+  final capabilities = ref.watch(platformCapabilitiesProvider);
+  final callingSupported = capabilities.supportsCalling;
+  final home = homeRouteFor(capabilities);
 
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
@@ -101,8 +115,12 @@ final routerProvider = Provider<GoRouter>((ref) {
     // The controller is a Listenable, so every auth change re-evaluates
     // redirects. This is what keeps routing and session state in lockstep.
     refreshListenable: auth,
-    redirect: (context, state) =>
-        _redirect(auth.value, state, callingSupported: callingSupported),
+    redirect: (context, state) => _redirect(
+      auth.value,
+      state,
+      callingSupported: callingSupported,
+      home: home,
+    ),
     routes: [
       GoRoute(
         path: Routes.onboarding,
@@ -176,6 +194,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const PostComposerScreen(),
       ),
       GoRoute(
+        path: Routes.liveWatch,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => LivePlayerScreen(
+          username: state.pathParameters['username'] ?? '',
+          model: state.extra is LiveModel ? state.extra as LiveModel : null,
+        ),
+      ),
+      GoRoute(
         path: Routes.notifications,
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const NotificationsScreen(),
@@ -226,11 +252,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         navigatorKey: _shellNavigatorKey,
         builder: (context, state, child) => AppShell(child: child),
         routes: [
-          GoRoute(path: Routes.app, redirect: (_, __) => Routes.discovery),
+          GoRoute(path: Routes.app, redirect: (_, __) => home),
           GoRoute(
             path: Routes.discovery,
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: DiscoveryScreen()),
+          ),
+          GoRoute(
+            path: Routes.live,
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: LiveScreen()),
           ),
           GoRoute(
             path: Routes.wallet,
@@ -265,6 +296,10 @@ final routerProvider = Provider<GoRouter>((ref) {
   );
 });
 
+/// Where a signed-in user lands: Feed on web, Discovery on Android.
+String homeRouteFor(PlatformCapabilities capabilities) =>
+    capabilities.isWeb ? Routes.feed : Routes.discovery;
+
 /// The single startup decision, evaluated on every navigation.
 ///
 /// Order matters and mirrors the launch flow: onboarding, then authentication,
@@ -279,6 +314,7 @@ String? _redirect(
   AuthState auth,
   GoRouterState state, {
   bool callingSupported = true,
+  String home = Routes.discovery,
 }) {
   if (auth.isInitializing) return null;
 
@@ -300,7 +336,7 @@ String? _redirect(
       return atProfileSetup ? null : Routes.profileSetup;
     case AuthStatus.authenticated:
       // Bounce away from the pre-auth screens once signed in and complete.
-      if (atOnboarding || atLogin || atProfileSetup) return Routes.discovery;
+      if (atOnboarding || atLogin || atProfileSetup) return home;
       if (!callingSupported && location.startsWith('/call/')) {
         return Routes.discovery;
       }

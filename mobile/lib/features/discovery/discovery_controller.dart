@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/listeners_api.dart';
 import '../../core/errors/api_exception.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/providers.dart';
 import '../../core/realtime/socket_service.dart';
 import '../../shared/models/listener.dart';
@@ -67,7 +68,20 @@ class DiscoveryState {
 }
 
 class DiscoveryController extends StateNotifier<DiscoveryState> {
-  DiscoveryController(this._api, this._socket) : super(const DiscoveryState()) {
+  DiscoveryController(
+    this._api,
+    this._socket, {
+    CallMode initialMode = CallMode.audio,
+  }) : super(
+         initialMode == CallMode.video
+             // Video is a real server-side filter, so starting there means
+             // the very first request already asks for video listeners.
+             ? const DiscoveryState(
+                 mode: CallMode.video,
+                 filters: DiscoveryFilters(callType: 'video'),
+               )
+             : const DiscoveryState(),
+       ) {
     _subscribeToPresence();
     load();
   }
@@ -222,5 +236,23 @@ final discoveryControllerProvider =
       (ref) => DiscoveryController(
         ref.watch(listenersApiProvider),
         ref.watch(socketServiceProvider),
+        // The web app opens on Video; Android keeps its Audio default.
+        initialMode: ref.watch(platformCapabilitiesProvider).isWeb
+            ? CallMode.video
+            : CallMode.audio,
       ),
     );
+
+/// Web only: Search is a bottom-nav item there instead of a Discovery header
+/// button, so the nav — not Discovery — decides whether the search field is
+/// open. Live closes it; Search opens it.
+final discoveryWebSearchOpenProvider = StateProvider<bool>((ref) => false);
+
+/// Web only: whether Discover's top bar is showing. Discover hides it while
+/// the user scrolls down through listeners and brings it back on scroll up,
+/// at the top, or once scrolling has paused for a moment.
+final discoveryWebTopBarVisibleProvider = StateProvider<bool>((ref) => true);
+
+/// Web only: bumped on every Search tap, so tapping Search again re-focuses
+/// the field even when it is already open.
+final discoveryWebSearchFocusProvider = StateProvider<int>((ref) => 0);

@@ -7,6 +7,7 @@
   <!-- Inline so the console makes no extra request and cannot 404. -->
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23e54f9a'/%3E%3Ctext x='16' y='23' font-family='sans-serif' font-size='19' font-weight='bold' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="admin.css">
+  <link rel="stylesheet" href="live-settings.css">
 </head>
 <body>
 
@@ -19,14 +20,14 @@
       <div class="brand-mark">M</div>
       <div class="brand-name">Moco Admin</div>
     </div>
-    <p class="login-sub">Sign in with your admin email address.</p>
+    <p class="login-sub">Sign in with your admin email address or phone number.</p>
 
     <div id="login-error" class="error-msg" hidden></div>
 
     <form id="phone-form">
       <div class="field">
-        <label for="login-email">Email address</label>
-        <input id="login-email" type="email" placeholder="admin@example.com" autocomplete="email" required>
+        <label for="login-email">Email or phone</label>
+        <input id="login-email" type="text" inputmode="email" placeholder="admin@example.com or +919876543210" autocomplete="username" required>
       </div>
       <button class="btn-primary" type="submit">Send code</button>
     </form>
@@ -37,7 +38,7 @@
         <input id="code" inputmode="numeric" maxlength="8" placeholder="000000" required>
       </div>
       <button class="btn-primary" type="submit">Verify</button>
-      <button class="btn-ghost" type="button" id="back-btn" style="width:100%;margin-top:8px">Use a different email</button>
+      <button class="btn-ghost" type="button" id="back-btn" style="width:100%;margin-top:8px">Use a different email or phone</button>
     </form>
 
     <p class="hint">Access is limited to the server's admin allow-list (ADMIN_EMAILS / ADMIN_PHONES).</p>
@@ -66,5 +67,7 @@
 
 <script src="monitoring.js"></script>
 <script src="admin.js"></script>
+<!-- Settings → Live (separate file; extends the Settings view). -->
+<script src="live-settings.js"></script>
 </body>
 </html>

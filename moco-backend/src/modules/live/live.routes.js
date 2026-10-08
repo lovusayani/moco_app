@@ -3,6 +3,7 @@
 const express = require('express');
 const { z } = require('zod');
 const live = require('./live.service');
+const liveSettings = require('./live.settings');
 const stripcash = require('../../integrations/stripcash');
 const jobs = require('../../jobs');
 const logger = require('../../utils/logger');
@@ -16,6 +17,26 @@ const { authenticate } = require('../../middleware/auth');
  */
 const router = express.Router();
 router.use(authenticate);
+
+/**
+ * What the client may know about Live: whether it is on, the 18+ gate, and
+ * the non-secret settings the official Stripchat player widget needs. The
+ * affiliate userId is the one provider value the player requires in the
+ * browser; the API key is never part of this response.
+ */
+router.get(
+  '/config',
+  asyncHandler(async (req, res) => {
+    const settings = await liveSettings.read();
+    const enabled = settings.enabled && stripcash.isConfigured();
+    res.json({
+      enabled,
+      provider: stripcash.PROVIDER,
+      requireAgeConfirmation: settings.requireAgeConfirmation,
+      player: enabled ? stripcash.playerConfig() : null,
+    });
+  }),
+);
 
 router.get(
   '/models',
@@ -31,26 +52,23 @@ router.get(
     'query',
   ),
   asyncHandler(async (req, res) => {
-    const configured = stripcash.isConfigured();
-    if (configured) {
-      await live.noteDemand();
-      // Keep the 30-second chain alive while people browse; if it had gone
-      // idle, refresh now rather than serve an empty or stale page.
-      await jobs.ensureLiveSync().catch((err) => logger.warn({ err: { message: err.message } }, 'live sync enqueue failed'));
-      await live.syncIfStale().catch((err) => logger.warn({ err: { message: err.message } }, 'live inline sync failed'));
+    const settings = await liveSettings.read();
+    const available = settings.enabled && stripcash.isConfigured();
+    const body = { provider: stripcash.PROVIDER, available, limit: req.query.limit, offset: req.query.offset, sort: req.query.sort };
+    if (!available) {
+      res.json({ ...body, updatedAt: null, models: [] });
+      return;
     }
+
+    await live.noteDemand();
+    // Keep the 30-second chain alive while people browse; if it had gone
+    // idle, refresh now rather than serve an empty or stale page.
+    await jobs.ensureLiveSync().catch((err) => logger.warn({ err: { message: err.message } }, 'live sync enqueue failed'));
+    await live.syncIfStale().catch((err) => logger.warn({ err: { message: err.message } }, 'live inline sync failed'));
 
     const viewer = live.viewerFromRequest(req);
     const [models, state] = await Promise.all([live.list(viewer, req.query), live.getState()]);
-    res.json({
-      provider: stripcash.PROVIDER,
-      available: configured,
-      updatedAt: state?.last_sync_ok ? state.last_sync_at : state?.last_sync_at ?? null,
-      limit: req.query.limit,
-      offset: req.query.offset,
-      sort: req.query.sort,
-      models,
-    });
+    res.json({ ...body, updatedAt: state?.last_sync_at ?? null, models });
   }),
 );
 

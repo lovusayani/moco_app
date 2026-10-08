@@ -15,8 +15,12 @@ const { redis } = require('../config/redis');
  *   - at most one request every 5 seconds — shared across every instance
  *     through a Redis slot, and across both endpoints;
  *   - images are the provider's URLs, never downloaded;
- *   - secrets (API key, userId) never leave this module: they are not logged,
- *     and errors carry only an HTTP status or a short code.
+ *   - the API key never leaves this module: it is not logged, and errors
+ *     carry only an HTTP status or a short code.
+ *
+ * The affiliate userId is not a secret: it is a tracking id the official
+ * Stripchat player needs in the browser, so playerConfig() exposes it (and
+ * only it) to signed-in clients. It is still never logged.
  */
 
 const PROVIDER = 'stripcash';
@@ -204,6 +208,15 @@ async function fetchDeletedModels({ since, until } = {}) {
     .filter((m) => m.username);
 }
 
+/**
+ * Non-secret settings for the official Stripchat player widget
+ * (new StripchatPlayer({ modelName, userId, strict, autoplay })), per the
+ * provider docs. modelName is chosen per model by the client.
+ */
+function playerConfig() {
+  return { type: 'stripchat-player', userId: env.stripcash.userId, strict: 1, autoplay: 'all' };
+}
+
 /** Concise, secret-free log line for a provider failure. */
 function logFailure(err, what) {
   const level = err.code === 'rate_limited' || err.code === 'not_configured' ? 'debug' : 'warn';
@@ -215,6 +228,7 @@ module.exports = {
   MIN_INTERVAL_MS,
   StripcashError,
   isConfigured,
+  playerConfig,
   fetchOnlineModels,
   fetchDeletedModels,
   normalizeModel,

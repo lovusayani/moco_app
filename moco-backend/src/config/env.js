@@ -132,9 +132,12 @@ const env = {
     gatewayToken: optional('TELEGRAM_GATEWAY_TOKEN', ''),
   },
 
-  // Moco Live: Stripcash "Models API for aggregators". Both values are
-  // server-side only — never returned by any route or sent to a client.
-  // Either unset: Live is "not configured" (empty listing, sync skipped).
+  // Moco Live: Stripcash "Models API for aggregators". Either unset: Live is
+  // "not configured" (empty listing, sync skipped).
+  //   STRIPCASH_API_KEY — SECRET. Server-side only: never returned, never logged.
+  //   STRIPCASH_USER_ID — affiliate tracking id, not a secret. Exposed only to
+  //                       signed-in clients via GET /api/live/config, because
+  //                       the official Stripchat player needs it.
   stripcash: {
     apiKey: optional('STRIPCASH_API_KEY', ''),
     userId: optional('STRIPCASH_USER_ID', ''),

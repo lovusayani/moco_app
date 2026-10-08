@@ -402,3 +402,54 @@ test('the daily cleanup is queued once per day', async () => {
   assert.equal(queued[0].idempotencyKey, queued[1].idempotencyKey);
   assert.equal(queued[0].payload.task, 'cleanup');
 });
+
+// --- client config / age gate -----------------------------------------------
+
+test('GET /api/live/config exposes the player userId and the age gate, never the API key', async () => {
+  await query(`DELETE FROM app_settings WHERE key = 'live'`);
+  const token = signToken(await createUser());
+  const res = await get('/api/live/config', { token });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, {
+    enabled: true,
+    provider: 'stripcash',
+    requireAgeConfirmation: true,
+    player: { type: 'stripchat-player', userId: USER_ID, strict: 1, autoplay: 'all' },
+  });
+  assert.equal(JSON.stringify(res.body).includes(API_KEY), false);
+  assert.equal((await get('/api/live/config')).status, 401);
+});
+
+test('the age gate stays on unless explicitly turned off', async () => {
+  const token = signToken(await createUser());
+  const setLive = (value) =>
+    query(
+      `INSERT INTO app_settings (key, value) VALUES ('live', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [JSON.stringify(value)],
+    );
+  await setLive({ requireAgeConfirmation: 'no' });
+  assert.equal((await get('/api/live/config', { token })).body.requireAgeConfirmation, true);
+  await setLive({ requireAgeConfirmation: false });
+  assert.equal((await get('/api/live/config', { token })).body.requireAgeConfirmation, false);
+  await query(`DELETE FROM app_settings WHERE key = 'live'`);
+});
+
+test('Live switched off: no player config, no models, no provider calls', async () => {
+  await syncWith([model('a')]);
+  providerCalls.length = 0;
+  await query(`INSERT INTO app_settings (key, value) VALUES ('live', '{"enabled": false}')
+               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
+  try {
+    const token = signToken(await createUser());
+    const config = await get('/api/live/config', { token });
+    assert.equal(config.body.enabled, false);
+    assert.equal(config.body.player, null);
+    const list = await get('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
+    assert.equal(list.body.available, false);
+    assert.deepEqual(list.body.models, []);
+    assert.equal(providerCalls.length, 0);
+  } finally {
+    await query(`DELETE FROM app_settings WHERE key = 'live'`);
+  }
+});

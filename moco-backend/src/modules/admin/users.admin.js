@@ -9,6 +9,8 @@ const { isAdminUser } = require('../../middleware/auth');
 const { notFound, badRequest, conflict } = require('../../utils/errors');
 const { USER_STATUS, listenerEligibleSql, listenerBlockers } = require('../../utils/constants');
 const audit = require('./audit.service');
+const jobs = require('../../jobs');
+const fcm = require('../../integrations/fcm');
 const { listSchema, Where, orderBy, limitOffset, pageOf, likeTerm } = require('./admin.list');
 
 /**
@@ -181,6 +183,7 @@ router.get(
       updatedAt: u.updated_at,
       lastActive: u.last_login,
       isAdmin: isAdminUser(u),
+      pushRegistered: Boolean(u.fcm_token),
       wallet: { coinBalance: Number(u.coin_balance) },
       listener: u.kyc_status
         ? {
@@ -252,6 +255,40 @@ router.post(
     });
 
     res.status(201).json({ id: user.id, phone: user.phone, name: user.display_name, status: user.status });
+  }),
+);
+
+/**
+ * Sends a test push to the user's registered device, through the same
+ * notification queue real pushes use. Delivery happens asynchronously; the
+ * response says whether there is anything to deliver to.
+ */
+router.post(
+  '/users/:id/test-push',
+  validate(idParam, 'params'),
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const { rows } = await query('SELECT id, fcm_token FROM users WHERE id = $1', [id]);
+    if (!rows[0]) throw notFound('User');
+    if (!fcm.isConfigured()) {
+      throw badRequest('push_not_configured', 'Push notifications are not configured on the server');
+    }
+    if (!rows[0].fcm_token) {
+      throw badRequest('no_push_token', 'This user has no device registered for push notifications');
+    }
+    await jobs.sendNotification({
+      userId: id,
+      title: 'Moco test notification',
+      body: 'Push notifications are working. Tap to open your notifications.',
+      data: { type: 'test' },
+    });
+    await audit.record(null, {
+      admin: req.user,
+      action: 'user.test_push',
+      targetType: 'user',
+      targetId: id,
+    });
+    res.json({ queued: true });
   }),
 );
 

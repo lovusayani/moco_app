@@ -175,12 +175,34 @@ router.post(
   }),
 );
 
-/** Registers the device push token used for incoming-call notifications. */
+/**
+ * Registers this device's push token (called on sign-in and whenever FCM
+ * rotates it). A token identifies an app install, not a person: if another
+ * account signed in on this device earlier, that account stops receiving
+ * this device's pushes.
+ */
 router.post(
   '/me/fcm-token',
   validate(z.object({ token: z.string().min(10).max(500) })),
   asyncHandler(async (req, res) => {
+    await query('UPDATE users SET fcm_token = NULL WHERE fcm_token = $1 AND id <> $2', [
+      req.body.token,
+      req.user.id,
+    ]);
     await query('UPDATE users SET fcm_token = $2, updated_at = now() WHERE id = $1', [
+      req.user.id,
+      req.body.token,
+    ]);
+    res.json({ ok: true });
+  }),
+);
+
+/** Forgets this device's push token — called on sign-out, so a signed-out device gets no pushes. */
+router.delete(
+  '/me/fcm-token',
+  validate(z.object({ token: z.string().min(10).max(500) })),
+  asyncHandler(async (req, res) => {
+    await query('UPDATE users SET fcm_token = NULL WHERE id = $1 AND fcm_token = $2', [
       req.user.id,
       req.body.token,
     ]);

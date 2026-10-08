@@ -133,7 +133,10 @@ const env = {
   },
 
   fcm: {
-    serverKey: optional('FCM_SERVER_KEY', ''),
+    // The Firebase project's service account key (Project settings → Service
+    // accounts → Generate new private key), as the JSON itself or base64 of
+    // it. Used only to mint FCM HTTP v1 access tokens; never logged.
+    serviceAccountJson: optional('FCM_SERVICE_ACCOUNT_JSON', ''),
   },
 
   payments: {

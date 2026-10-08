@@ -186,12 +186,15 @@ overrides.)
 | `SMS_PROVIDER` + `SMS_API_KEY` | **`msg91` + key needed** — with `log`, production OTPs are never delivered and nobody can sign in | ✔ (key) |
 | `PAYMENT_PROVIDER` + keys + `PAYMENT_WEBHOOK_SECRET` | currently `mock` (production refuses mock webhooks, so no coins can be credited) | ✔ |
 | `AGORA_APP_ID`, `AGORA_APP_CERTIFICATE`, `AGORA_WEBHOOK_SECRET`, `AGORA_CUSTOMER_KEY/SECRET` | **needed for calls** (Android) | ✔ |
-| `FCM_SERVER_KEY` | **needed for push** | ✔ |
+| `FCM_SERVICE_ACCOUNT_JSON` | Firebase service-account key (JSON, or base64 of it) — **needed for push**; FCM HTTP v1. Without it production logs every push as not sent | ✔ |
+| `SENTRY_DSN` | Sentry DSN for API error reporting (public client key). Unset: reporting off | |
 | `GOOGLE_PLAY_PACKAGE_NAME` / `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Play Billing verification | ✔ |
 
 `npm run build:vercel` fails the deployment if a required variable is missing.
 It warns, without failing, when SMS is still `log` in production. Never put
-backend variables in moco-web or moco-admin.
+backend variables in moco-web or moco-admin. The only variable moco-web and
+moco-admin take is their own `SENTRY_DSN` (a public client key, baked into
+the page).
 
 ---
 
@@ -220,6 +223,20 @@ Records:
 
 If the zone has a CAA record, it must allow `letsencrypt.org`. Vercel serves
 HTTP → HTTPS redirects and HSTS automatically.
+
+**Caching:** set Caching → Configuration → Browser Cache TTL to **Respect
+Existing Headers**. Any fixed TTL there rewrites the web app's
+`Cache-Control: no-cache` on `.js` files (the default 4 h made returning
+browsers run the previous build for hours after a deploy). Independently of
+that setting, each web build loads `flutter_bootstrap.js` and `main.dart.js`
+under `?v=<commit>` URLs (served `immutable`), so a deploy always reaches
+returning browsers and the service worker.
+
+**Email (Resend):** `resend._domainkey` (DKIM, signs as `lovcamx.online`),
+`send` (bounce domain: SPF and MX) and `_dmarc`. DMARC passes through DKIM
+alignment. Start DMARC at `p=none` with aggregate reports (Cloudflare → Email
+→ DMARC Management adds an `rua` address); move to `quarantine` only after
+the reports show every legitimate sender aligned.
 
 ---
 
@@ -277,3 +294,25 @@ The code runs on Hobby, but **production on Hobby is not appropriate**:
    so reconnects happen less often.
 
 Pro is $20 per seat per month plus usage.
+
+---
+
+## 7. Push notifications and error monitoring
+
+**Push (FCM HTTP v1).** Firebase project with an Android app
+`com.sprsinfotech.moco`. Its `google-services.json` goes in
+`mobile/android/app/` (client configuration, not a secret; the Android build
+skips push without it). The service-account key goes only in moco-api as
+`FCM_SERVICE_ACCOUNT_JSON` (Sensitive). Admin console → user → **Send test
+push** sends one through the real notification queue. Dead tokens are cleared
+automatically; sign-out unregisters the device. The web app does not use push.
+
+**Errors (Sentry).** One `SENTRY_DSN` per project (a DSN is a public client
+key): moco-api (Node), moco-web (Flutter; the same DSN in the Android build via
+`--dart-define=SENTRY_DSN=…`), moco-admin (browser). Each is off when unset.
+moco-api reports error-level log lines (unhandled route errors, Redis and
+Postgres errors, failed pushes and OTP emails, realtime errors), failed queue
+jobs and crashes, with only an allow-list of fields — never bodies, headers,
+tokens, codes, emails or phone numbers. Test events: `https://lovcamx.online/?moco_monitoring_test=1`
+and `https://admin.lovcamx.online/?monitoring-test`. Vercel runtime logs keep
+everything as before.

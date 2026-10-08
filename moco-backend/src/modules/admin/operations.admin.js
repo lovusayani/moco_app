@@ -16,6 +16,9 @@ const { asyncHandler } = require('../../middleware/error');
 const { notFound, badRequest } = require('../../utils/errors');
 const { LEDGER_REASON, PAYOUT_STATUS, REDIS } = require('../../utils/constants');
 const audit = require('./audit.service');
+const fcm = require('../../integrations/fcm');
+const monitoring = require('../../utils/monitoring');
+const logger = require('../../utils/logger');
 const { listSchema, Where, orderBy, limitOffset, pageOf, likeTerm } = require('./admin.list');
 
 /**
@@ -571,8 +574,28 @@ router.get(
       storage: objectStorage,
       tickWorker,
       queues,
+      push: { ok: fcm.isConfigured() },
+      monitoring: { ok: monitoring.isEnabled() },
       checkedAt: new Date().toISOString(),
     });
+  }),
+);
+
+/**
+ * Sends one deliberate error through the normal error path, to check that
+ * error monitoring receives it. Responds 500 like any unhandled error would.
+ */
+router.post(
+  '/system/monitoring-test',
+  asyncHandler(async (req, res) => {
+    if (!monitoring.isEnabled()) {
+      throw badRequest('monitoring_not_configured', 'Error monitoring is not configured on the server (SENTRY_DSN)');
+    }
+    logger.error(
+      { err: new Error('Moco API monitoring test event'), path: req.path, method: req.method },
+      'monitoring test event',
+    );
+    res.json({ sent: true });
   }),
 );
 

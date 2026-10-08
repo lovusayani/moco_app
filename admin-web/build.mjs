@@ -59,9 +59,31 @@ const patched = js.replace(API_LINE, `const API = '${API_ORIGIN}/api';`);
 if (/https?:\/\/(localhost|127\.0\.0\.1)/.test(patched)) fail('admin.js contains a localhost URL.');
 writeFileSync(jsPath, patched);
 
+// Error reporting (moco-backend/public/admin/monitoring.js): fill in the
+// Sentry DSN (SENTRY_DSN on moco-admin — a public client key) and the release.
+// Unset: the reporter installs nothing. vercel.json's CSP allows *.sentry.io.
+const sentryDsn = (process.env.SENTRY_DSN || '').trim();
+if (sentryDsn && !/^https:\/\/[^@\s'"]+@[^/\s'"]+\/\d+$/.test(sentryDsn)) {
+  fail('SENTRY_DSN does not look like a Sentry DSN (https://<key>@<host>/<project-id>).');
+}
+const release = `moco-admin@${(process.env.VERCEL_GIT_COMMIT_SHA || 'local').slice(0, 12)}`;
+const monPath = join(out, 'monitoring.js');
+const mon = readFileSync(monPath, 'utf8');
+const DSN_LINE = "const SENTRY_DSN = '';";
+const RELEASE_LINE = "const RELEASE = '';";
+for (const line of [DSN_LINE, RELEASE_LINE]) {
+  if (mon.split(line).length !== 2) fail(`expected exactly one "${line}" in monitoring.js.`);
+}
+writeFileSync(
+  monPath,
+  mon
+    .replace(DSN_LINE, `const SENTRY_DSN = '${sentryDsn}';`)
+    .replace(RELEASE_LINE, `const RELEASE = '${release}';`),
+);
+
 // No server-side secret may end up in the static output. Vercel exposes every
 // project variable to the build process, so check the values that exist here.
-const SECRET_NAMES = ['DATABASE_URL', 'REDIS_PASSWORD', 'JWT_SECRET', 'CRON_SECRET', 'SUPABASE_SERVICE_ROLE_KEY', 'AGORA_APP_CERTIFICATE', 'PAYMENT_KEY_SECRET', 'SMS_API_KEY', 'FCM_SERVER_KEY'];
+const SECRET_NAMES = ['DATABASE_URL', 'REDIS_PASSWORD', 'JWT_SECRET', 'CRON_SECRET', 'SUPABASE_SERVICE_ROLE_KEY', 'AGORA_APP_CERTIFICATE', 'PAYMENT_KEY_SECRET', 'SMS_API_KEY', 'FCM_SERVICE_ACCOUNT_JSON'];
 const secrets = SECRET_NAMES.map((n) => [n, (process.env[n] || '').trim()]).filter(([, v]) => v.length >= 8);
 for (const f of readdirSync(out)) {
   const text = readFileSync(join(out, f), 'latin1');
@@ -70,4 +92,4 @@ for (const f of readdirSync(out)) {
   }
 }
 
-console.log(`[admin build] OK — ${readdirSync(out).join(', ')} → admin-web/dist, API ${API_ORIGIN}/api (refs checked: ${refs.join(', ')})`);
+console.log(`[admin build] OK — ${readdirSync(out).join(', ')} → admin-web/dist, API ${API_ORIGIN}/api, monitoring ${sentryDsn ? 'on' : 'off'} (refs checked: ${refs.join(', ')})`);

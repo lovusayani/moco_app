@@ -12,6 +12,7 @@ import 'api/safety_api.dart';
 import 'api/users_api.dart';
 import 'auth/auth_controller.dart';
 import 'auth/auth_state.dart';
+import 'push/push_service.dart';
 import 'realtime/socket_service.dart';
 import 'storage/secure_store.dart';
 import '../shared/models/app_config.dart';
@@ -98,6 +99,7 @@ final authControllerProvider = StateNotifierProvider<AuthNotifier, AuthState>((
   // session now clears auth state everywhere, without the two providers
   // depending on each other.
   ref.read(apiClientProvider).onUnauthorized = controller.handleUnauthorized;
+  controller.onSigningOut = ref.read(pushServiceProvider).onSigningOut;
 
   ref.onDispose(controller.dispose);
   return AuthNotifier(controller);
@@ -107,6 +109,13 @@ final authControllerProvider = StateNotifierProvider<AuthNotifier, AuthState>((
 final authActionsProvider = Provider<AuthController>(
   (ref) => ref.watch(authControllerProvider.notifier).controller,
 );
+
+/// Push notifications (FCM). A no-op where Firebase is not configured.
+final pushServiceProvider = Provider<PushService>((ref) {
+  final service = PushService(usersApi: ref.watch(usersApiProvider));
+  ref.onDispose(service.dispose);
+  return service;
+});
 
 final socketServiceProvider = Provider<SocketService>((ref) {
   final service = SocketService();

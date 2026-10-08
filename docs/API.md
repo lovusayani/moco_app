@@ -95,7 +95,8 @@ level, including wallet balance and listener state. (Before Phase 1.1, `PATCH`
 returned raw snake_case columns wrapped in `{ user: ... }`; clients that parsed
 that shape must be updated.)
 | `POST` | `/api/users/me/become-listener` | Opt into listener mode (creates an unverified profile) |
-| `POST` | `/api/users/me/fcm-token` | Register the device push token |
+| `POST` | `/api/users/me/fcm-token` | Register this device's push token `{ token }`; the token is removed from any other account first |
+| `DELETE` | `/api/users/me/fcm-token` | Unregister `{ token }` (sign-out); a no-op if it is not the current token |
 | `DELETE` | `/api/users/me` | Account deletion (Play Store requirement) |
 
 Deletion is a soft delete: personal fields are cleared but the row is retained,

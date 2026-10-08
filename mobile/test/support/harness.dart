@@ -125,6 +125,9 @@ class _StubUsersApi implements UsersApi {
   Future<void> registerPushToken(String token) async {}
 
   @override
+  Future<void> unregisterPushToken(String token) async {}
+
+  @override
   Future<void> deleteAccount() async {}
 }
 

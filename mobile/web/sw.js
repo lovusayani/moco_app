@@ -15,8 +15,12 @@
 // * Every successful network response refreshes its cache entry, so the
 //   offline copy is always the last version that was actually loaded. Bump
 //   CACHE when the caching scheme itself changes; activate drops old caches.
+// * Each deploy loads main.dart.js and flutter_bootstrap.js under a new
+//   ?v=<build> URL (tool/vercel/build_web.mjs). Entries are stored WITHOUT
+//   that stamp, so a deploy replaces the previous copy instead of adding
+//   another multi-megabyte one next to it.
 
-const CACHE = 'moco-shell-v1';
+const CACHE = 'moco-shell-v2';
 
 // Fetched best-effort at install so an installed app can cold-start offline.
 // Each entry is cached individually: one missing file must not fail install.
@@ -70,6 +74,13 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+/** The cache key for a request: its URL without the per-build ?v= stamp. */
+function cacheKey(request) {
+  const url = new URL(request.url);
+  url.searchParams.delete('v');
+  return url.href;
+}
+
 function isHandled(request) {
   if (request.method !== 'GET') return false;
   const url = new URL(request.url);
@@ -107,11 +118,11 @@ self.addEventListener('fetch', (event) => {
       try {
         const response = await fetch(request);
         if (response.ok && response.type === 'basic') {
-          cache.put(request, response.clone());
+          cache.put(cacheKey(request), response.clone());
         }
         return response;
       } catch (err) {
-        const cached = await cache.match(request, { ignoreSearch: true });
+        const cached = await cache.match(cacheKey(request), { ignoreSearch: true });
         if (cached) return cached;
         throw err;
       }

@@ -12,6 +12,8 @@
 //   MOCO_API_ORIGIN   API origin. Default: API_ORIGIN below.
 //   MOCO_FLAVOR       default "production". "staging" or "development" are
 //                     refused for the production deployment.
+//   SENTRY_DSN        Sentry DSN for crash/error reporting (a public client
+//                     key, not a secret). Unset: reporting is off.
 //
 // This project has no secrets. The build still fails if the value of any
 // known server-side secret present in the build environment shows up in the
@@ -63,7 +65,14 @@ if (onVercel && process.env.VERCEL_ENV === 'production' && flavor !== 'productio
 const flutterHome = process.env.FLUTTER_HOME || join(homedir(), 'flutter-sdk');
 const flutter = onVercel ? join(flutterHome, 'flutter', 'bin', 'flutter') : 'flutter';
 
+// The build id doubles as the Sentry release, so an error report names the
+// exact deployment (see "per-build asset URLs" below).
+const buildId = (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 12) || Date.now().toString(36);
+const sentryDsn = (process.env.SENTRY_DSN || '').trim();
+if (sentryDsn && !/^https:\/\/[^@\s]+@[^/\s]+\/\d+$/.test(sentryDsn)) fail('SENTRY_DSN does not look like a Sentry DSN (https://<key>@<host>/<project-id>).');
+
 const defines = [`FLAVOR=${flavor}`, `API_BASE_URL=${apiOrigin}/api`, `SOCKET_URL=${apiOrigin}`];
+if (sentryDsn) defines.push(`SENTRY_DSN=${sentryDsn}`, `MOCO_RELEASE=moco-web@${buildId}`);
 
 const args = ['build', 'web', '--release', '--no-wasm-dry-run', ...defines.map((d) => `--dart-define=${d}`)];
 console.log(`[build_web] flutter ${args.join(' ')}`);
@@ -104,8 +113,9 @@ if (!index.includes('<base href="/">')) fail('index.html must have <base href="/
 // URLs with the build id makes every deploy fetch brand-new URLs that no
 // browser, service worker or CDN cache has seen. index.html itself is not
 // cached by Cloudflare (it stays `no-cache`), so it always points at the
-// current build.
-const buildId = (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 12) || Date.now().toString(36);
+// current build. Because a stamped URL never changes content, vercel.json
+// serves the stamped requests as `immutable`; the unstamped names stay
+// `no-cache`.
 const stamp = (file, from, to, what) => {
   const path = join(outDir, file);
   const text = readFileSync(path, 'utf8');
@@ -133,7 +143,7 @@ const SECRET_NAMES = [
   'PAYMENT_KEY_SECRET',
   'PAYMENT_WEBHOOK_SECRET',
   'SMS_API_KEY',
-  'FCM_SERVER_KEY',
+  'FCM_SERVICE_ACCOUNT_JSON',
 ];
 const secrets = SECRET_NAMES.map((n) => [n, (process.env[n] || '').trim()]).filter(([, v]) => v.length >= 8);
 function* walk(dir) {
@@ -155,6 +165,6 @@ for (const file of walk(outDir)) {
 
 console.log(
   `[build_web] OK — ${files} files in build/web, flavor=${flavor}, ` +
-    `api=${apiOrigin}/api, socket=${apiOrigin}, build=${buildId}, ` +
+    `api=${apiOrigin}/api, socket=${apiOrigin}, build=${buildId}, monitoring=${sentryDsn ? 'on' : 'off'}, ` +
     `secret scan: ${secrets.length} value(s) checked.`,
 );

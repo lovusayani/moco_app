@@ -61,6 +61,18 @@ class UsersApi {
     );
   }
 
+  /// `DELETE /users/me/fcm-token` — this device stops receiving pushes for
+  /// the signed-in account. Called on sign-out, while the session is valid.
+  Future<void> unregisterPushToken(String token) {
+    return _client.request(
+      () => _client.dio.delete<dynamic>(
+        '/users/me/fcm-token',
+        data: {'token': token},
+      ),
+      (_) {},
+    );
+  }
+
   /// `DELETE /users/me` — soft delete. The backend clears personal fields and
   /// retains the row so financial history (coin_ledger, listener_earnings)
   /// stays reconstructable; it never returns a new session, so the caller

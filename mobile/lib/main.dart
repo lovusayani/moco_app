@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,7 +9,9 @@ import 'package:go_router/go_router.dart';
 
 import 'core/auth/auth_state.dart';
 import 'core/calling/call_controller.dart';
+import 'core/monitoring/monitoring.dart';
 import 'core/providers.dart';
+import 'core/push/push_service.dart';
 import 'core/routing/app_router.dart';
 import 'core/storage/secure_store.dart';
 import 'core/theme/moco_colors.dart';
@@ -28,7 +32,7 @@ Future<void> main() async {
 
   // Let the app's own gradient show through the system bars.
   SystemChrome.setSystemUIOverlayStyle(
-     SystemUiOverlayStyle(
+    SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
       systemNavigationBarColor: MocoColors.backgroundElevated,
@@ -39,14 +43,20 @@ Future<void> main() async {
   // whether onboarding was completed — this is what prevents route flicker.
   final prefs = await AppPreferences.create();
 
-  runApp(
-    ProviderScope(
-      overrides: [
-        appPreferencesProvider.overrideWithValue(prefs),
-        if (launchLocation != null)
-          initialLocationProvider.overrideWithValue(launchLocation),
-      ],
-      child: const MocoApp(),
+  // Push notifications (Android). Without Firebase config this does nothing.
+  await PushService.initializeFirebase();
+
+  // Crash/error reporting wraps the app; a no-op without SENTRY_DSN.
+  await Monitoring.run(
+    () => runApp(
+      ProviderScope(
+        overrides: [
+          appPreferencesProvider.overrideWithValue(prefs),
+          if (launchLocation != null)
+            initialLocationProvider.overrideWithValue(launchLocation),
+        ],
+        child: const MocoApp(),
+      ),
     ),
   );
 }
@@ -75,6 +85,24 @@ class _MocoAppState extends ConsumerState<MocoApp> with WidgetsBindingObserver {
     Future.microtask(
       () => ref.read(authControllerProvider.notifier).bootstrap(),
     );
+    // A tapped notification opens its screen. The router's own redirect
+    // sends a signed-out user to login first.
+    Future.microtask(
+      () => ref.read(pushServiceProvider).start(open: _openFromNotification),
+    );
+  }
+
+  /// Opens [location] once the session has been resolved — a notification
+  /// that launched the app is handled before the router exists.
+  Future<void> _openFromNotification(String location) async {
+    for (var i = 0; i < 50; i++) {
+      if (!mounted) return;
+      if (ref.read(authControllerProvider).status != AuthStatus.initializing) {
+        ref.read(routerProvider).push(location);
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
   }
 
   @override
@@ -127,6 +155,11 @@ class _MocoAppState extends ConsumerState<MocoApp> with WidgetsBindingObserver {
       AuthState? previous,
       AuthState next,
     ) async {
+      Monitoring.setUser(next.isSignedIn ? next.user?.id : null);
+      final wasSignedIn = previous?.isSignedIn ?? false;
+      if (next.isSignedIn && !wasSignedIn) {
+        unawaited(ref.read(pushServiceProvider).onSignedIn());
+      }
       final socket = ref.read(socketServiceProvider);
       if (next.isSignedIn && !socket.isActive) {
         final token = await ref.read(secureStoreProvider).readToken();
@@ -181,7 +214,7 @@ class _BootstrapScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return  Scaffold(
+    return Scaffold(
       backgroundColor: MocoColors.backgroundPrimary,
       body: Center(
         child: SizedBox(

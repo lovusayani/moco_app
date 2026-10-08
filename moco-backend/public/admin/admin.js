@@ -640,6 +640,7 @@ function openUser(id) {
         ${u.status === 'suspended' ? '<button class="btn-ok btn-sm" data-act="restore">Restore account</button>' : ''}
         ${L ? '<button class="btn-ghost btn-sm" data-act="listener">Open creator profile</button>' : ''}
         ${typeof openWallet === 'function' ? '<button class="btn-ghost btn-sm" data-act="wallet">Wallet & ledger</button>' : ''}
+        ${u.pushRegistered ? '<button class="btn-ghost btn-sm" data-act="test-push">Send test push</button>' : ''}
       </div>
       <div class="cols-2">
         <div class="panel"><h3>Profile</h3>${kv([
@@ -651,6 +652,7 @@ function openUser(id) {
           ['Joined', esc(fmtDate(u.createdAt))],
           ['Last sign-in', when(u.lastActive)],
           ['Free trial', u.freeTrialUsed ? 'used' : 'available'],
+          ['Push notifications', u.pushRegistered ? badge('device registered', 'green') : badge('no device', 'grey')],
         ])}</div>
         <div class="panel"><h3>Wallet & activity</h3>${kv([
           ['Coin balance', coins(u.wallet.coinBalance)],
@@ -703,6 +705,18 @@ function openUser(id) {
     });
     body.querySelector('[data-act=listener]')?.addEventListener('click', () => openListener(u.id));
     body.querySelector('[data-act=wallet]')?.addEventListener('click', () => openWallet(u.id));
+    body.querySelector('[data-act=test-push]')?.addEventListener('click', async (e) => {
+      const button = e.currentTarget;
+      button.disabled = true;
+      try {
+        await api(`/admin/users/${u.id}/test-push`, { method: 'POST' });
+        toast('Test push queued — it should arrive on the device within a few seconds');
+      } catch (err) {
+        toast(err.message, false);
+      } finally {
+        button.disabled = false;
+      }
+    });
     body.querySelectorAll('[data-report]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();
       openReport(a.dataset.report);
@@ -922,6 +936,14 @@ view('overview', 'Overview', 'Operate', async (el) => {
     }));
   };
   el.querySelector('[data-r]').addEventListener('click', load);
+  el.querySelector('[data-mt]').addEventListener('click', async () => {
+    try {
+      await api('/admin/system/monitoring-test', { method: 'POST' });
+      toast('Test error sent — check Sentry (moco-api) for "Moco API monitoring test event"');
+    } catch (err) {
+      toast(err.message, false);
+    }
+  });
   load();
 });
 
@@ -1471,7 +1493,7 @@ view('payouts', 'Payouts', 'Money', (el) => {
 /* ---------- System ---------- */
 
 view('system', 'System / Reconcile', 'System', (el) => {
-  el.innerHTML = head('System', 'Live dependency health and money reconciliation. No hosts, keys or credentials are ever shown.', '<button class="btn-ghost btn-sm" data-r>Re-check</button>') +
+  el.innerHTML = head('System', 'Live dependency health and money reconciliation. No hosts, keys or credentials are ever shown.', '<button class="btn-ghost btn-sm" data-mt>Send test error</button> <button class="btn-ghost btn-sm" data-r>Re-check</button>') +
     '<div class="section-title">Health</div><div class="health-grid" id="hl"><div class="empty">Checking…</div></div>' +
     '<div class="section-title">Queues</div><div id="qs"></div>' +
     '<div class="section-title">Coin wallets ↔ coin ledger</div><div id="rec"></div>' +
@@ -1489,6 +1511,8 @@ view('system', 'System / Reconcile', 'System', (el) => {
         card('Redis', h.redis.ok, h.redis.ok ? `${h.redis.latencyMs} ms` : esc(h.redis.error)),
         card('Storage', h.storage.ok, h.storage.ok ? `${h.storage.latencyMs} ms · ${h.storage.buckets.map((b) => `${esc(b.name)} ${b.private ? badge('private', 'green') : badge('PUBLIC', 'red')}`).join(' ')}` : esc(h.storage.error || 'not configured')),
         card('Tick worker (billing)', h.tickWorker.ok, h.tickWorker.ok ? `last heartbeat ${h.tickWorker.ageSeconds}s ago` : esc(h.tickWorker.error)),
+        card('Push notifications (FCM)', h.push?.ok, h.push?.ok ? 'service account configured' : 'FCM_SERVICE_ACCOUNT_JSON not set — pushes are not sent'),
+        card('Error monitoring (Sentry)', h.monitoring?.ok, h.monitoring?.ok ? 'reporting API errors' : 'SENTRY_DSN not set — errors are only in Vercel logs'),
       ].join('');
       el.querySelector('#qs').innerHTML = h.queues.ok
         ? `<div class="panel">${miniTable([

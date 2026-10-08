@@ -19,6 +19,19 @@ const PHONE_KEY = 'moco_admin_phone';
 
 let token = localStorage.getItem(TOKEN_KEY);
 let pendingIdentifier = '';
+// 'email' or 'sms' — decided from what the admin typed.
+let pendingChannel = 'email';
+
+/** Email → email code; a phone number (+91… or 10 digits) → SMS code. The
+ * admin allow-list (ADMIN_EMAILS / ADMIN_PHONES) is checked server-side. */
+function parseAdminIdentifier(raw) {
+  const value = raw.trim();
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return { channel: 'email', identifier: value.toLowerCase() };
+  const digits = value.replace(/[\s-]/g, '');
+  if (/^\+[1-9]\d{7,14}$/.test(digits)) return { channel: 'sms', identifier: digits };
+  if (/^\d{10}$/.test(digits)) return { channel: 'sms', identifier: `+91${digits}` };
+  return null;
+}
 
 /* =====================================================================
  * Core
@@ -483,11 +496,16 @@ function showLoginError(message) {
 document.getElementById('phone-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   loginErr.hidden = true;
-  pendingIdentifier = document.getElementById('login-email').value.trim();
+  const parsed = parseAdminIdentifier(document.getElementById('login-email').value);
+  if (!parsed) {
+    showLoginError('Enter an email address or a phone number like +919876543210.');
+    return;
+  }
+  pendingIdentifier = parsed.identifier;
+  pendingChannel = parsed.channel;
   try {
-    // One sign-in flow for the whole product (POST /auth/otp/send); the
-    // console uses the email channel.
-    await api('/auth/otp/send', { method: 'POST', body: { channel: 'email', identifier: pendingIdentifier } });
+    // One sign-in flow for the whole product (POST /auth/otp/send).
+    await api('/auth/otp/send', { method: 'POST', body: { channel: pendingChannel, identifier: pendingIdentifier } });
     document.getElementById('phone-form').hidden = true;
     document.getElementById('code-form').hidden = false;
     document.getElementById('code').focus();
@@ -502,7 +520,7 @@ document.getElementById('code-form').addEventListener('submit', async (e) => {
   try {
     const result = await api('/auth/otp/verify', {
       method: 'POST',
-      body: { channel: 'email', identifier: pendingIdentifier, code: document.getElementById('code').value.trim() },
+      body: { channel: pendingChannel, identifier: pendingIdentifier, code: document.getElementById('code').value.trim() },
     });
     token = result.token;
     localStorage.setItem(TOKEN_KEY, token);

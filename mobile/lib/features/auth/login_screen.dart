@@ -273,21 +273,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               builder: (context, constraints) {
                 // Controls sit in the lower-middle; on short screens (or under
                 // the keyboard) the column scrolls instead of overflowing.
-                final bottomGap = (constraints.maxHeight * 0.14).clamp(
-                  24.0,
-                  140.0,
-                );
+                // Controls centred on the screen; on short screens (or under
+                // the keyboard) the column scrolls instead of overflowing.
+                const pad = 24.0;
                 return SingleChildScrollView(
-                  padding: EdgeInsets.fromLTRB(20, 24, 20, bottomGap),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: pad,
+                  ),
                   child: ConstrainedBox(
                     constraints: BoxConstraints(
-                      minHeight: (constraints.maxHeight - 24 - bottomGap).clamp(
+                      minHeight: (constraints.maxHeight - 2 * pad).clamp(
                         0,
                         double.infinity,
                       ),
                     ),
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Center(
                           child: ConstrainedBox(

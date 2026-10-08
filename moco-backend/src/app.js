@@ -21,7 +21,8 @@ const callsRoutes = require('./modules/calls/calls.routes');
 const chatRoutes = require('./modules/chat/chat.routes');
 const feedRoutes = require('./modules/feed/feed.routes');
 const notificationsRoutes = require('./modules/notifications/notifications.routes');
-const liveRoutes = require('./modules/live/live.routes');
+const { router: liveRoutes } = require('./modules/live/live.routes');
+const liveAdminRoutes = require('./modules/live/live.admin');
 const purchasesRoutes = require('./modules/purchases/purchases.routes');
 const payoutsRoutes = require('./modules/payouts/payouts.routes');
 const safetyRoutes = require('./modules/safety/safety.routes');
@@ -77,6 +78,8 @@ function createApp() {
     const adminMediaSrc = ["'self'", 'data:', ...(storageOrigin ? [storageOrigin] : [])];
     // blob: lets the settings page preview a picked file before it is saved.
     const adminPreviewSrc = [...adminMediaSrc, 'blob:'];
+    // Live settings preview shows provider-hosted model images (https only).
+    const adminImageSrc = [...adminPreviewSrc, 'https:'];
     const adminDir = path.join(__dirname, '..', 'public', 'admin');
     // The console page is served with content-hashed asset URLs and no-cache,
     // so after an update a browser always loads a matching admin.js +
@@ -89,7 +92,9 @@ function createApp() {
       const html = fs
         .readFileSync(path.join(adminDir, 'index.html'), 'utf8')
         .replace('href="admin.css"', `href="admin.css?v=${assetVersion('admin.css')}"`)
-        .replace('src="admin.js"', `src="admin.js?v=${assetVersion('admin.js')}"`);
+        .replace('src="admin.js"', `src="admin.js?v=${assetVersion('admin.js')}"`)
+        .replace('href="live-settings.css"', `href="live-settings.css?v=${assetVersion('live-settings.css')}"`)
+        .replace('src="live-settings.js"', `src="live-settings.js?v=${assetVersion('live-settings.js')}"`);
       return res.set('Cache-Control', 'no-cache').type('html').send(html);
     };
     app.use(
@@ -98,7 +103,7 @@ function createApp() {
         useDefaults: true,
         // connect-src: the console uploads login-background media straight to
         // Storage with a backend-signed URL.
-        directives: { 'img-src': adminPreviewSrc, 'media-src': adminPreviewSrc, 'connect-src': adminMediaSrc },
+        directives: { 'img-src': adminImageSrc, 'media-src': adminPreviewSrc, 'connect-src': adminMediaSrc },
       }),
       adminIndex,
       express.static(adminDir),
@@ -142,6 +147,7 @@ function createApp() {
   app.use('/api/purchases', purchasesRoutes);
   app.use('/api/payouts', payoutsRoutes);
   app.use('/api/safety', safetyRoutes);
+  app.use('/api/admin/live', liveAdminRoutes);
   app.use('/api/admin', adminRoutes);
 
   app.use(notFoundHandler);

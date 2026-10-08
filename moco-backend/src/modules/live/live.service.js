@@ -210,15 +210,22 @@ function geobanClause(viewer, params) {
 
 // --- listing ----------------------------------------------------------------
 
+const RANK = 'provider_rank ASC NULLS LAST, id ASC';
 const SORTS = Object.freeze({
-  default: 'provider_rank ASC NULLS LAST, id ASC',
-  viewers: 'viewers_count DESC, provider_rank ASC NULLS LAST, id ASC',
-  favorites: 'favorited_count DESC, provider_rank ASC NULLS LAST, id ASC',
-  hd: 'is_hd DESC, provider_rank ASC NULLS LAST, id ASC',
+  default: RANK,
+  viewers: `viewers_count DESC, ${RANK}`,
+  favorites: `favorited_count DESC, ${RANK}`,
+  hd: `is_hd DESC, ${RANK}`,
+  // Featured models first, in the admin's order; then provider order.
+  featured: RANK,
 });
 
-/** The client-facing shape. Never includes the click URL, geobans or metadata. */
-function serialize(row) {
+/**
+ * The client-facing shape. Never includes geobans, metadata or anything
+ * secret. The provider link (clickUrl, which carries the affiliate tracking
+ * id) is included only when the admin chose "open provider destination".
+ */
+function serialize(row, { featured = [], clickBehavior = 'internal_player' } = {}) {
   return {
     id: Number(row.id),
     provider: row.provider,
@@ -235,49 +242,135 @@ function serialize(row) {
     favorites: row.favorited_count,
     isHd: row.is_hd,
     isVr: row.is_vr,
+    status: row.status,
+    featured: featured.includes(row.username),
     goal:
       row.goal_needed > 0 || row.goal_message
         ? { message: row.goal_message, needed: row.goal_needed, earned: row.goal_earned }
         : null,
+    ...(clickBehavior === 'provider' ? { destinationUrl: row.click_url } : {}),
   };
 }
 
+const NO_CURATION = Object.freeze({
+  status: 'public',
+  selection: { mode: 'all', featured: [], hidden: [], selected: [] },
+  preferredLanguage: null,
+  preferredCountry: null,
+  preferredTag: null,
+  sort: 'default',
+  clickBehavior: 'internal_player',
+});
+
 /**
- * Public, online models for one viewer. Geobans are always applied.
- * Filters: language, country, tag. Sorts: SORTS keys.
+ * Online models for one viewer, shaped by the admin's Live settings.
+ *
+ * Geobans come first and are not configurable: geobanClause() is always part
+ * of the WHERE, and no setting or parameter reaches it. The settings then
+ * narrow (status, selection mode, hidden list) and order (featured,
+ * preferred language/country/tag, sort) what is left.
+ *
+ * Request filters: language, country, tag. Sort: the request's, else the
+ * admin's default.
  */
-async function list(viewer, { limit = 24, offset = 0, language, country, tag, sort = 'default' } = {}) {
+async function list(viewer, { limit = 24, offset = 0, language, country, tag, sort } = {}, settings = NO_CURATION) {
+  const sel = settings.selection || NO_CURATION.selection;
   const params = [PROVIDER, ONLINE_WINDOW_SECONDS];
+  const p = (value) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
   const where = [
     'provider = $1',
-    `status = 'public'`,
     'last_seen_at > now() - make_interval(secs => $2)',
+    settings.status === 'any' ? `status <> 'offline'` : `status = 'public'`,
     geobanClause(viewer, params),
   ];
-  if (language) {
-    params.push(language);
-    where.push(`$${params.length}::text = ANY(languages)`);
+
+  // Selection: all eligible / selected only / all except hidden.
+  if (sel.mode === 'selected') {
+    where.push(`username = ANY(${p(sel.selected)}::text[])`);
+    if (sel.hidden.length) where.push(`NOT (username = ANY(${p(sel.hidden)}::text[]))`);
+  } else if (sel.mode === 'all_except_blocked' && sel.hidden.length) {
+    where.push(`NOT (username = ANY(${p(sel.hidden)}::text[]))`);
   }
-  if (country) {
-    params.push(country);
-    where.push(`country = $${params.length}`);
+
+  if (language) where.push(`${p(language)}::text = ANY(languages)`);
+  if (country) where.push(`country = ${p(country)}`);
+  if (tag) where.push(`${p(tag)}::text = ANY(tags)`);
+
+  const effectiveSort = SORTS[sort] ? sort : SORTS[settings.sort] ? settings.sort : 'default';
+  const order = [];
+  if (effectiveSort === 'featured' && sel.featured.length) {
+    order.push(`array_position(${p(sel.featured)}::text[], username) ASC NULLS LAST`);
   }
-  if (tag) {
-    params.push(tag);
-    where.push(`$${params.length}::text = ANY(tags)`);
-  }
-  params.push(limit, offset);
+  // Preferred language / country / tag: boosted, not filtered.
+  const boosts = [];
+  if (settings.preferredLanguage) boosts.push(`(${p(settings.preferredLanguage)}::text = ANY(languages))::int`);
+  if (settings.preferredCountry) boosts.push(`(country = ${p(settings.preferredCountry)})::int`);
+  if (settings.preferredTag) boosts.push(`(${p(settings.preferredTag)}::text = ANY(tags))::int`);
+  if (boosts.length) order.push(`(${boosts.join(' + ')}) DESC`);
+  order.push(SORTS[effectiveSort]);
+
+  const limitParam = p(limit);
+  const offsetParam = p(offset);
   const { rows } = await query(
-    `SELECT id, provider, username, avatar_url, snapshot_url, thumb_url, country, languages, gender,
-            broadcast_gender, tags, viewers_count, favorited_count, is_hd, is_vr,
+    `SELECT id, provider, username, avatar_url, snapshot_url, thumb_url, click_url, country, languages, gender,
+            broadcast_gender, tags, viewers_count, favorited_count, is_hd, is_vr, status,
             goal_message, goal_needed, goal_earned
        FROM live_models
       WHERE ${where.join(' AND ')}
-      ORDER BY ${SORTS[sort] || SORTS.default}
-      LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      ORDER BY ${order.join(', ')}
+      LIMIT ${limitParam} OFFSET ${offsetParam}`,
     params,
   );
-  return rows.map(serialize);
+  return rows.map((row) => serialize(row, { featured: sel.featured, clickBehavior: settings.clickBehavior }));
+}
+
+/**
+ * Admin search over everything stored (any status, online or not), for
+ * picking featured / hidden / selected models. Admin-only; returns no
+ * geoban data and is never used to build the public listing.
+ */
+async function searchStored({ q, limit = 30 } = {}) {
+  const params = [PROVIDER, ONLINE_WINDOW_SECONDS];
+  let filter = '';
+  if (q) {
+    params.push(`%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+    filter = `AND username ILIKE $${params.length}`;
+  }
+  params.push(limit);
+  const { rows } = await query(
+    `SELECT id, username, thumb_url, avatar_url, snapshot_url, status, viewers_count, country, last_seen_at,
+            (last_seen_at > now() - make_interval(secs => $2)) AS online
+       FROM live_models
+      WHERE provider = $1 ${filter}
+      ORDER BY online DESC, provider_rank ASC NULLS LAST, username ASC
+      LIMIT $${params.length}`,
+    params,
+  );
+  return rows.map((r) => ({
+    id: Number(r.id),
+    username: r.username,
+    imageUrl: r.thumb_url || r.avatar_url || r.snapshot_url,
+    status: r.status,
+    online: r.online,
+    viewers: r.viewers_count,
+    country: r.country,
+    lastSeenAt: r.last_seen_at,
+  }));
+}
+
+/** Counts for the admin page header. */
+async function storedCounts() {
+  const { rows } = await query(
+    `SELECT count(*)::int AS stored,
+            count(*) FILTER (WHERE last_seen_at > now() - make_interval(secs => $2))::int AS online,
+            count(*) FILTER (WHERE last_seen_at > now() - make_interval(secs => $2) AND status = 'public')::int AS public
+       FROM live_models WHERE provider = $1`,
+    [PROVIDER, ONLINE_WINDOW_SECONDS],
+  );
+  return rows[0];
 }
 
 // --- cleanup ----------------------------------------------------------------
@@ -349,6 +442,8 @@ module.exports = {
   upsertModels,
   viewerFromRequest,
   list,
+  searchStored,
+  storedCounts,
   cleanup,
   serialize,
 };

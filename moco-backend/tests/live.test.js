@@ -320,8 +320,8 @@ test('listing: public and recently seen only, normalized fields, no provider sec
   }
   const m = res.body.models.find((x) => x.username === 'open');
   assert.deepEqual(Object.keys(m).sort(), [
-    'avatarUrl', 'broadcastGender', 'country', 'favorites', 'gender', 'goal', 'id', 'isHd', 'isVr',
-    'languages', 'provider', 'snapshotUrl', 'tags', 'thumbnailUrl', 'username', 'viewers',
+    'avatarUrl', 'broadcastGender', 'country', 'favorites', 'featured', 'gender', 'goal', 'id', 'isHd', 'isVr',
+    'languages', 'provider', 'snapshotUrl', 'status', 'tags', 'thumbnailUrl', 'username', 'viewers',
   ]);
 });
 
@@ -410,12 +410,15 @@ test('GET /api/live/config exposes the player userId and the age gate, never the
   const token = signToken(await createUser());
   const res = await get('/api/live/config', { token });
   assert.equal(res.status, 200);
+  const liveSettings = require('../src/modules/live/live.settings');
   assert.deepEqual(res.body, {
     enabled: true,
     provider: 'stripcash',
-    requireAgeConfirmation: true,
+    ...liveSettings.clientView(liveSettings.DEFAULTS),
     player: { type: 'stripchat-player', userId: USER_ID, strict: 1, autoplay: 'all' },
   });
+  assert.equal(res.body.requireAgeConfirmation, true);
+  assert.equal('selection' in res.body, false, 'curation lists stay admin-side');
   assert.equal(JSON.stringify(res.body).includes(API_KEY), false);
   assert.equal((await get('/api/live/config')).status, 401);
 });
@@ -452,4 +455,209 @@ test('Live switched off: no player config, no models, no provider calls', async 
   } finally {
     await query(`DELETE FROM app_settings WHERE key = 'live'`);
   }
+});
+
+// --- Admin → Settings → Live (Task 2) ----------------------------------------
+
+const liveSettings = require('../src/modules/live/live.settings');
+const ADMIN_PHONE_ENV = process.env.ADMIN_PHONES;
+
+async function adminToken() {
+  const admin = await createUser();
+  process.env.ADMIN_PHONES = admin.phone;
+  return signToken(admin);
+}
+
+async function send(method, path, token, body) {
+  const res = await realFetch(`${baseUrl}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'cf-ipcountry': 'DE' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return { status: res.status, body: await res.json() };
+}
+
+const withSettings = (patch) => {
+  const s = JSON.parse(JSON.stringify(liveSettings.DEFAULTS));
+  for (const [k, v] of Object.entries(patch)) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && s[k] && typeof s[k] === 'object') Object.assign(s[k], v);
+    else s[k] = v;
+  }
+  return s;
+};
+
+async function seedRanked() {
+  await syncWith([
+    model('r1', { viewersCount: 10, favoritedCount: 5, broadcastHD: false, languages: ['en'] }),
+    model('r2', { viewersCount: 90, favoritedCount: 1, languages: ['en'] }),
+    model('r3', { viewersCount: 50, favoritedCount: 900, languages: ['hi'], modelsCountry: 'in' }),
+    model('r4', { viewersCount: 30, favoritedCount: 3, status: 'groupShow' }),
+    model('r5', { viewersCount: 70, favoritedCount: 4, geobans: { blockedCountries: ['de'], blockedRegions: {}, blockedLanguages: [] } }),
+  ]);
+}
+
+test.afterEach(() => {
+  if (ADMIN_PHONE_ENV === undefined) delete process.env.ADMIN_PHONES;
+  else process.env.ADMIN_PHONES = ADMIN_PHONE_ENV;
+});
+
+test('admin settings: defaults, save, reload, audit; admin-only', async () => {
+  await query(`DELETE FROM app_settings WHERE key = 'live'`);
+  const token = await adminToken();
+  const first = await send('GET', '/api/admin/live/settings', token);
+  assert.equal(first.status, 200);
+  assert.deepEqual({ ...first.body.settings, updatedAt: undefined }, { ...liveSettings.DEFAULTS, updatedAt: undefined });
+  assert.equal(first.body.provider.configured, true);
+  assert.equal(JSON.stringify(first.body).includes(API_KEY), false);
+
+  const next = withSettings({
+    enabled: false,
+    pageSize: 12,
+    layout: { preset: 'mixed', columns: { mobile: 1, tablet: 2, desktop: 6 }, aspect: 'wide', density: 'compact', radius: 'large' },
+    card: { tags: true, goal: true, viewers: false },
+    selection: { mode: 'all_except_blocked', featured: ['r3', 'r1'], hidden: ['r2'], selected: [] },
+    sort: 'featured',
+    clickBehavior: 'provider',
+    preferredLanguage: 'HI',
+  });
+  const saved = await send('PUT', '/api/admin/live/settings', token, { settings: next });
+  assert.equal(saved.status, 200);
+  const reloaded = (await send('GET', '/api/admin/live/settings', token)).body.settings;
+  assert.equal(reloaded.enabled, false);
+  assert.equal(reloaded.layout.preset, 'mixed');
+  assert.equal(reloaded.layout.columns.desktop, 6);
+  assert.equal(reloaded.card.viewers, false);
+  assert.deepEqual(reloaded.selection.featured, ['r3', 'r1']);
+  assert.equal(reloaded.preferredLanguage, 'hi');
+  assert.ok(reloaded.updatedAt);
+  const { rows } = await query(`SELECT action FROM admin_audit_log WHERE action = 'settings.live.update'`);
+  assert.equal(rows.length >= 1, true);
+
+  const user = signToken(await createUser());
+  assert.equal((await send('GET', '/api/admin/live/settings', user)).status, 403);
+  assert.equal((await send('PUT', '/api/admin/live/settings', user, { settings: next })).status, 403);
+  await query(`DELETE FROM app_settings WHERE key = 'live'`);
+});
+
+test('admin settings: invalid values are rejected field by field', async () => {
+  const token = await adminToken();
+  const bad = withSettings({ pageSize: 500, layout: { preset: 'masonry' }, selection: { mode: 'all', featured: ['bad name!'], hidden: [], selected: [] } });
+  const res = await send('PUT', '/api/admin/live/settings', token, { settings: bad });
+  assert.equal(res.status, 400);
+  const fields = res.body.error.details.map((d) => d.field);
+  assert.ok(fields.includes('pageSize'));
+  assert.ok(fields.includes('layout.preset'));
+  assert.ok(fields.includes('selection.featured.0'));
+});
+
+test('no setting can override geobans', async () => {
+  await seedRanked();
+  const token = await adminToken();
+  const sneaky = { ...withSettings({ selection: { mode: 'selected', featured: ['r5'], hidden: [], selected: ['r5'] } }), geobans: false, applyGeobans: false, ignoreGeobans: true };
+  await send('PUT', '/api/admin/live/settings', token, { settings: sneaky });
+  const stored = (await query(`SELECT value FROM app_settings WHERE key = 'live'`)).rows[0].value;
+  assert.equal(Object.keys(stored).some((k) => /geoban/i.test(k)), false, 'unknown keys are not stored');
+
+  const preview = await send('POST', '/api/admin/live/preview', token, { settings: sneaky });
+  assert.deepEqual(preview.body.models.map((m) => m.username), [], 'r5 is geobanned in DE even when explicitly selected');
+  const listing = await get('/api/live/models', { token: signToken(await createUser()), headers: { 'cf-ipcountry': 'DE' } });
+  assert.deepEqual(listing.body.models, []);
+  await query(`DELETE FROM app_settings WHERE key = 'live'`);
+});
+
+test('selection modes, featured and hidden', async () => {
+  await seedRanked();
+  const token = await adminToken();
+  const preview = async (patch) =>
+    (await send('POST', '/api/admin/live/preview', token, { settings: withSettings(patch) })).body.models.map((m) => m.username);
+
+  // r4 is a group show (public only by default); r5 is geobanned for DE.
+  assert.deepEqual(await preview({}), ['r1', 'r2', 'r3']);
+  assert.deepEqual(await preview({ status: 'any' }), ['r1', 'r2', 'r3', 'r4']);
+  assert.deepEqual(await preview({ selection: { mode: 'all', featured: [], hidden: ['r2'], selected: [] } }), ['r1', 'r2', 'r3'], 'hidden list not applied in "all"');
+  assert.deepEqual(await preview({ selection: { mode: 'all_except_blocked', featured: [], hidden: ['r2'], selected: [] } }), ['r1', 'r3']);
+  assert.deepEqual(await preview({ selection: { mode: 'selected', featured: [], hidden: ['r3'], selected: ['r3', 'r2'] } }), ['r2']);
+  assert.deepEqual(
+    await preview({ sort: 'featured', selection: { mode: 'all', featured: ['r3', 'r2'], hidden: [], selected: [] } }),
+    ['r3', 'r2', 'r1'],
+    'featured first, in the admin order',
+  );
+  const res = await send('POST', '/api/admin/live/preview', token, {
+    settings: withSettings({ sort: 'featured', selection: { mode: 'all', featured: ['r3'], hidden: [], selected: [] } }),
+  });
+  assert.equal(res.body.models.find((m) => m.username === 'r3').featured, true);
+  assert.equal(res.body.models.find((m) => m.username === 'r1').featured, false);
+  assert.equal(res.body.viewer.country, 'de');
+});
+
+test('sorting and preferences', async () => {
+  await seedRanked();
+  const token = await adminToken();
+  const order = async (patch) =>
+    (await send('POST', '/api/admin/live/preview', token, { settings: withSettings(patch) })).body.models.map((m) => m.username);
+  assert.deepEqual(await order({ sort: 'default' }), ['r1', 'r2', 'r3']);
+  assert.deepEqual(await order({ sort: 'viewers' }), ['r2', 'r3', 'r1']);
+  assert.deepEqual(await order({ sort: 'favorites' }), ['r3', 'r1', 'r2']);
+  assert.deepEqual(await order({ sort: 'hd' }), ['r2', 'r3', 'r1']);
+  assert.deepEqual(await order({ preferredLanguage: 'hi' }), ['r3', 'r1', 'r2'], 'preferred language is boosted, not filtered');
+  assert.deepEqual(await order({ pageSize: 6, preferredCountry: 'in', sort: 'viewers' }), ['r3', 'r2', 'r1']);
+});
+
+test('public listing follows the saved settings; click behaviour controls the provider link', async () => {
+  await seedRanked();
+  const token = await adminToken();
+  const userToken = signToken(await createUser());
+  const list = async () => (await get('/api/live/models', { token: userToken, headers: { 'cf-ipcountry': 'DE' } })).body;
+
+  await send('PUT', '/api/admin/live/settings', token, {
+    settings: withSettings({ pageSize: 6, sort: 'viewers', selection: { mode: 'all_except_blocked', featured: [], hidden: ['r2'], selected: [] } }),
+  });
+  let body = await list();
+  assert.equal(body.limit, 6);
+  assert.equal(body.sort, 'viewers');
+  assert.deepEqual(body.models.map((m) => m.username), ['r3', 'r1']);
+  assert.equal('destinationUrl' in body.models[0], false, 'internal player: no provider link');
+
+  const config = (await get('/api/live/config', { token: userToken })).body;
+  assert.equal(config.pageSize, 6);
+  assert.equal(config.clickBehavior, 'internal_player');
+
+  await send('PUT', '/api/admin/live/settings', token, { settings: withSettings({ clickBehavior: 'provider' }) });
+  body = await list();
+  assert.match(body.models[0].destinationUrl, /^https:\/\/go\.example\//);
+  assert.equal((await get('/api/live/config', { token: userToken })).body.clickBehavior, 'provider');
+
+  await send('PUT', '/api/admin/live/settings', token, { settings: withSettings({ enabled: false }) });
+  body = await list();
+  assert.equal(body.available, false);
+  assert.deepEqual(body.models, []);
+  await query(`DELETE FROM app_settings WHERE key = 'live'`);
+});
+
+test('admin model search lists stored models for the pickers', async () => {
+  await seedRanked();
+  await query(`UPDATE live_models SET last_seen_at = now() - interval '2 days', status = 'offline' WHERE username = 'r1'`);
+  const token = await adminToken();
+  const res = await send('GET', '/api/admin/live/models?q=r', token);
+  assert.equal(res.status, 200);
+  const r1 = res.body.models.find((m) => m.username === 'r1');
+  assert.equal(r1.online, false, 'offline models can still be picked');
+  assert.equal(res.body.models[0].online, true, 'online first');
+  assert.equal(JSON.stringify(res.body).includes('blocked'), false);
+  const none = await send('GET', '/api/admin/live/models?q=%25', token);
+  assert.deepEqual(none.body.models, [], 'LIKE wildcards are matched literally');
+});
+
+test('a stored document with a bad value falls back to that default, and the age gate stays on', async () => {
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ('live', $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify({ pageSize: 9999, layout: { preset: 'grid', radius: 'huge' }, sort: 'viewers' })],
+  );
+  const s = await liveSettings.read();
+  assert.equal(s.pageSize, liveSettings.DEFAULTS.pageSize);
+  assert.equal(s.layout.radius, liveSettings.DEFAULTS.layout.radius);
+  assert.equal(s.sort, 'viewers');
+  assert.equal(s.requireAgeConfirmation, true);
+  await query(`DELETE FROM app_settings WHERE key = 'live'`);
 });

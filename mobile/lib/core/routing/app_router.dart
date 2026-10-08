@@ -23,6 +23,7 @@ import '../../features/profile/ledger_screen.dart';
 import '../../features/notifications/notifications_screen.dart';
 import '../../features/profile/profile_screen.dart';
 import '../../features/listener_profile/listener_profile_screen.dart';
+import '../../features/live/live_screen.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/profile_setup/profile_setup_screen.dart';
 import '../../features/wallet/wallet_screen.dart';
@@ -51,6 +52,9 @@ class Routes {
   static const coinLedger = '/profile/ledger/coins';
   static const earningsLedger = '/profile/ledger/earnings';
   static const notifications = '/notifications';
+
+  /// Web only: the top bar's Live item — an empty placeholder for now.
+  static const live = '/live';
 
   /// Deep-link safe: the listener id is a path segment, so
   /// `moco://listener/42` maps cleanly once deep links are enabled.
@@ -237,6 +241,11 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: Routes.discovery,
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: DiscoveryScreen()),
+          ),
+          GoRoute(
+            path: Routes.live,
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: LiveScreen()),
           ),
           GoRoute(
             path: Routes.wallet,

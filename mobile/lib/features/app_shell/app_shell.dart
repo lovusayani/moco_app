@@ -14,6 +14,7 @@ import '../../core/theme/moco_spacing.dart';
 import '../../core/widgets/moco_background.dart';
 import '../../core/widgets/moco_states.dart';
 import '../discovery/discovery_controller.dart';
+import 'web_top_bar.dart';
 
 /// The app's primary destinations.
 ///
@@ -197,7 +198,10 @@ class AppShell extends ConsumerWidget {
       context.push(Routes.callIncoming);
     });
 
+    final location = GoRouterState.of(context).matchedLocation;
+
     return Scaffold(
+      drawer: isWeb ? const WebSideDrawer() : null,
       // No bottomNavigationBar slot: the reference's chrome is a floating
       // pill that overlaps the page content rather than a docked bar that
       // reserves its own strip, so it's a Stack layer over the body instead.
@@ -206,6 +210,14 @@ class AppShell extends ConsumerWidget {
         child: Stack(
           children: [
             Positioned.fill(child: child),
+            // Web only: menu, the Call/Live/Feed/Video capsule, wallet, bell.
+            if (isWeb && WebTopItem.showsOn(location))
+              Positioned(
+                left: MocoSpacing.screenPadding,
+                right: MocoSpacing.screenPadding,
+                top: MediaQuery.paddingOf(context).top + MocoSpacing.md,
+                child: const WebTopBar(),
+              ),
             Positioned(
               left: MocoSpacing.lg,
               right: MocoSpacing.lg,

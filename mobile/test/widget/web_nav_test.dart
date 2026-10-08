@@ -30,7 +30,12 @@ class _MockChatApi extends Mock implements ChatApi {}
 const _web = PlatformCapabilities(isWeb: true);
 const _native = PlatformCapabilities(isWeb: false);
 
-const _user = MocoUser(id: 1, phone: '+919876543210', displayName: 'Rahul');
+const _user = MocoUser(
+  id: 1,
+  phone: '+919876543210',
+  displayName: 'Rahul',
+  coinBalance: 250,
+);
 
 void main() {
   late _MockListenersApi listenersApi;
@@ -115,6 +120,16 @@ void main() {
     ),
   );
 
+  /// Which capsule item the sliding indicator sits under.
+  String? selectedTopItem(WidgetTester tester) {
+    final dot = tester.getCenter(find.byKey(const Key('topbar_indicator')));
+    for (final name in ['call', 'live', 'feed', 'video']) {
+      final r = tester.getRect(find.byKey(Key('topbar_$name')));
+      if (r.contains(dot)) return name;
+    }
+    return null;
+  }
+
   List<DiscoveryFilters> discoverCalls() => verify(
     () => listenersApi.discover(
       filters: captureAny(named: 'filters'),
@@ -184,15 +199,7 @@ void main() {
         reason: 'Live is the selected tab',
       );
 
-      final videoSegment = tester.widget<Material>(
-        find
-            .descendant(
-              of: find.byKey(const Key('discovery_mode_video')),
-              matching: find.byType(Material),
-            )
-            .first,
-      );
-      expect(videoSegment.color, isNot(Colors.transparent));
+      expect(selectedTopItem(tester), 'video');
       expect(
         discoverCalls().first.callType,
         'video',
@@ -200,22 +207,124 @@ void main() {
       );
     });
 
-    testWidgets('the toggle is centred horizontally', (tester) async {
+    testWidgets('the capsule is centred in the top bar', (tester) async {
       await pumpApp(tester, _web);
       await tester.tap(find.byKey(const Key('nav_live')));
       await tester.pumpAndSettle();
 
-      final header = tester.getRect(
-        find.byKey(const Key('discovery_web_header')),
+      final bar = tester.getRect(find.byKey(const Key('web_top_bar')));
+      final capsule = tester.getRect(find.byKey(const Key('topbar_capsule')));
+      expect((capsule.center.dx - bar.center.dx).abs(), lessThan(4));
+    });
+
+    testWidgets('top bar: menu, Call | Live | Feed | Video, wallet, bell', (
+      tester,
+    ) async {
+      await pumpApp(tester, _web);
+
+      double x(String key) => tester.getCenter(find.byKey(Key(key))).dx;
+      final order = [
+        'topbar_menu',
+        'topbar_call',
+        'topbar_live',
+        'topbar_feed',
+        'topbar_video',
+        'topbar_wallet',
+        'topbar_notifications',
+      ];
+      for (var i = 1; i < order.length; i++) {
+        expect(x(order[i - 1]), lessThan(x(order[i])), reason: order[i]);
+      }
+      expect(selectedTopItem(tester), 'feed', reason: 'web lands on Feed');
+    });
+
+    testWidgets('Call and Video switch Discovery mode', (tester) async {
+      await pumpApp(tester, _web);
+
+      await tester.tap(find.byKey(const Key('topbar_call')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('discovery_web_header')), findsOneWidget);
+      expect(selectedTopItem(tester), 'call');
+      expect(discoverCalls().last.callType, 'audio');
+
+      await tester.tap(find.byKey(const Key('topbar_video')));
+      await tester.pumpAndSettle();
+      expect(selectedTopItem(tester), 'video');
+      expect(discoverCalls().last.callType, 'video');
+    });
+
+    testWidgets('Live opens an empty placeholder; Feed opens Feed', (
+      tester,
+    ) async {
+      await pumpApp(tester, _web);
+
+      await tester.tap(find.byKey(const Key('topbar_live')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('live_empty')), findsOneWidget);
+      expect(selectedTopItem(tester), 'live');
+
+      await tester.tap(find.byKey(const Key('topbar_feed')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('live_empty')), findsNothing);
+      expect(selectedTopItem(tester), 'feed');
+    });
+
+    testWidgets('wallet shows the real balance and opens Wallet', (
+      tester,
+    ) async {
+      await pumpApp(tester, _web);
+
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('topbar_wallet_balance')))
+            .data,
+        '250',
       );
-      final audio = tester.getRect(
-        find.byKey(const Key('discovery_mode_audio')),
-      );
-      final video = tester.getRect(
-        find.byKey(const Key('discovery_mode_video')),
-      );
-      final toggleCentre = (audio.left + video.right) / 2;
-      expect((toggleCentre - header.center.dx).abs(), lessThan(4));
+      await tester.tap(find.byKey(const Key('topbar_wallet')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('web_top_bar')), findsNothing);
+      expect(WebShellTab.forLocation(Routes.wallet, searchOpen: false), isNull);
+    });
+
+    testWidgets('the bell opens Notifications', (tester) async {
+      await pumpApp(tester, _web);
+      await tester.tap(find.byKey(const Key('topbar_notifications')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('web_top_bar')), findsNothing);
+      expect(find.text('Notifications'), findsWidgets);
+    });
+
+    testWidgets('the menu opens a sidebar of existing destinations', (
+      tester,
+    ) async {
+      await pumpApp(tester, _web);
+
+      await tester.tap(find.byKey(const Key('topbar_menu')));
+      await tester.pumpAndSettle();
+      for (final id in [
+        'home',
+        'search',
+        'feed',
+        'wallet',
+        'chats',
+        'profile',
+        'settings',
+      ]) {
+        expect(find.byKey(Key('drawer_$id')), findsOneWidget, reason: id);
+      }
+
+      await tester.tap(find.byKey(const Key('drawer_chats')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('web_side_drawer')), findsNothing);
+      verify(() => chatApi.conversations()).called(greaterThan(0));
+
+      await tester.tap(find.byKey(const Key('nav_live')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('topbar_menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('drawer_search')));
+      await tester.pumpAndSettle();
+      expect(searchField(tester).focusNode.hasFocus, isTrue);
     });
 
     testWidgets(
@@ -303,6 +412,8 @@ void main() {
         expect(find.byKey(Key('nav_${tab.name}')), findsOneWidget);
       }
       expect(find.byKey(const Key('nav_live')), findsNothing);
+      expect(find.byKey(const Key('web_top_bar')), findsNothing);
+      expect(find.byKey(const Key('topbar_menu')), findsNothing);
       expect(
         discoverCalls().first.callType,
         isNull,

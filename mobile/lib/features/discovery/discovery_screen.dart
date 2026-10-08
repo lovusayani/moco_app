@@ -124,10 +124,12 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Web: the shell's top bar sits here (menu, the
+                    // Call/Live/Feed/Video capsule, wallet, bell).
                     if (isWeb)
-                      _WebHeader(
-                        mode: state.mode,
-                        onModeChanged: controller.setMode,
+                      const SizedBox(
+                        key: Key('discovery_web_header'),
+                        height: 44,
                       )
                     else
                       Row(
@@ -400,34 +402,6 @@ class _LoadingGrid extends StatelessWidget {
           ),
           childCount: 9,
         ),
-      ),
-    );
-  }
-}
-
-/// The web Discovery header: no wordmark and no search button (Search is a
-/// bottom-nav item on web), just the Audio/Video toggle centred, with the
-/// notifications bell kept at the end — it is the only way into the inbox.
-class _WebHeader extends StatelessWidget {
-  const _WebHeader({required this.mode, required this.onModeChanged});
-
-  final CallMode mode;
-  final ValueChanged<CallMode> onModeChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      key: const Key('discovery_web_header'),
-      height: 44,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          _CompactModeToggle(mode: mode, onChanged: onModeChanged),
-          const Align(
-            alignment: Alignment.centerRight,
-            child: _NotificationsBell(),
-          ),
-        ],
       ),
     );
   }

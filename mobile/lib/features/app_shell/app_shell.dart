@@ -13,6 +13,7 @@ import '../../core/theme/moco_colors.dart';
 import '../../core/theme/moco_spacing.dart';
 import '../../core/widgets/moco_background.dart';
 import '../../core/widgets/moco_states.dart';
+import '../discovery/discovery_controller.dart';
 
 /// The app's primary destinations.
 ///
@@ -68,6 +69,45 @@ enum AppShellTab {
   String get phase => '';
 }
 
+/// The web app's bottom nav. It differs from [AppShellTab] (Android) in two
+/// places: Wallet is not a tab (it stays reachable from Profile → Wallet &
+/// top-up, and from every "add coins" prompt), and Discovery's header search
+/// button becomes the Search tab. Live and Search both show the same
+/// Discovery screen and reuse its search state — Search only opens and
+/// focuses the existing search field.
+enum WebShellTab {
+  live('Live', Icons.home_outlined, Icons.home_rounded),
+  search('Search', Icons.search_rounded, Icons.search_rounded),
+  feed('Feed', Icons.video_call_outlined, Icons.video_call_rounded),
+  chats('Chat', Icons.chat_bubble_outline_rounded, Icons.chat_bubble_rounded),
+  profile('Profile', Icons.person_outline_rounded, Icons.person_rounded);
+
+  const WebShellTab(this.label, this.icon, this.activeIcon);
+
+  final String label;
+  final IconData icon;
+  final IconData activeIcon;
+
+  String get path => switch (this) {
+    live || search => Routes.discovery,
+    feed => Routes.feed,
+    chats => Routes.chats,
+    profile => Routes.profile,
+  };
+
+  /// The tab to highlight at [location], or null where no tab owns the page
+  /// (e.g. /wallet, reached from Profile).
+  static WebShellTab? forLocation(String location, {required bool searchOpen}) {
+    if (location.startsWith(Routes.discovery)) {
+      return searchOpen ? search : live;
+    }
+    if (location.startsWith(Routes.feed)) return feed;
+    if (location.startsWith(Routes.chats)) return chats;
+    if (location.startsWith(Routes.profile)) return profile;
+    return null;
+  }
+}
+
 class AppShell extends ConsumerWidget {
   const AppShell({super.key, required this.child});
 
@@ -81,9 +121,54 @@ class AppShell extends ConsumerWidget {
     return index < 0 ? 0 : index;
   }
 
+  Widget _webNav(BuildContext context, WidgetRef ref) {
+    final selected = WebShellTab.forLocation(
+      GoRouterState.of(context).matchedLocation,
+      searchOpen: ref.watch(discoveryWebSearchOpenProvider),
+    );
+    return _FloatingNavBar(
+      items: [
+        for (final tab in WebShellTab.values)
+          _NavItem(
+            key: Key('nav_${tab.name}'),
+            label: tab.label,
+            icon: tab.icon,
+            activeIcon: tab.activeIcon,
+            selected: tab == selected,
+            onTap: () {
+              if (tab == WebShellTab.live) {
+                ref.read(discoveryWebSearchOpenProvider.notifier).state = false;
+              } else if (tab == WebShellTab.search) {
+                ref.read(discoveryWebSearchOpenProvider.notifier).state = true;
+                ref.read(discoveryWebSearchFocusProvider.notifier).state++;
+              }
+              context.go(tab.path);
+            },
+          ),
+      ],
+    );
+  }
+
+  Widget _nativeNav(BuildContext context) {
+    final index = _indexFor(context);
+    return _FloatingNavBar(
+      items: [
+        for (final tab in AppShellTab.values)
+          _NavItem(
+            key: Key('nav_${tab.name}'),
+            label: tab.label,
+            icon: tab.icon,
+            activeIcon: tab.activeIcon,
+            selected: AppShellTab.values.indexOf(tab) == index,
+            onTap: () => context.go(tab.path),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final index = _indexFor(context);
+    final isWeb = ref.watch(platformCapabilitiesProvider).isWeb;
 
     // Global: an incoming call must interrupt whatever tab is on screen. The
     // controller's socket subscription is already app-lifetime (see
@@ -125,10 +210,7 @@ class AppShell extends ConsumerWidget {
               left: MocoSpacing.lg,
               right: MocoSpacing.lg,
               bottom: MocoSpacing.lg,
-              child: _FloatingNavBar(
-                selectedIndex: index,
-                onSelect: (i) => context.go(AppShellTab.values[i].path),
-              ),
+              child: isWeb ? _webNav(context, ref) : _nativeNav(context),
             ),
           ],
         ),
@@ -147,10 +229,9 @@ class AppShell extends ConsumerWidget {
 /// unilaterally — matching the chrome first, as directed, and leaving the
 /// label question open.
 class _FloatingNavBar extends StatelessWidget {
-  const _FloatingNavBar({required this.selectedIndex, required this.onSelect});
+  const _FloatingNavBar({required this.items});
 
-  final int selectedIndex;
-  final ValueChanged<int> onSelect;
+  final List<_NavItem> items;
 
   @override
   Widget build(BuildContext context) {
@@ -177,14 +258,7 @@ class _FloatingNavBar extends StatelessWidget {
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                for (final tab in AppShellTab.values)
-                  _NavItem(
-                    tab: tab,
-                    selected: AppShellTab.values.indexOf(tab) == selectedIndex,
-                    onTap: () => onSelect(AppShellTab.values.indexOf(tab)),
-                  ),
-              ],
+              children: items,
             ),
           ),
         ),
@@ -195,12 +269,17 @@ class _FloatingNavBar extends StatelessWidget {
 
 class _NavItem extends StatelessWidget {
   const _NavItem({
-    required this.tab,
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.activeIcon,
     required this.selected,
     required this.onTap,
   });
 
-  final AppShellTab tab;
+  final String label;
+  final IconData icon;
+  final IconData activeIcon;
   final bool selected;
   final VoidCallback onTap;
 
@@ -212,7 +291,6 @@ class _NavItem extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          key: Key('nav_${tab.name}'),
           onTap: onTap,
           borderRadius: BorderRadius.circular(MocoRadius.pill),
           child: Padding(
@@ -221,14 +299,10 @@ class _NavItem extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  selected ? tab.activeIcon : tab.icon,
-                  color: color,
-                  size: 22,
-                ),
+                Icon(selected ? activeIcon : icon, color: color, size: 22),
                 const SizedBox(height: 2),
                 Text(
-                  tab.label,
+                  label,
                   style: TextStyle(
                     color: color,
                     fontSize: 10.5,

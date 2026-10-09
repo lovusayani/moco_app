@@ -16,9 +16,10 @@ import 'platform/live_platform.dart';
 import 'widgets/live_model_card.dart';
 
 /// Internal Moco Live player for one provider model: the official Stripchat
-/// player (see live_platform_web.dart) on an immersive 9:16 stage, with the
-/// model's details as glass overlays the viewer can hide. Nothing here
-/// creates a Moco account or profile for the model.
+/// player (see live_platform_web.dart) on a centred, embedded 9:16 stage,
+/// with the model's details as glass overlays the viewer can hide. Only the
+/// player's own fullscreen control gives the stream the whole viewport.
+/// Nothing here creates a Moco account or profile for the model.
 class LivePlayerScreen extends ConsumerWidget {
   const LivePlayerScreen({super.key, required this.username, this.model});
 
@@ -67,9 +68,11 @@ class LivePlayerScreen extends ConsumerWidget {
   }
 }
 
-/// Phone-width web fills the screen; wider screens get a centred 9:16
-/// stage on a dark backdrop, never a stretched landscape block.
-const double _fullBleedBelow = 600;
+/// Below this width the stage keeps a phone-sized margin; above it, a wider
+/// one. Either way it is a centred 9:16 stage on a dark backdrop — never a
+/// stretched landscape block, and never the whole viewport until the viewer
+/// asks for fullscreen.
+const double _phoneBelow = 600;
 
 class _ImmersivePlayer extends StatefulWidget {
   const _ImmersivePlayer({
@@ -88,6 +91,14 @@ class _ImmersivePlayer extends StatefulWidget {
 
 class _ImmersivePlayerState extends State<_ImmersivePlayer> {
   bool _overlays = true;
+
+  /// The player is in fullscreen (its own control): the stage takes the
+  /// whole viewport, with no page chrome or overlays, until it exits.
+  bool _fullscreen = false;
+
+  void _onFullscreenChanged(bool value) {
+    if (mounted && value != _fullscreen) setState(() => _fullscreen = value);
+  }
 
   @override
   void initState() {
@@ -123,17 +134,22 @@ class _ImmersivePlayerState extends State<_ImmersivePlayer> {
             config: player,
             fallback: fallback,
             onExit: _back,
+            onFullscreenChanged: _onFullscreenChanged,
           );
 
     return LayoutBuilder(
       builder: (context, c) {
-        final fullBleed = c.maxWidth < _fullBleedBelow;
+        final fullBleed = _fullscreen;
         var w = c.maxWidth;
         var h = c.maxHeight;
         if (!fullBleed) {
-          // Tallest 9:16 stage that fits with a margin all round.
-          const margin = MocoSpacing.xl;
-          h = c.maxHeight - margin * 2;
+          // Tallest 9:16 stage that fits with a margin all round (and clear
+          // of the phone's safe areas).
+          final safe = MediaQuery.paddingOf(context);
+          final margin = c.maxWidth < _phoneBelow
+              ? MocoSpacing.lg
+              : MocoSpacing.xl + MocoSpacing.lg;
+          h = c.maxHeight - safe.vertical - margin * 2;
           w = h * 9 / 16;
           if (w > c.maxWidth - margin * 2) {
             w = c.maxWidth - margin * 2;
@@ -141,9 +157,6 @@ class _ImmersivePlayerState extends State<_ImmersivePlayer> {
           }
         }
         final radius = BorderRadius.circular(fullBleed ? 0 : MocoRadius.xl);
-        final insets = fullBleed
-            ? MediaQuery.paddingOf(context)
-            : EdgeInsets.zero;
 
         return Stack(
           fit: StackFit.expand,
@@ -181,15 +194,16 @@ class _ImmersivePlayerState extends State<_ImmersivePlayer> {
                       children: [
                         const ColoredBox(color: Colors.black),
                         media,
-                        _StageOverlays(
-                          username: widget.username,
-                          model: widget.model,
-                          visible: _overlays,
-                          insets: insets,
-                          onBack: _back,
-                          onToggle: () =>
-                              setState(() => _overlays = !_overlays),
-                        ),
+                        if (!fullBleed)
+                          _StageOverlays(
+                            username: widget.username,
+                            model: widget.model,
+                            visible: _overlays,
+                            insets: EdgeInsets.zero,
+                            onBack: _back,
+                            onToggle: () =>
+                                setState(() => _overlays = !_overlays),
+                          ),
                       ],
                     ),
                   ),

@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/moco_colors.dart';
 import '../../../shared/models/feed.dart';
 
-/// The Feed's right-hand controls, floating over the media:
-/// compose · follow · like · comment · share.
+/// The Feed's right-hand engagement controls, floating over the media:
+/// like · comment · share. (Add post sits apart in the upper right —
+/// [FeedComposeButton] — and Follow beside the author — [FeedFollowPill].)
 ///
 /// Fixed light-on-dark styling rather than theme colours: it always sits on
 /// top of a photo or video, never on the app background.
@@ -12,22 +13,16 @@ class FeedActionStack extends StatelessWidget {
   const FeedActionStack({
     super.key,
     required this.post,
-    required this.onCompose,
     required this.onLike,
     required this.onComment,
     required this.onShare,
-    this.onFollow,
     this.compact = false,
   });
 
   final Post post;
-  final VoidCallback onCompose;
   final VoidCallback onLike;
   final VoidCallback onComment;
   final VoidCallback onShare;
-
-  /// Null hides Follow: your own post, or an author who cannot be followed.
-  final VoidCallback? onFollow;
 
   /// Smaller buttons and gaps for short viewports.
   final bool compact;
@@ -41,27 +36,6 @@ class FeedActionStack extends StatelessWidget {
       key: const Key('feed_action_stack'),
       mainAxisSize: MainAxisSize.min,
       children: [
-        _ActionButton(
-          buttonKey: const Key('feed_compose_button'),
-          semanticLabel: 'Create a post',
-          size: size,
-          highlighted: true,
-          onTap: onCompose,
-          child: Icon(
-            Icons.add_rounded,
-            color: Colors.white,
-            size: size * 0.54,
-          ),
-        ),
-        if (onFollow != null) ...[
-          SizedBox(height: gap),
-          _FollowButton(
-            following: post.author.isFollowing,
-            size: size,
-            onTap: onFollow!,
-          ),
-        ],
-        SizedBox(height: gap),
         _LikeButton(
           liked: post.liked,
           count: post.likeCount,
@@ -101,6 +75,132 @@ class FeedActionStack extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Add post (+): the pink glass button in the Feed's upper right.
+class FeedComposeButton extends StatelessWidget {
+  const FeedComposeButton({
+    super.key,
+    required this.onTap,
+    this.compact = false,
+  });
+
+  final VoidCallback onTap;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = compact ? 40.0 : 46.0;
+    return _ActionButton(
+      buttonKey: const Key('feed_compose_button'),
+      semanticLabel: 'Create a post',
+      size: size,
+      highlighted: true,
+      onTap: onTap,
+      child: Icon(Icons.add_rounded, color: Colors.white, size: size * 0.54),
+    );
+  }
+}
+
+/// Follow / Following, beside the post's author.
+class FeedFollowPill extends StatefulWidget {
+  const FeedFollowPill({
+    super.key,
+    required this.following,
+    required this.onTap,
+  });
+
+  final bool following;
+  final VoidCallback onTap;
+
+  @override
+  State<FeedFollowPill> createState() => _FeedFollowPillState();
+}
+
+class _FeedFollowPillState extends State<FeedFollowPill> {
+  bool _down = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final following = widget.following;
+    return Semantics(
+      button: true,
+      label: following ? 'Unfollow' : 'Follow',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          key: const Key('feed_follow_button'),
+          onTapDown: (_) => setState(() => _down = true),
+          onTapCancel: () => setState(() => _down = false),
+          onTapUp: (_) => setState(() => _down = false),
+          onTap: widget.onTap,
+          child: AnimatedScale(
+            scale: _down ? 0.92 : 1,
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOutBack,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+              height: 30,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                color: following ? _glassFill : null,
+                gradient: following
+                    ? null
+                    : const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [MocoColors.accentPrimary, _purple],
+                      ),
+                border: Border.all(
+                  color: following
+                      ? _glassBorder
+                      : Colors.white.withValues(alpha: 0.28),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: (following ? Colors.black : MocoColors.accentPrimary)
+                        .withValues(alpha: following ? 0.18 : 0.38),
+                    blurRadius: following ? 10 : 14,
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    transitionBuilder: (child, animation) =>
+                        ScaleTransition(scale: animation, child: child),
+                    child: Icon(
+                      following
+                          ? Icons.how_to_reg_rounded
+                          : Icons.person_add_alt_1_rounded,
+                      key: ValueKey(following),
+                      color: Colors.white,
+                      size: 15,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    following ? 'Following' : 'Follow',
+                    key: const Key('feed_follow_label'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      shadows: [Shadow(color: Color(0x66000000), blurRadius: 4)],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -188,44 +288,6 @@ class _ActionButton extends StatelessWidget {
         ),
         if (label != null) ...[const SizedBox(height: 3), label!],
       ],
-    );
-  }
-}
-
-class _FollowButton extends StatelessWidget {
-  const _FollowButton({
-    required this.following,
-    required this.size,
-    required this.onTap,
-  });
-
-  final bool following;
-  final double size;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return _ActionButton(
-      buttonKey: const Key('feed_follow_button'),
-      semanticLabel: following ? 'Unfollow' : 'Follow',
-      size: size,
-      onTap: onTap,
-      highlighted: !following,
-      label: _Label(
-        following ? 'Following' : 'Follow',
-        textKey: const Key('feed_follow_label'),
-      ),
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 220),
-        transitionBuilder: (child, animation) =>
-            ScaleTransition(scale: animation, child: child),
-        child: Icon(
-          following ? Icons.how_to_reg_rounded : Icons.person_add_alt_1_rounded,
-          key: ValueKey(following),
-          color: Colors.white,
-          size: size * 0.46,
-        ),
-      ),
     );
   }
 }

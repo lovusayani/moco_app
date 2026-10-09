@@ -580,23 +580,14 @@ void main() {
       },
     );
 
-    for (final size in const [Size(390, 844), Size(430, 932)]) {
-      testWidgets('player stage fills a ${size.width.toInt()} px phone', (
-        tester,
-      ) async {
-        final live = _FakeLiveApi(configJson: config(), list: [model(1)]);
-        await pumpApp(tester, live, ageConfirmed: true, size: size);
-        await tester.tap(find.byKey(const Key('live_card_Model_1')));
-        await tester.pumpAndSettle();
-        final stage = tester.getSize(
-          find.byKey(const Key('live_player_stage')),
-        );
-        expect(stage.width, size.width);
-        expect(stage.height, size.height);
-      });
-    }
-
-    for (final size in const [Size(820, 1180), Size(1440, 900)]) {
+    // The normal player is an embedded, centred 9:16 stage on every screen;
+    // only the player's own fullscreen gives it the whole viewport.
+    for (final size in const [
+      Size(390, 844),
+      Size(430, 932),
+      Size(820, 1180),
+      Size(1440, 900),
+    ]) {
       testWidgets(
         'player stage is a centred 9:16 on ${size.width.toInt()} px',
         (tester) async {
@@ -611,6 +602,7 @@ void main() {
           expect(stage.width, lessThan(size.width));
           final centre = tester.getCenter(finder);
           expect(centre.dx, closeTo(size.width / 2, 1));
+          expect(centre.dy, closeTo(size.height / 2, 1));
         },
       );
     }

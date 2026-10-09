@@ -104,9 +104,17 @@ class FeedPostItem extends StatelessWidget {
             post: post,
             onAuthorTap: onAuthorTap,
             onMoreTap: onMoreTap,
+            onFollow: onFollow,
           ),
         ),
-        if (_hasActions)
+        if (_hasActions) ...[
+          // Add post: upper right, under the sound control, apart from the
+          // engagement actions.
+          Positioned(
+            right: 10 + insets.right,
+            top: insets.top + 66,
+            child: FeedComposeButton(compact: compact, onTap: onCompose!),
+          ),
           Positioned(
             right: 10 + insets.right,
             // Above the floating bottom navigation.
@@ -114,13 +122,12 @@ class FeedPostItem extends StatelessWidget {
             child: FeedActionStack(
               post: post,
               compact: compact,
-              onCompose: onCompose!,
-              onFollow: onFollow,
               onLike: onLike!,
               onComment: onComment!,
               onShare: onShare!,
             ),
           ),
+        ],
       ],
     );
   }
@@ -221,11 +228,19 @@ class _MediaUnavailable extends StatelessWidget {
 }
 
 class _Overlay extends StatelessWidget {
-  const _Overlay({required this.post, this.onAuthorTap, this.onMoreTap});
+  const _Overlay({
+    required this.post,
+    this.onAuthorTap,
+    this.onMoreTap,
+    this.onFollow,
+  });
 
   final Post post;
   final VoidCallback? onAuthorTap;
   final VoidCallback? onMoreTap;
+
+  /// Null hides Follow: your own post, or an author who cannot be followed.
+  final VoidCallback? onFollow;
 
   @override
   Widget build(BuildContext context) {
@@ -246,7 +261,14 @@ class _Overlay extends StatelessWidget {
               Flexible(
                 child: _AuthorRow(post: post, onTap: onAuthorTap),
               ),
-              const SizedBox(width: MocoSpacing.sm),
+              if (onFollow != null) ...[
+                const SizedBox(width: MocoSpacing.md),
+                FeedFollowPill(
+                  following: post.author.isFollowing,
+                  onTap: onFollow!,
+                ),
+              ],
+              const SizedBox(width: MocoSpacing.xs),
               if (onMoreTap != null)
                 IconButton(
                   key: const Key('feed_post_more'),

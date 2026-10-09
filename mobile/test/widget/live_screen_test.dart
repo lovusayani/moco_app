@@ -538,6 +538,83 @@ void main() {
       expect(find.byKey(const Key('live_grid')), findsOneWidget);
     });
 
+    testWidgets(
+      'player: details overlay hides and shows; back stays reachable',
+      (tester) async {
+        final live = _FakeLiveApi(configJson: config(), list: [model(1)]);
+        await pumpApp(tester, live, ageConfirmed: true);
+        await tester.tap(find.byKey(const Key('live_card_Model_1')));
+        await tester.pumpAndSettle();
+
+        double opacity() => tester
+            .widget<AnimatedOpacity>(
+              find.byKey(const Key('live_player_details_visibility')),
+            )
+            .opacity;
+        expect(opacity(), 1, reason: 'details visible by default');
+        expect(find.text('Model_1'), findsWidgets);
+        expect(find.textContaining('watching'), findsOneWidget);
+        expect(find.textContaining('External stream'), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('live_overlay_toggle')));
+        await tester.pumpAndSettle();
+        expect(opacity(), 0);
+        expect(
+          find.byKey(const Key('live_player_back')).hitTestable(),
+          findsOneWidget,
+          reason: 'back stays reachable with details hidden',
+        );
+        expect(
+          find.byKey(const Key('live_player_fallback')),
+          findsOneWidget,
+          reason: 'hiding details never touches the player',
+        );
+
+        await tester.tap(find.byKey(const Key('live_overlay_toggle')));
+        await tester.pumpAndSettle();
+        expect(opacity(), 1);
+
+        await tester.tap(find.byKey(const Key('live_player_back')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('live_grid')), findsOneWidget);
+      },
+    );
+
+    for (final size in const [Size(390, 844), Size(430, 932)]) {
+      testWidgets('player stage fills a ${size.width.toInt()} px phone', (
+        tester,
+      ) async {
+        final live = _FakeLiveApi(configJson: config(), list: [model(1)]);
+        await pumpApp(tester, live, ageConfirmed: true, size: size);
+        await tester.tap(find.byKey(const Key('live_card_Model_1')));
+        await tester.pumpAndSettle();
+        final stage = tester.getSize(
+          find.byKey(const Key('live_player_stage')),
+        );
+        expect(stage.width, size.width);
+        expect(stage.height, size.height);
+      });
+    }
+
+    for (final size in const [Size(820, 1180), Size(1440, 900)]) {
+      testWidgets(
+        'player stage is a centred 9:16 on ${size.width.toInt()} px',
+        (tester) async {
+          final live = _FakeLiveApi(configJson: config(), list: [model(1)]);
+          await pumpApp(tester, live, ageConfirmed: true, size: size);
+          await tester.tap(find.byKey(const Key('live_card_Model_1')));
+          await tester.pumpAndSettle();
+          final finder = find.byKey(const Key('live_player_stage'));
+          final stage = tester.getSize(finder);
+          expect(stage.width / stage.height, closeTo(9 / 16, 0.01));
+          expect(stage.height, lessThanOrEqualTo(size.height));
+          expect(stage.width, lessThan(size.width));
+          final centre = tester.getCenter(finder);
+          expect(centre.dx, closeTo(size.width / 2, 1));
+        },
+      );
+    }
+
     testWidgets('provider mode never opens the internal player', (
       tester,
     ) async {

@@ -3,6 +3,7 @@ import 'dart:js_interop';
 import 'dart:ui_web' as ui_web;
 
 import 'package:flutter/material.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
 import 'package:web/web.dart' as web;
 
 import '../../../core/config/env.dart';
@@ -221,7 +222,10 @@ class _StripchatPlayerState extends State<_StripchatPlayer> {
               ),
             ),
           ),
-        if (_phase.index > _Phase.ready.index) _overlay(),
+        // Drawn over the browser frame: PointerInterceptor lets its buttons
+        // receive the clicks.
+        if (_phase.index > _Phase.ready.index)
+          PointerInterceptor(child: _overlay()),
       ],
     );
   }

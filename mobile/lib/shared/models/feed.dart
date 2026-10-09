@@ -21,6 +21,8 @@ class PostAuthor {
     this.avatarUrl,
     this.isListener = false,
     this.verified = false,
+    this.canFollow = false,
+    this.isFollowing = false,
   });
 
   final int id;
@@ -35,6 +37,24 @@ class PostAuthor {
   /// The server's derived KYC boolean. Raw KYC status never reaches a client.
   final bool verified;
 
+  /// Whether the viewer may follow this author — the existing listener
+  /// follow. False for your own posts and for authors who are not eligible
+  /// listeners, so the Follow control is simply not shown for them.
+  final bool canFollow;
+
+  /// Whether the viewer already follows this author.
+  final bool isFollowing;
+
+  PostAuthor copyWith({bool? isFollowing}) => PostAuthor(
+    id: id,
+    name: name,
+    avatarUrl: avatarUrl,
+    isListener: isListener,
+    verified: verified,
+    canFollow: canFollow,
+    isFollowing: isFollowing ?? this.isFollowing,
+  );
+
   String get displayName =>
       (name?.trim().isNotEmpty ?? false) ? name!.trim() : 'Moco user';
 
@@ -45,6 +65,8 @@ class PostAuthor {
       avatarUrl: json['avatarUrl'] as String?,
       isListener: json['isListener'] as bool? ?? false,
       verified: json['verified'] as bool? ?? false,
+      canFollow: json['canFollow'] as bool? ?? false,
+      isFollowing: json['isFollowing'] as bool? ?? false,
     );
   }
 }
@@ -58,6 +80,10 @@ class Post {
     this.caption,
     required this.createdAt,
     required this.author,
+    this.likeCount = 0,
+    this.liked = false,
+    this.commentCount = 0,
+    this.shareCount = 0,
   });
 
   final int id;
@@ -70,6 +96,31 @@ class Post {
   final String? caption;
   final DateTime createdAt;
   final PostAuthor author;
+
+  /// Server-persisted counters, and whether the viewer liked this post.
+  final int likeCount;
+  final bool liked;
+  final int commentCount;
+  final int shareCount;
+
+  Post copyWith({
+    PostAuthor? author,
+    int? likeCount,
+    bool? liked,
+    int? commentCount,
+    int? shareCount,
+  }) => Post(
+    id: id,
+    mediaType: mediaType,
+    mediaUrl: mediaUrl,
+    caption: caption,
+    createdAt: createdAt,
+    author: author ?? this.author,
+    likeCount: likeCount ?? this.likeCount,
+    liked: liked ?? this.liked,
+    commentCount: commentCount ?? this.commentCount,
+    shareCount: shareCount ?? this.shareCount,
+  );
 
   bool get isVideo => mediaType == PostMediaType.video;
 
@@ -90,8 +141,105 @@ class Post {
       author: PostAuthor.fromJson(
         Map<String, dynamic>.from(json['author'] as Map? ?? const {}),
       ),
+      likeCount: (json['likeCount'] as num?)?.toInt() ?? 0,
+      liked: json['liked'] as bool? ?? false,
+      commentCount: (json['commentCount'] as num?)?.toInt() ?? 0,
+      shareCount: (json['shareCount'] as num?)?.toInt() ?? 0,
     );
   }
+}
+
+/// The server's word on a like after `PUT`/`DELETE /feed/:id/like`.
+class PostLikeState {
+  const PostLikeState({required this.liked, required this.likeCount});
+
+  final bool liked;
+  final int likeCount;
+
+  factory PostLikeState.fromJson(Map<String, dynamic> json) => PostLikeState(
+    liked: json['liked'] as bool? ?? false,
+    likeCount: (json['likeCount'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// One comment on a post.
+class PostComment {
+  const PostComment({
+    required this.id,
+    required this.body,
+    required this.createdAt,
+    required this.authorId,
+    this.authorName,
+    this.authorAvatarUrl,
+    this.isOwn = false,
+    this.canDelete = false,
+  });
+
+  final int id;
+  final String body;
+  final DateTime createdAt;
+  final int authorId;
+  final String? authorName;
+  final String? authorAvatarUrl;
+  final bool isOwn;
+
+  /// The commenter, or the post's author — decided by the server.
+  final bool canDelete;
+
+  String get authorDisplayName => (authorName?.trim().isNotEmpty ?? false)
+      ? authorName!.trim()
+      : 'Moco user';
+
+  factory PostComment.fromJson(Map<String, dynamic> json) {
+    final author = Map<String, dynamic>.from(json['author'] as Map? ?? const {});
+    return PostComment(
+      id: (json['id'] as num).toInt(),
+      body: json['body'] as String? ?? '',
+      createdAt:
+          DateTime.tryParse(json['createdAt'] as String? ?? '') ??
+          DateTime.now(),
+      authorId: (author['id'] as num?)?.toInt() ?? 0,
+      authorName: author['name'] as String?,
+      authorAvatarUrl: author['avatarUrl'] as String?,
+      isOwn: json['isOwn'] as bool? ?? false,
+      canDelete: json['canDelete'] as bool? ?? false,
+    );
+  }
+}
+
+/// One page of comments, newest first, plus the post's current total.
+class CommentPage {
+  const CommentPage({
+    this.comments = const [],
+    this.nextCursor,
+    this.commentCount = 0,
+  });
+
+  final List<PostComment> comments;
+  final int? nextCursor;
+  final int commentCount;
+
+  factory CommentPage.fromJson(Map<String, dynamic> json) {
+    final raw = json['comments'];
+    return CommentPage(
+      comments: raw is List
+          ? raw
+                .whereType<Map>()
+                .map((e) => PostComment.fromJson(Map<String, dynamic>.from(e)))
+                .toList()
+          : const [],
+      nextCursor: (json['nextCursor'] as num?)?.toInt(),
+      commentCount: (json['commentCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// A newly added comment and the post's total after it.
+class CommentAdded {
+  const CommentAdded({required this.comment, required this.commentCount});
+
+  final PostComment comment;
+  final int commentCount;
 }
 
 /// One page of the feed (`GET /feed`), newest first.

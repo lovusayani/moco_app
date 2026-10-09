@@ -8,6 +8,8 @@ const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
 const { authenticate } = require('../../middleware/auth');
 const { rateLimit } = require('../../middleware/rateLimit');
+const { redis } = require('../../config/redis');
+const notifications = require('../notifications/notifications.service');
 const { forbidden, notFound, badRequest } = require('../../utils/errors');
 const {
   FEED_MEDIA,
@@ -16,6 +18,7 @@ const {
   POST_STATUS,
   postMediaTypeForMime,
   feedMaxBytesFor,
+  listenerEligibleSql,
 } = require('../../utils/constants');
 
 const router = express.Router();
@@ -46,14 +49,64 @@ async function toPost(row) {
     mediaUrl: await feedStorage.createViewUrl(row.media_path),
     caption: row.caption,
     createdAt: row.created_at,
+    likeCount: Number(row.like_count ?? 0),
+    liked: Boolean(row.liked),
+    commentCount: Number(row.comment_count ?? 0),
+    shareCount: Number(row.share_count ?? 0),
     author: {
       id: row.author_user_id,
       name: row.display_name,
       avatarUrl: row.avatar_url,
       isListener: row.is_listener,
       verified: row.verified,
+      // Follow is the existing listener follow (listener_relations): only an
+      // eligible listener can be followed, and never yourself.
+      canFollow: Boolean(row.can_follow),
+      isFollowing: Boolean(row.is_following),
     },
   };
+}
+
+/**
+ * The feed's post columns for viewer $2: author, the viewer's like/follow
+ * state and the like/comment/share counts. $1 = active status, $3 = the
+ * approved KYC status. Callers add their own WHERE terms after these.
+ */
+const POST_SELECT = `
+  SELECT p.id, p.author_user_id, p.media_type, p.media_path, p.caption, p.created_at, p.share_count,
+         u.display_name, u.avatar_url,
+         (lp.user_id IS NOT NULL) AS is_listener,
+         -- Same rule as discovery: publish the derived boolean, never the
+         -- underlying KYC state.
+         (lp.kyc_status = $3) AS verified,
+         (SELECT count(*) FROM post_likes l WHERE l.post_id = p.id) AS like_count,
+         EXISTS (SELECT 1 FROM post_likes l WHERE l.post_id = p.id AND l.user_id = $2) AS liked,
+         (SELECT count(*) FROM post_comments c WHERE c.post_id = p.id) AS comment_count,
+         (lp.user_id IS NOT NULL AND ${listenerEligibleSql('lp')} AND p.author_user_id <> $2) AS can_follow,
+         EXISTS (SELECT 1 FROM listener_relations r
+                  WHERE r.user_id = $2 AND r.listener_id = p.author_user_id AND r.kind = 'follow') AS is_following
+    FROM posts p
+    JOIN users u ON u.id = p.author_user_id
+    LEFT JOIN listener_profiles lp ON lp.user_id = p.author_user_id
+   WHERE p.status = $1
+     AND u.status = 'active'
+     -- The existing one-directional block row, checked in both directions —
+     -- the same predicate discovery and chat already use. No second block
+     -- system.
+     AND NOT EXISTS (
+           SELECT 1 FROM blocks b
+            WHERE (b.blocker_id = $2 AND b.blocked_id = p.author_user_id)
+               OR (b.blocker_id = p.author_user_id AND b.blocked_id = $2))`;
+
+/** One visible post for this viewer, or null (gone, removed, or blocked either way). */
+async function visiblePost(postId, viewerId) {
+  const { rows } = await query(`${POST_SELECT} AND p.id = $4`, [
+    POST_STATUS.ACTIVE,
+    viewerId,
+    KYC_STATUS.APPROVED,
+    postId,
+  ]);
+  return rows[0] || null;
 }
 
 const feedQuerySchema = z.object({
@@ -69,30 +122,13 @@ router.get(
     const { limit, cursor } = req.query;
 
     const { rows } = await query(
-      `SELECT p.id, p.author_user_id, p.media_type, p.media_path, p.caption, p.created_at,
-              u.display_name, u.avatar_url,
-              (lp.user_id IS NOT NULL) AS is_listener,
-              -- Same rule as discovery: publish the derived boolean, never the
-              -- underlying KYC state.
-              (lp.kyc_status = $4) AS verified
-         FROM posts p
-         JOIN users u ON u.id = p.author_user_id
-         LEFT JOIN listener_profiles lp ON lp.user_id = p.author_user_id
-        WHERE p.status = $1
-          AND u.status = 'active'
+      `${POST_SELECT}
           -- Keyset pagination. id DESC is creation order, so this is a stable
           -- "everything older than what I have" with no OFFSET drift.
-          AND ($2::bigint IS NULL OR p.id < $2)
-          -- The existing one-directional block row, checked in both
-          -- directions — the same predicate discovery and chat already use.
-          -- No second block system.
-          AND NOT EXISTS (
-                SELECT 1 FROM blocks b
-                 WHERE (b.blocker_id = $3 AND b.blocked_id = p.author_user_id)
-                    OR (b.blocker_id = p.author_user_id AND b.blocked_id = $3))
+          AND ($4::bigint IS NULL OR p.id < $4)
         ORDER BY p.id DESC
         LIMIT $5`,
-      [POST_STATUS.ACTIVE, cursor ?? null, req.user.id, KYC_STATUS.APPROVED, limit],
+      [POST_STATUS.ACTIVE, req.user.id, KYC_STATUS.APPROVED, cursor ?? null, limit],
     );
 
     const posts = await Promise.all(rows.map(toPost));
@@ -213,18 +249,229 @@ router.post(
       throw badRequest('already_posted', 'That media has already been posted');
     }
 
-    const { rows: author } = await query(
-      `SELECT u.display_name, u.avatar_url,
-              (lp.user_id IS NOT NULL) AS is_listener,
-              (lp.kyc_status = $2) AS verified
-         FROM users u LEFT JOIN listener_profiles lp ON lp.user_id = u.id
-        WHERE u.id = $1`,
-      [req.user.id, KYC_STATUS.APPROVED],
-    );
-
-    res.status(201).json({ post: await toPost({ ...rows[0], ...author[0] }) });
+    res.status(201).json({ post: await toPost(await visiblePost(rows[0].id, req.user.id)) });
   }),
 );
+
+// --- one post, likes, comments, shares --------------------------------------
+
+const postIdParam = z.object({ postId: z.coerce.number().int().positive() });
+
+/** One post (for a shared link). 404 when it is gone or blocked either way. */
+router.get(
+  '/:postId',
+  validate(postIdParam, 'params'),
+  asyncHandler(async (req, res) => {
+    const row = await visiblePost(req.params.postId, req.user.id);
+    if (!row) throw notFound('Post');
+    res.json({ post: await toPost(row) });
+  }),
+);
+
+async function likeState(postId, viewerId) {
+  const { rows } = await query(
+    `SELECT (SELECT count(*)::int FROM post_likes WHERE post_id = $1) AS like_count,
+            EXISTS (SELECT 1 FROM post_likes WHERE post_id = $1 AND user_id = $2) AS liked`,
+    [postId, viewerId],
+  );
+  return { postId: Number(postId), liked: rows[0].liked, likeCount: rows[0].like_count };
+}
+
+/**
+ * Like / unlike. Idempotent (primary key + ON CONFLICT): a double tap or a
+ * retry cannot double-count. Always answers with the resulting state so an
+ * optimistic client can reconcile.
+ */
+router.put(
+  '/:postId/like',
+  rateLimit({ windowSeconds: 60, max: 120, keyPrefix: 'feed_like' }),
+  validate(postIdParam, 'params'),
+  asyncHandler(async (req, res) => {
+    const post = await visiblePost(req.params.postId, req.user.id);
+    if (!post) throw notFound('Post');
+    const { rowCount } = await query(
+      'INSERT INTO post_likes (post_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [post.id, req.user.id],
+    );
+    if (rowCount === 1) await notifyLike(post, req.user);
+    res.json(await likeState(post.id, req.user.id));
+  }),
+);
+
+router.delete(
+  '/:postId/like',
+  rateLimit({ windowSeconds: 60, max: 120, keyPrefix: 'feed_like' }),
+  validate(postIdParam, 'params'),
+  asyncHandler(async (req, res) => {
+    await query('DELETE FROM post_likes WHERE post_id = $1 AND user_id = $2', [req.params.postId, req.user.id]);
+    res.json(await likeState(req.params.postId, req.user.id));
+  }),
+);
+
+async function commentCount(postId) {
+  const { rows } = await query('SELECT count(*)::int AS n FROM post_comments WHERE post_id = $1', [postId]);
+  return rows[0].n;
+}
+
+function toComment(row, viewerId, postAuthorId) {
+  const mine = Number(row.author_user_id) === Number(viewerId);
+  return {
+    id: Number(row.id),
+    body: row.body,
+    createdAt: row.created_at,
+    author: { id: Number(row.author_user_id), name: row.display_name, avatarUrl: row.avatar_url },
+    isOwn: mine,
+    // The commenter, or the post's author moderating their own post.
+    canDelete: mine || Number(postAuthorId) === Number(viewerId),
+  };
+}
+
+/** Comments, newest first, keyset-paginated. Comments across a block (either way) are hidden. */
+router.get(
+  '/:postId/comments',
+  validate(postIdParam, 'params'),
+  validate(
+    z.object({
+      limit: z.coerce.number().int().min(1).max(50).default(30),
+      cursor: z.coerce.number().int().positive().optional(),
+    }),
+    'query',
+  ),
+  asyncHandler(async (req, res) => {
+    const post = await visiblePost(req.params.postId, req.user.id);
+    if (!post) throw notFound('Post');
+    const { limit, cursor } = req.query;
+    const { rows } = await query(
+      `SELECT c.id, c.body, c.created_at, c.author_user_id, u.display_name, u.avatar_url
+         FROM post_comments c JOIN users u ON u.id = c.author_user_id
+        WHERE c.post_id = $1
+          AND ($2::bigint IS NULL OR c.id < $2)
+          AND NOT EXISTS (
+                SELECT 1 FROM blocks b
+                 WHERE (b.blocker_id = $3 AND b.blocked_id = c.author_user_id)
+                    OR (b.blocker_id = c.author_user_id AND b.blocked_id = $3))
+        ORDER BY c.id DESC
+        LIMIT $4`,
+      [post.id, cursor ?? null, req.user.id, limit],
+    );
+    res.json({
+      comments: rows.map((r) => toComment(r, req.user.id, post.author_user_id)),
+      nextCursor: rows.length === limit ? Number(rows[rows.length - 1].id) : null,
+      commentCount: await commentCount(post.id),
+    });
+  }),
+);
+
+router.post(
+  '/:postId/comments',
+  rateLimit({ windowSeconds: 60, max: 20, keyPrefix: 'feed_comment' }),
+  validate(postIdParam, 'params'),
+  validate(z.object({ body: z.string().trim().min(1).max(500) })),
+  asyncHandler(async (req, res) => {
+    const post = await visiblePost(req.params.postId, req.user.id);
+    if (!post) throw notFound('Post');
+    const { rows } = await query(
+      `INSERT INTO post_comments (post_id, author_user_id, body) VALUES ($1, $2, $3)
+       RETURNING id, body, created_at, author_user_id`,
+      [post.id, req.user.id, req.body.body],
+    );
+    await notifyComment(post, req.user, req.body.body);
+    const { rows: me } = await query('SELECT display_name, avatar_url FROM users WHERE id = $1', [req.user.id]);
+    const comment = toComment({ ...rows[0], ...me[0] }, req.user.id, post.author_user_id);
+    res.status(201).json({ comment, commentCount: await commentCount(post.id) });
+  }),
+);
+
+router.delete(
+  '/:postId/comments/:commentId',
+  validate(z.object({ postId: z.coerce.number().int().positive(), commentId: z.coerce.number().int().positive() }), 'params'),
+  asyncHandler(async (req, res) => {
+    const { postId, commentId } = req.params;
+    // The commenter, or the author of the post the comment is on.
+    const { rowCount } = await query(
+      `DELETE FROM post_comments c USING posts p
+        WHERE c.id = $1 AND c.post_id = $2 AND p.id = c.post_id
+          AND (c.author_user_id = $3 OR p.author_user_id = $3)`,
+      [commentId, postId, req.user.id],
+    );
+    if (rowCount === 0) {
+      const { rows } = await query('SELECT 1 FROM post_comments WHERE id = $1 AND post_id = $2', [commentId, postId]);
+      // Someone else's comment on someone else's post: not yours to delete.
+      if (rows[0]) throw forbidden('You cannot delete this comment');
+    }
+    res.json({ ok: true, commentCount: await commentCount(postId) });
+  }),
+);
+
+/**
+ * Records that the viewer shared a post (the client calls this only after a
+ * share sheet opened or a link was copied — never on render). Counted at
+ * most once per user per post per hour.
+ */
+router.post(
+  '/:postId/share',
+  rateLimit({ windowSeconds: 3600, max: 120, keyPrefix: 'feed_share' }),
+  validate(postIdParam, 'params'),
+  validate(z.object({ method: z.enum(['native', 'copy']).optional() })),
+  asyncHandler(async (req, res) => {
+    const post = await visiblePost(req.params.postId, req.user.id);
+    if (!post) throw notFound('Post');
+    const fresh = await redis
+      .set(`feed:share:${post.id}:${req.user.id}`, '1', 'EX', 3600, 'NX')
+      .catch(() => 'OK');
+    let shareCount = Number(post.share_count);
+    if (fresh === 'OK') {
+      const { rows } = await query(
+        'UPDATE posts SET share_count = share_count + 1 WHERE id = $1 RETURNING share_count',
+        [post.id],
+      );
+      shareCount = rows[0].share_count;
+    }
+    res.json({ postId: Number(post.id), shareCount, counted: fresh === 'OK' });
+  }),
+);
+
+// --- notifications (in-app; deduplicated so taps cannot spam an inbox) -------
+
+const displayName = (user) => user.display_name || 'Someone';
+
+/** One like notification per (post, liker), ever — unliking and re-liking stays quiet. */
+async function notifyLike(post, liker) {
+  if (Number(post.author_user_id) === Number(liker.id)) return;
+  const { rows } = await query(
+    `SELECT 1 FROM notifications
+      WHERE user_id = $1 AND type = 'post_like' AND data->>'postId' = $2 AND data->>'actorId' = $3
+      LIMIT 1`,
+    [post.author_user_id, String(post.id), String(liker.id)],
+  );
+  if (rows[0]) return;
+  await notifications.create({
+    userId: post.author_user_id,
+    type: 'post_like',
+    title: `${displayName(liker)} liked your post`,
+    data: { postId: Number(post.id), actorId: Number(liker.id) },
+  });
+}
+
+/** Comments notify the post's author, at most once per commenter per post per 10 minutes. */
+async function notifyComment(post, commenter, body) {
+  if (Number(post.author_user_id) === Number(commenter.id)) return;
+  const { rows } = await query(
+    `SELECT 1 FROM notifications
+      WHERE user_id = $1 AND type = 'post_comment' AND data->>'postId' = $2 AND data->>'actorId' = $3
+        AND created_at > now() - interval '10 minutes'
+      LIMIT 1`,
+    [post.author_user_id, String(post.id), String(commenter.id)],
+  );
+  if (rows[0]) return;
+  await notifications.create({
+    userId: post.author_user_id,
+    type: 'post_comment',
+    title: `${displayName(commenter)} commented on your post`,
+    body: body.length > 140 ? `${body.slice(0, 137)}…` : body,
+    data: { postId: Number(post.id), actorId: Number(commenter.id) },
+  });
+}
 
 /**
  * Soft-deletes the caller's own post. Author-only: there is no moderation

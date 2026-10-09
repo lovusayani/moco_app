@@ -2,25 +2,48 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moco/core/media/feed_video_playback.dart';
+import 'package:moco/core/providers.dart';
+import 'package:moco/core/storage/secure_store.dart';
 import 'package:moco/features/feed/widgets/feed_video.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/fake_video_playback.dart';
 
 /// The video lifecycle rules, asserted on the widget that owns them.
 void main() {
   late RecordingPlaybackFactory factory;
+  late AppPreferences prefs;
 
-  setUp(() {
+  Future<void> usePrefs(Map<String, Object> values) async {
+    SharedPreferences.setMockInitialValues(values);
+    prefs = await AppPreferences.create();
+  }
+
+  setUp(() async {
     factory = RecordingPlaybackFactory();
+    await usePrefs({});
   });
 
-  Widget subject({required bool isActive, String url = 'https://v/a.mp4'}) {
+  Widget subject({
+    required bool isActive,
+    String url = 'https://v/a.mp4',
+    bool loop = true,
+    VoidCallback? onCompleted,
+  }) {
     return ProviderScope(
       overrides: [
+        appPreferencesProvider.overrideWithValue(prefs),
         feedVideoPlaybackFactoryProvider.overrideWithValue(factory.call),
       ],
       child: MaterialApp(
-        home: Scaffold(body: FeedVideo(url: url, isActive: isActive)),
+        home: Scaffold(
+          body: FeedVideo(
+            url: url,
+            isActive: isActive,
+            loop: loop,
+            onCompleted: onCompleted,
+          ),
+        ),
       ),
     );
   }
@@ -141,5 +164,56 @@ void main() {
     expect(find.byKey(const Key('feed_video_error')), findsOneWidget);
     expect(find.text('This video could not be played'), findsOneWidget);
     expect(factory.last.disposeCount, 1, reason: 'a failed controller is still released');
+  });
+
+  testWidgets('the sound choice is saved and used by the next video', (tester) async {
+    await tester.pumpWidget(subject(isActive: true));
+    await tester.pumpAndSettle();
+    expect(factory.last.volume, 0);
+
+    await tester.tap(find.byKey(const Key('feed_video_mute')));
+    await tester.pumpAndSettle();
+    expect(prefs.feedMuted, isFalse, reason: 'remembered across posts and visits');
+
+    // A different post's video starts with sound.
+    await tester.pumpWidget(subject(isActive: true, url: 'https://v/b.mp4'));
+    await tester.pumpAndSettle();
+    expect(factory.last.url, 'https://v/b.mp4');
+    expect(factory.last.volume, 1);
+  });
+
+  testWidgets('a browser that blocks sound autoplay falls back to muted', (tester) async {
+    await usePrefs({'moco_feed_muted': false});
+    factory.configure = (playback) => playback.blockUnmutedAutoplay = true;
+
+    await tester.pumpWidget(subject(isActive: true));
+    await tester.pumpAndSettle();
+
+    expect(factory.count, 2, reason: 'restarted once, muted');
+    expect(factory.created.first.disposeCount, 1);
+    expect(factory.last.volume, 0);
+    expect(factory.last.isPlaying, isTrue);
+    expect(find.byKey(const Key('feed_video_error')), findsNothing);
+    expect(prefs.feedMuted, isFalse, reason: 'the saved choice is not overwritten');
+
+    // The next tap is the gesture the browser wanted: sound comes on.
+    await tester.tap(find.byKey(const Key('feed_video_mute')));
+    await tester.pumpAndSettle();
+    expect(factory.last.volume, 1);
+  });
+
+  testWidgets('without looping, the end of the clip is reported once', (tester) async {
+    var completed = 0;
+    await tester.pumpWidget(
+      subject(isActive: true, loop: false, onCompleted: () => completed += 1),
+    );
+    await tester.pumpAndSettle();
+    expect(factory.last.looping, isFalse);
+
+    factory.last.finish();
+    await tester.pump();
+    factory.last.finish();
+    await tester.pump();
+    expect(completed, 1);
   });
 }

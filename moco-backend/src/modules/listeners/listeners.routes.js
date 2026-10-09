@@ -9,6 +9,7 @@ const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
 const { authenticate, requireListener } = require('../../middleware/auth');
 const { rateLimit } = require('../../middleware/rateLimit');
+const notifications = require('../notifications/notifications.service');
 const { notFound, badRequest, forbidden } = require('../../utils/errors');
 const {
   KYC_STATUS,
@@ -491,11 +492,12 @@ router.put(
     );
     if (!exists[0]) throw notFound('Listener');
 
-    await query(
+    const { rowCount: added } = await query(
       `INSERT INTO listener_relations (user_id, listener_id, kind)
        VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
       [req.user.id, id, kind],
     );
+    if (added === 1 && kind === 'follow') await notifyFollow(id, req.user);
 
     const { rows } = await query(
       `SELECT count(*)::int AS followers FROM listener_relations
@@ -506,6 +508,28 @@ router.put(
     res.json({ listenerId: Number(id), kind, active: true, followerCount: rows[0].followers });
   }),
 );
+
+/**
+ * Tells a listener they have a new follower. Only on a fresh follow row, and
+ * at most once per follower per day, so follow/unfollow toggling cannot spam
+ * the listener's inbox.
+ */
+async function notifyFollow(listenerId, follower) {
+  const { rows } = await query(
+    `SELECT 1 FROM notifications
+      WHERE user_id = $1 AND type = 'new_follower' AND data->>'actorId' = $2
+        AND created_at > now() - interval '24 hours'
+      LIMIT 1`,
+    [listenerId, String(follower.id)],
+  );
+  if (rows[0]) return;
+  await notifications.create({
+    userId: Number(listenerId),
+    type: 'new_follower',
+    title: `${follower.display_name || 'Someone'} started following you`,
+    data: { actorId: Number(follower.id) },
+  });
+}
 
 router.delete(
   '/:id/:kind',

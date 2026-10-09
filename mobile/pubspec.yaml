@@ -56,6 +56,7 @@ dependencies:
   # Stripchat player). Already a transitive dependency; declared because it is
   # imported directly behind a conditional import.
   web: ^1.1.0
+  pointer_interceptor: ^0.10.1+3
 
 dev_dependencies:
   flutter_test:

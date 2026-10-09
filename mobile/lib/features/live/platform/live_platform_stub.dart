@@ -11,4 +11,5 @@ Widget stripchatPlayerView({
   required LivePlayerConfig config,
   required Widget fallback,
   VoidCallback? onExit,
+  ValueChanged<bool>? onFullscreenChanged,
 }) => fallback;

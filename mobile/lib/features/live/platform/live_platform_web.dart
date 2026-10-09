@@ -3,6 +3,7 @@ import 'dart:js_interop';
 import 'dart:ui_web' as ui_web;
 
 import 'package:flutter/material.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
 import 'package:web/web.dart' as web;
 
 import '../../../core/config/env.dart';
@@ -33,7 +34,11 @@ bool openLiveDestination(String url) {
 ///  * `offline` / `unavailable` errors → a message and a way back to Live
 ///    (never a silent switch to another model — this one was chosen);
 ///  * `playback` errors → the player is left to recover; a fatal one offers
-///    "Try again"; `fullscreen` errors → a short notice only.
+///    "Try again"; `fullscreen` errors → a short notice only;
+///  * the player entering or leaving fullscreen (its own control) →
+///    [onFullscreenChanged], from the player's `fullscreenChange` event and
+///    the page's `fullscreenchange`, so the screen can give the stage the
+///    whole viewport while it lasts.
 ///
 /// Without a configured script, [fallback] is shown: no guessed script and
 /// no raw stream URLs.
@@ -42,6 +47,7 @@ Widget stripchatPlayerView({
   required LivePlayerConfig config,
   required Widget fallback,
   VoidCallback? onExit,
+  ValueChanged<bool>? onFullscreenChanged,
 }) {
   if (!config.available) return fallback;
   return _StripchatPlayer(
@@ -49,6 +55,7 @@ Widget stripchatPlayerView({
     modelName: modelName,
     config: config,
     onExit: onExit,
+    onFullscreenChanged: onFullscreenChanged,
   );
 }
 
@@ -60,11 +67,13 @@ class _StripchatPlayer extends StatefulWidget {
     required this.modelName,
     required this.config,
     this.onExit,
+    this.onFullscreenChanged,
   });
 
   final String modelName;
   final LivePlayerConfig config;
   final VoidCallback? onExit;
+  final ValueChanged<bool>? onFullscreenChanged;
 
   @override
   State<_StripchatPlayer> createState() => _StripchatPlayerState();
@@ -77,6 +86,7 @@ class _StripchatPlayerState extends State<_StripchatPlayer> {
   late final Uri _frameUrl;
   web.HTMLIFrameElement? _frame;
   JSFunction? _onMessage;
+  JSFunction? _onFullscreenChange;
   Timer? _watchdog;
   _Phase _phase = _Phase.loading;
 
@@ -117,6 +127,12 @@ class _StripchatPlayerState extends State<_StripchatPlayer> {
     });
     _onMessage = _handleMessage.toJS;
     web.window.addEventListener('message', _onMessage);
+    // The player's fullscreen puts this iframe into browser fullscreen; the
+    // page's own event is the reliable signal for entering and leaving it.
+    _onFullscreenChange = ((web.Event _) => widget.onFullscreenChanged?.call(
+      web.document.fullscreenElement != null,
+    )).toJS;
+    web.document.addEventListener('fullscreenchange', _onFullscreenChange);
     _armWatchdog();
   }
 
@@ -132,6 +148,9 @@ class _StripchatPlayerState extends State<_StripchatPlayer> {
     _send({'type': 'destroy'});
     if (_onMessage != null) {
       web.window.removeEventListener('message', _onMessage);
+    }
+    if (_onFullscreenChange != null) {
+      web.document.removeEventListener('fullscreenchange', _onFullscreenChange);
     }
     _frame = null;
     super.dispose();
@@ -178,6 +197,9 @@ class _StripchatPlayerState extends State<_StripchatPlayer> {
       case 'mounted' || 'ready' || 'play':
         _watchdog?.cancel();
         if (_phase != _Phase.ready) setState(() => _phase = _Phase.ready);
+      case 'fullscreenChange':
+        final value = payload['isFullscreen'];
+        if (value is bool) widget.onFullscreenChanged?.call(value);
       case 'error':
         _onError(payload['type'] as String?, payload['fatal'] == true);
     }
@@ -221,7 +243,10 @@ class _StripchatPlayerState extends State<_StripchatPlayer> {
               ),
             ),
           ),
-        if (_phase.index > _Phase.ready.index) _overlay(),
+        // Drawn over the browser frame: PointerInterceptor lets its buttons
+        // receive the clicks.
+        if (_phase.index > _Phase.ready.index)
+          PointerInterceptor(child: _overlay()),
       ],
     );
   }

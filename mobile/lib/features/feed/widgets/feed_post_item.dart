@@ -6,9 +6,11 @@ import '../../../core/theme/moco_spacing.dart';
 import '../../../core/utils/time_format.dart';
 import '../../../core/widgets/moco_avatar.dart';
 import '../../../shared/models/feed.dart';
+import 'feed_action_stack.dart';
 import 'feed_video.dart';
 
-/// One full-screen feed page: the media, and the author/caption overlay on top.
+/// One full-screen feed page: the media, the author/caption overlay, and the
+/// action stack (compose · follow · like · comment · share) on the right.
 class FeedPostItem extends StatelessWidget {
   const FeedPostItem({
     super.key,
@@ -16,6 +18,13 @@ class FeedPostItem extends StatelessWidget {
     required this.isActive,
     this.onAuthorTap,
     this.onMoreTap,
+    this.onCompose,
+    this.onFollow,
+    this.onLike,
+    this.onComment,
+    this.onShare,
+    this.loopVideo = true,
+    this.onVideoCompleted,
   });
 
   final Post post;
@@ -31,12 +40,42 @@ class FeedPostItem extends StatelessWidget {
   final VoidCallback? onAuthorTap;
   final VoidCallback? onMoreTap;
 
+  /// The action stack. It is shown when the feed wires these up; Follow is
+  /// additionally hidden when [onFollow] is null (own post, or an author who
+  /// cannot be followed).
+  final VoidCallback? onCompose;
+  final VoidCallback? onFollow;
+  final VoidCallback? onLike;
+  final VoidCallback? onComment;
+  final VoidCallback? onShare;
+
+  /// Passed to the video: off while the feed auto-scrolls.
+  final bool loopVideo;
+  final VoidCallback? onVideoCompleted;
+
+  bool get _hasActions =>
+      onCompose != null &&
+      onLike != null &&
+      onComment != null &&
+      onShare != null;
+
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final insets = MediaQuery.paddingOf(context);
+    // Short viewports (landscape phones, small windows) get a tighter stack
+    // so it never runs off the top of the media.
+    final compact = size.height < 700;
+
     return Stack(
       fit: StackFit.expand,
       children: [
-        _Media(post: post, isActive: isActive),
+        _Media(
+          post: post,
+          isActive: isActive,
+          loopVideo: loopVideo,
+          onVideoCompleted: onVideoCompleted,
+        ),
         // Scrim behind the overlay text. Without it, white text over a bright
         // photo is unreadable — and the feed cannot choose its own photos.
         const Positioned(
@@ -58,24 +97,54 @@ class FeedPostItem extends StatelessWidget {
         ),
         Positioned(
           left: 0,
-          right: 0,
+          // Leave the right-hand column to the action stack.
+          right: _hasActions ? (compact ? 60 : 68) : 0,
           bottom: 0,
           child: _Overlay(
             post: post,
             onAuthorTap: onAuthorTap,
             onMoreTap: onMoreTap,
+            onFollow: onFollow,
           ),
         ),
+        if (_hasActions) ...[
+          // Add post: upper right, under the sound control, apart from the
+          // engagement actions.
+          Positioned(
+            right: 10 + insets.right,
+            top: insets.top + 66,
+            child: FeedComposeButton(compact: compact, onTap: onCompose!),
+          ),
+          Positioned(
+            right: 10 + insets.right,
+            // Above the floating bottom navigation.
+            bottom: compact ? 92 : 104,
+            child: FeedActionStack(
+              post: post,
+              compact: compact,
+              onLike: onLike!,
+              onComment: onComment!,
+              onShare: onShare!,
+            ),
+          ),
+        ],
       ],
     );
   }
 }
 
 class _Media extends StatelessWidget {
-  const _Media({required this.post, required this.isActive});
+  const _Media({
+    required this.post,
+    required this.isActive,
+    this.loopVideo = true,
+    this.onVideoCompleted,
+  });
 
   final Post post;
   final bool isActive;
+  final bool loopVideo;
+  final VoidCallback? onVideoCompleted;
 
   @override
   Widget build(BuildContext context) {
@@ -88,6 +157,8 @@ class _Media extends StatelessWidget {
         key: ValueKey('feed_video_${post.id}'),
         url: post.mediaUrl!,
         isActive: isActive,
+        loop: loopVideo,
+        onCompleted: onVideoCompleted,
       );
     }
 
@@ -105,7 +176,7 @@ class _Media extends StatelessWidget {
       height: double.infinity,
       memCacheWidth: (size.width * dpr).round(),
       fadeInDuration: const Duration(milliseconds: 180),
-      placeholder: (_, __) =>  ColoredBox(
+      placeholder: (_, __) => ColoredBox(
         color: MocoColors.backgroundPrimary,
         child: Center(
           child: SizedBox(
@@ -133,7 +204,7 @@ class _MediaUnavailable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return  ColoredBox(
+    return ColoredBox(
       color: MocoColors.backgroundPrimary,
       child: Center(
         child: Column(
@@ -157,11 +228,19 @@ class _MediaUnavailable extends StatelessWidget {
 }
 
 class _Overlay extends StatelessWidget {
-  const _Overlay({required this.post, this.onAuthorTap, this.onMoreTap});
+  const _Overlay({
+    required this.post,
+    this.onAuthorTap,
+    this.onMoreTap,
+    this.onFollow,
+  });
 
   final Post post;
   final VoidCallback? onAuthorTap;
   final VoidCallback? onMoreTap;
+
+  /// Null hides Follow: your own post, or an author who cannot be followed.
+  final VoidCallback? onFollow;
 
   @override
   Widget build(BuildContext context) {
@@ -182,13 +261,20 @@ class _Overlay extends StatelessWidget {
               Flexible(
                 child: _AuthorRow(post: post, onTap: onAuthorTap),
               ),
-              const SizedBox(width: MocoSpacing.sm),
+              if (onFollow != null) ...[
+                const SizedBox(width: MocoSpacing.md),
+                FeedFollowPill(
+                  following: post.author.isFollowing,
+                  onTap: onFollow!,
+                ),
+              ],
+              const SizedBox(width: MocoSpacing.xs),
               if (onMoreTap != null)
                 IconButton(
                   key: const Key('feed_post_more'),
                   onPressed: onMoreTap,
                   visualDensity: VisualDensity.compact,
-                  icon:  Icon(
+                  icon: Icon(
                     Icons.more_horiz_rounded,
                     color: MocoColors.textPrimary,
                   ),
@@ -203,13 +289,11 @@ class _Overlay extends StatelessWidget {
               key: const Key('feed_post_caption'),
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
-              style:  TextStyle(
+              style: TextStyle(
                 color: MocoColors.textPrimary,
                 fontSize: 14.5,
                 height: 1.4,
-                shadows: [
-                  Shadow(color: Color(0x99000000), blurRadius: 8),
-                ],
+                shadows: [Shadow(color: Color(0x99000000), blurRadius: 8)],
               ),
             ),
           ],
@@ -252,7 +336,7 @@ class _AuthorRow extends StatelessWidget {
                       author.displayName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style:  TextStyle(
+                      style: TextStyle(
                         color: MocoColors.textPrimary,
                         fontSize: 15.5,
                         fontWeight: FontWeight.w700,
@@ -270,7 +354,7 @@ class _AuthorRow extends StatelessWidget {
               ),
               Text(
                 formatRelativeTime(post.createdAt),
-                style:  TextStyle(
+                style: TextStyle(
                   color: MocoColors.textSecondary,
                   fontSize: 12,
                   shadows: [Shadow(color: Color(0x99000000), blurRadius: 6)],

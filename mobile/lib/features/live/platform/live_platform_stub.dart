@@ -10,4 +10,5 @@ Widget stripchatPlayerView({
   required String modelName,
   required LivePlayerConfig config,
   required Widget fallback,
+  VoidCallback? onExit,
 }) => fallback;

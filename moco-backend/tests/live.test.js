@@ -482,7 +482,8 @@ test('GET /api/live/config exposes the player userId and the age gate, never the
     enabled: true,
     provider: 'stripcash',
     ...liveSettings.clientView(liveSettings.DEFAULTS),
-    player: { type: 'stripchat-player', userId: PLAYER_ID, strict: 1, autoplay: 'all', scriptUrl: null },
+    // No player script configured: no player (the app shows "not available").
+    player: null,
   });
   assert.equal(JSON.stringify(res.body).includes(USER_ID), false, 'the API user id stays server-side');
   assert.equal(res.body.requireAgeConfirmation, true);
@@ -729,4 +730,94 @@ test('a stored document with a bad value falls back to that default, and the age
   assert.equal(s.sort, 'viewers');
   assert.equal(s.requireAgeConfirmation, true);
   await query(`DELETE FROM app_settings WHERE key = 'live'`);
+});
+
+// --- official player (frame page) --------------------------------------------
+
+const OFFICIAL_SCRIPT = 'https://creative.whitetrafsa.com/widgets/Player/lib.js';
+
+async function withPlayerScript(fn) {
+  env.stripcash.playerScriptUrl = OFFICIAL_SCRIPT;
+  try {
+    await fn();
+  } finally {
+    env.stripcash.playerScriptUrl = '';
+  }
+}
+
+test('with the official script configured, /config describes the player (affiliate id only)', async () => {
+  await withPlayerScript(async () => {
+    const token = signToken(await createUser());
+    const { body } = await get('/api/live/config', { token });
+    assert.deepEqual(body.player, {
+      type: 'stripchat-player',
+      userId: PLAYER_ID,
+      strict: 1,
+      autoplay: 'playButton',
+      volumeControl: 1,
+      fullscreen: 1,
+      thumbFit: 'smart',
+      usePreroll: 2,
+      scriptUrl: OFFICIAL_SCRIPT,
+      framePath: '/live/player-frame',
+    });
+    for (const secret of [API_KEY, USER_ID]) {
+      assert.equal(JSON.stringify(body).includes(secret), false, 'API credentials stay server-side');
+    }
+  });
+});
+
+test('a non-https script URL is treated as not configured', async () => {
+  env.stripcash.playerScriptUrl = 'http://creative.whitetrafsa.com/widgets/Player/lib.js';
+  try {
+    const token = signToken(await createUser());
+    assert.equal((await get('/api/live/config', { token })).body.player, null);
+    const frame = await realFetch(`${baseUrl}/api/live/player-frame`);
+    assert.equal(frame.status, 404);
+  } finally {
+    env.stripcash.playerScriptUrl = '';
+  }
+});
+
+test('the player frame page: official script + affiliate id from the server, no secrets, framing locked down', async () => {
+  await withPlayerScript(async () => {
+    const res = await realFetch(`${baseUrl}/api/live/player-frame?scriptUrl=https://evil.example/x.js&userId=attacker`);
+    assert.equal(res.status, 200, 'public: an iframe cannot send the session token');
+    const html = await res.text();
+    assert.ok(html.includes(JSON.stringify(OFFICIAL_SCRIPT)), 'loads the configured official script');
+    assert.ok(html.includes(`"userId":"${PLAYER_ID}"`));
+    assert.ok(html.includes("s.id = 'SCPlayerScript'"), 'the script finds itself by this id');
+    assert.ok(html.includes('"autoplay":"playButton"') && html.includes('"usePreroll":2') && html.includes('"thumbFit":"smart"'));
+    assert.equal(html.includes('evil.example') || html.includes('attacker'), false, 'nothing is taken from the request');
+    for (const secret of [API_KEY, USER_ID]) assert.equal(html.includes(secret), false, 'API credentials never reach the page');
+    assert.equal(/m3u8|hls/i.test(html), false, 'no raw stream URLs');
+
+    const csp = res.headers.get('content-security-policy');
+    const nonce = /'nonce-([^']+)'/.exec(csp)[1];
+    assert.ok(html.includes(`<script nonce="${nonce}">`), 'the only inline script carries the nonce');
+    assert.match(csp, /frame-ancestors [^;]*http:\/\/localhost:\*/, 'outside production, localhost may frame it');
+    assert.match(csp, /default-src 'none'/);
+    assert.equal(res.headers.get('x-frame-options'), null);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+  });
+});
+
+test('in production only the allow-listed site origins may frame the player', async () => {
+  const savedProd = env.isProduction;
+  const savedOrigins = env.cors.origins;
+  env.isProduction = true;
+  env.cors.origins = ['https://lovcamx.online', 'https://admin.lovcamx.online'];
+  try {
+    await withPlayerScript(async () => {
+      const res = await realFetch(`${baseUrl}/api/live/player-frame`);
+      const csp = res.headers.get('content-security-policy');
+      assert.match(csp, /frame-ancestors https:\/\/lovcamx\.online https:\/\/admin\.lovcamx\.online(;|$)/);
+      assert.equal(csp.includes('localhost'), false);
+      const html = await res.text();
+      assert.ok(html.includes('"localhost":false'));
+    });
+  } finally {
+    env.isProduction = savedProd;
+    env.cors.origins = savedOrigins;
+  }
 });

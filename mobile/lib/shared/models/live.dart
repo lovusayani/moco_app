@@ -154,31 +154,46 @@ class LiveCardFields {
   }
 }
 
-/// Non-secret settings for the official Stripchat player. [scriptUrl] is
-/// null until the provider's player script is configured on the backend.
+/// Non-secret settings for the official Stripchat player. The player runs
+/// in an isolated page on the API's origin ([framePath], relative to the API
+/// base URL); the backend injects the script and the affiliate id there, so
+/// the app only says which model to show. [scriptUrl] is null — and the app
+/// shows its "player not available" state — until the backend has both.
 class LivePlayerConfig {
   const LivePlayerConfig({
     required this.userId,
     this.strict = 1,
-    this.autoplay = 'all',
+    this.autoplay = 'playButton',
     this.scriptUrl,
+    this.framePath = '/live/player-frame',
   });
 
   final String userId;
   final int strict;
   final String autoplay;
   final String? scriptUrl;
+  final String framePath;
+
+  /// The player can run: the backend has the official script configured.
+  bool get available => scriptUrl != null;
 
   static LivePlayerConfig? fromJson(Object? json) {
     if (json is! Map || json['userId'] is! String) return null;
     final script = json['scriptUrl'];
+    final frame = json['framePath'];
     return LivePlayerConfig(
       userId: json['userId'] as String,
       strict: _int(json['strict'], 1),
-      autoplay: json['autoplay'] is String ? json['autoplay'] as String : 'all',
+      autoplay: json['autoplay'] is String
+          ? json['autoplay'] as String
+          : 'playButton',
       scriptUrl: script is String && script.startsWith('https://')
           ? script
           : null,
+      // Only a path on the API itself; never a full URL from the network.
+      framePath: frame is String && RegExp(r'^/[a-z0-9/_-]+$').hasMatch(frame)
+          ? frame
+          : '/live/player-frame',
     );
   }
 }

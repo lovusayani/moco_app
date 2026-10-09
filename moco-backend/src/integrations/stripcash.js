@@ -253,22 +253,47 @@ async function fetchDeletedModels({ since, until } = {}) {
 }
 
 /**
- * Non-secret settings for the official Stripchat player widget
- * (new StripchatPlayer({ modelName, userId, strict, autoplay })), per the
- * provider docs. modelName is chosen per model by the client.
+ * Options for the official Stripchat player widget, per the provider docs:
+ * `new StripchatPlayer({ modelName, ...PLAYER_OPTIONS, userId }).mount(el)`.
+ * modelName is the model the viewer picked.
+ */
+const PLAYER_OPTIONS = Object.freeze({
+  strict: 1,
+  autoplay: 'playButton',
+  volumeControl: 1,
+  fullscreen: 1,
+  thumbFit: 'smart',
+  usePreroll: 2,
+});
+
+/** The configured player script, if it is an https URL. */
+function playerScriptUrl() {
+  const raw = (env.stripcash.playerScriptUrl || '').trim();
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Non-secret settings for the official Stripchat player. Null — and the app
+ * shows its "player not available" state — until both the default-link
+ * affiliate id and the provider's script URL are configured: no guessed
+ * script, no raw stream URLs.
  */
 function playerConfig() {
-  // Without the default-link affiliate id the player cannot attribute views;
-  // the app then shows its "player not available" state.
-  if (!env.stripcash.playerUserId) return null;
+  const scriptUrl = playerScriptUrl();
+  if (!env.stripcash.playerUserId || !scriptUrl) return null;
   return {
     type: 'stripchat-player',
     userId: env.stripcash.playerUserId,
-    strict: 1,
-    autoplay: 'all',
-    // The provider's player script. Null until configured: the app then
-    // shows a "player not available" state rather than guessing a URL.
-    scriptUrl: env.stripcash.playerScriptUrl || null,
+    ...PLAYER_OPTIONS,
+    scriptUrl,
+    // The isolated page that hosts the player, on the API's own origin
+    // (src/modules/live/live.player.js). Relative to the API base URL.
+    framePath: '/live/player-frame',
   };
 }
 
@@ -284,6 +309,8 @@ module.exports = {
   StripcashError,
   isConfigured,
   playerConfig,
+  playerScriptUrl,
+  PLAYER_OPTIONS,
   fetchOnlineModels,
   fetchDeletedModels,
   normalizeModel,

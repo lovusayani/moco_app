@@ -23,6 +23,7 @@ const feedRoutes = require('./modules/feed/feed.routes');
 const notificationsRoutes = require('./modules/notifications/notifications.routes');
 const { router: liveRoutes } = require('./modules/live/live.routes');
 const liveAdminRoutes = require('./modules/live/live.admin');
+const livePlayerFrame = require('./modules/live/live.player');
 const purchasesRoutes = require('./modules/purchases/purchases.routes');
 const payoutsRoutes = require('./modules/payouts/payouts.routes');
 const safetyRoutes = require('./modules/safety/safety.routes');
@@ -143,6 +144,8 @@ function createApp() {
   app.use('/api/chat', chatRoutes);
   app.use('/api/feed', feedRoutes);
   app.use('/api/notifications', notificationsRoutes);
+  // Public (no session): the iframe page hosting the official player.
+  app.use('/api/live', livePlayerFrame);
   app.use('/api/live', liveRoutes);
   app.use('/api/purchases', purchasesRoutes);
   app.use('/api/payouts', payoutsRoutes);

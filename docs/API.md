@@ -460,6 +460,23 @@ Same ownership rule as read. Permanent — there is no undo/archive state.
 
 ## Live (external live models)
 
+### `GET /api/live/player-frame`
+Public page (no session) that hosts the official Stripchat player; the web
+app embeds it in an iframe. It is served from the API's origin, so the
+provider's script never runs on the web app's origin. The server injects the
+official script (`STRIPCASH_PLAYER_SCRIPT_URL`, https only) and the
+affiliate id (`STRIPCASH_PLAYER_USER_ID`); nothing comes from the request.
+404 until both are set. The embedding page talks to it by `postMessage`:
+`{ type: 'load', modelName }` (destroys any current player with
+`app.destroy()`, then mounts `new StripchatPlayer({...}).mount(...)`) and
+`{ type: 'destroy' }`; the page reports `loading`, `mounted`, `destroyed`
+and the player's `ready`, `play`, `pause`, `volumeChange`, `muteChange`,
+`fullscreenChange` and `error` (`{ type, fatal }`) events. Player options:
+`strict 1, autoplay playButton, volumeControl 1, fullscreen 1, thumbFit
+smart, usePreroll 2`. CSP `frame-ancestors` = `CORS_ORIGINS` (plus localhost
+outside production); messages are accepted only from the embedding parent on
+one of those origins.
+
 ### `GET /api/live/config`
 Signed-in users. What the app may know about Live:
 

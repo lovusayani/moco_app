@@ -100,6 +100,9 @@ class _PlayerBody extends StatelessWidget {
                       modelName: username,
                       config: player,
                       fallback: fallback,
+                      onExit: () => context.canPop()
+                          ? context.pop()
+                          : context.go(Routes.live),
                     ),
             ),
           ),

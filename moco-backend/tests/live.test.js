@@ -427,9 +427,11 @@ test('a listing request starts the sync chain and refreshes stale data', async (
 // --- cleanup ----------------------------------------------------------------
 
 test('cleanup removes provider-deleted models and advances the cursor', async () => {
+  // Inside the default 7-day window, relative to now (fixed dates go stale).
+  const newestDeletion = new Date(Date.now() - 3600_000).toISOString();
   await syncWith([model('gone'), model('stays')]);
   deletedReply = () =>
-    json(200, { count: 2, models: [{ username: 'gone', deletedAt: '2026-10-01T10:00:00Z', reason: 'banned' }, { username: 'never_stored', deletedAt: '2026-10-02T11:00:00Z', reason: 'offline' }] });
+    json(200, { count: 2, models: [{ username: 'gone', deletedAt: new Date(Date.now() - 2 * 86400_000).toISOString(), reason: 'banned' }, { username: 'never_stored', deletedAt: newestDeletion, reason: 'offline' }] });
   await redis.del('live:stripcash:rate_slot');
 
   const result = await live.cleanup();
@@ -442,7 +444,7 @@ test('cleanup removes provider-deleted models and advances the cursor', async ()
   assert.equal(call.url.pathname, '/app/models-ext/models/deleted');
   assert.equal(call.auth, `Bearer ${API_KEY}`);
   assert.ok(call.url.searchParams.get('deleted_since'));
-  assert.equal(new Date((await live.getState()).deleted_cursor).toISOString(), '2026-10-02T11:00:00.000Z');
+  assert.equal(new Date((await live.getState()).deleted_cursor).toISOString(), newestDeletion);
 });
 
 test('cleanup removes models absent for 30 days, even without the provider', async () => {

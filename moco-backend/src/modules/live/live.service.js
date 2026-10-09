@@ -305,17 +305,26 @@ const SORTS = Object.freeze({
  * favorites / goal progress and the snapshot timestamp. `$1` is the provider
  * and `$2` the freshness window in seconds.
  */
+/**
+ * The latest fresh snapshot as rows (username, value, ts). It is expanded
+ * once with jsonb_each and hash-joined: looking keys up in the snapshot per
+ * stored row instead re-reads the whole (TOASTed) snapshot for every row,
+ * which took ~100 s per listing with the real ~12k-model list.
+ */
+const SNAPSHOT_ROWS = `
+  SELECT e.key AS username, e.value AS v, p.snapshot_ts AS ts
+    FROM live_provider_state p, jsonb_each(p.live_snapshot) e
+   WHERE p.provider = $1 AND p.last_ok_sync_at > now() - make_interval(secs => $2)`;
+
 const ONLINE_MODELS = `
   SELECT m.*, s.ts AS snapshot_ts,
-         (s.snap -> m.username ->> 0)::int AS rank_now,
-         (s.snap -> m.username ->> 1)::int AS viewers_now,
-         (s.snap -> m.username ->> 2)::int AS favorites_now,
-         (s.snap -> m.username ->> 3)::int AS goal_needed_now,
-         (s.snap -> m.username ->> 4)::int AS goal_earned_now
+         (s.v ->> 0)::int AS rank_now,
+         (s.v ->> 1)::int AS viewers_now,
+         (s.v ->> 2)::int AS favorites_now,
+         (s.v ->> 3)::int AS goal_needed_now,
+         (s.v ->> 4)::int AS goal_earned_now
     FROM live_models m
-    JOIN (SELECT live_snapshot AS snap, snapshot_ts AS ts FROM live_provider_state
-           WHERE provider = $1 AND last_ok_sync_at > now() - make_interval(secs => $2)) s
-      ON s.snap ? m.username
+    JOIN (${SNAPSHOT_ROWS}) s ON s.username = m.username
    WHERE m.provider = $1`;
 
 /** Fills the stored '{ts}' placeholder with the current snapshot timestamp. */
@@ -442,12 +451,11 @@ async function searchStored({ q, limit = 30 } = {}) {
   params.push(limit);
   const { rows } = await query(
     `SELECT m.id, m.username, m.thumb_url, m.avatar_url, m.snapshot_url, m.status, m.country, m.last_seen_at,
-            COALESCE((s.snap -> m.username ->> 1)::int, m.viewers_count) AS viewers_count, s.ts AS snapshot_ts,
-            (s.snap ? m.username) IS TRUE AS online,
-            (s.snap -> m.username ->> 0)::int AS rank_now
+            COALESCE((s.v ->> 1)::int, m.viewers_count) AS viewers_count, s.ts AS snapshot_ts,
+            (s.username IS NOT NULL) AS online,
+            (s.v ->> 0)::int AS rank_now
        FROM live_models m
-       LEFT JOIN (SELECT live_snapshot AS snap, snapshot_ts AS ts FROM live_provider_state
-                   WHERE provider = $1 AND last_ok_sync_at > now() - make_interval(secs => $2)) s ON TRUE
+       LEFT JOIN (${SNAPSHOT_ROWS}) s ON s.username = m.username
       WHERE m.provider = $1 ${filter.replace('username', 'm.username')}
       ORDER BY online DESC, rank_now ASC NULLS LAST, m.username ASC
       LIMIT $${params.length}`,
@@ -469,11 +477,10 @@ async function searchStored({ q, limit = 30 } = {}) {
 async function storedCounts() {
   const { rows } = await query(
     `SELECT count(*)::int AS stored,
-            count(*) FILTER (WHERE (s.snap ? m.username) IS TRUE)::int AS online,
-            count(*) FILTER (WHERE (s.snap ? m.username) IS TRUE AND m.status = 'public')::int AS public
+            count(*) FILTER (WHERE s.username IS NOT NULL)::int AS online,
+            count(*) FILTER (WHERE s.username IS NOT NULL AND m.status = 'public')::int AS public
        FROM live_models m
-       LEFT JOIN (SELECT live_snapshot AS snap FROM live_provider_state
-                   WHERE provider = $1 AND last_ok_sync_at > now() - make_interval(secs => $2)) s ON TRUE
+       LEFT JOIN (${SNAPSHOT_ROWS}) s ON s.username = m.username
       WHERE m.provider = $1`,
     [PROVIDER, ONLINE_WINDOW_SECONDS],
   );

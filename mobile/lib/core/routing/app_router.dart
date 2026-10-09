@@ -69,6 +69,9 @@ class Routes {
   static const listener = '/listener/:id';
   static String listenerPath(int id) => '/listener/$id';
 
+  /// A Feed post's shareable link: the Feed, opened on that post.
+  static String feedPostPath(int postId) => '$feed?post=$postId';
+
   /// The counterparty's id, same deep-link-safe shape as [listener]. The
   /// Chats row passes the [Conversation] it already has via `extra` so the
   /// thread header doesn't wait on a network round trip to show a name — but
@@ -275,8 +278,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: Routes.feed,
-            pageBuilder: (context, state) =>
-                const NoTransitionPage(child: FeedScreen()),
+            pageBuilder: (context, state) {
+              // `/feed?post=<id>` — a shared link opens on that post.
+              final postId = int.tryParse(
+                state.uri.queryParameters['post'] ?? '',
+              );
+              return NoTransitionPage(
+                child: FeedScreen(
+                  key: ValueKey('feed_screen_${postId ?? ''}'),
+                  initialPostId: postId,
+                ),
+              );
+            },
           ),
           GoRoute(
             path: Routes.profile,

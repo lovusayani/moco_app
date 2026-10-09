@@ -53,6 +53,76 @@ class FeedApi {
     );
   }
 
+  /// `GET /feed/:postId` — one post, for a shared link.
+  Future<Post> post(int postId) {
+    return _client.request(
+      () => _client.dio.get<dynamic>('/feed/$postId'),
+      (data) =>
+          Post.fromJson(Map<String, dynamic>.from((data as Map)['post'] as Map)),
+    );
+  }
+
+  /// `PUT` / `DELETE /feed/:postId/like`. Idempotent server-side; the answer
+  /// is the resulting state, which an optimistic client reconciles to.
+  Future<PostLikeState> setLiked(int postId, {required bool liked}) {
+    return _client.request(
+      () => liked
+          ? _client.dio.put<dynamic>('/feed/$postId/like')
+          : _client.dio.delete<dynamic>('/feed/$postId/like'),
+      (data) => PostLikeState.fromJson(Map<String, dynamic>.from(data as Map)),
+    );
+  }
+
+  /// `GET /feed/:postId/comments` — newest first.
+  Future<CommentPage> comments(int postId, {int? cursor}) {
+    return _client.request(
+      () => _client.dio.get<dynamic>(
+        '/feed/$postId/comments',
+        queryParameters: {if (cursor != null) 'cursor': cursor},
+      ),
+      (data) => CommentPage.fromJson(Map<String, dynamic>.from(data as Map)),
+    );
+  }
+
+  /// `POST /feed/:postId/comments`.
+  Future<CommentAdded> addComment(int postId, String body) {
+    return _client.request(
+      () => _client.dio.post<dynamic>(
+        '/feed/$postId/comments',
+        data: {'body': body},
+      ),
+      (data) {
+        final json = Map<String, dynamic>.from(data as Map);
+        return CommentAdded(
+          comment: PostComment.fromJson(
+            Map<String, dynamic>.from(json['comment'] as Map),
+          ),
+          commentCount: (json['commentCount'] as num?)?.toInt() ?? 0,
+        );
+      },
+    );
+  }
+
+  /// `DELETE /feed/:postId/comments/:commentId` — returns the new total.
+  Future<int> deleteComment(int postId, int commentId) {
+    return _client.request(
+      () => _client.dio.delete<dynamic>('/feed/$postId/comments/$commentId'),
+      (data) => ((data as Map)['commentCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  /// `POST /feed/:postId/share` — called only after a share sheet completed
+  /// or a link was copied, never on render. Returns the post's share count.
+  Future<int> recordShare(int postId, {required String method}) {
+    return _client.request(
+      () => _client.dio.post<dynamic>(
+        '/feed/$postId/share',
+        data: {'method': method},
+      ),
+      (data) => ((data as Map)['shareCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
   /// `DELETE /feed/:postId` — the caller's own post only. Idempotent.
   Future<void> deletePost(int postId) {
     return _client.request(

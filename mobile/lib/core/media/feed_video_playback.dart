@@ -23,6 +23,11 @@ abstract class FeedVideoPlayback implements Listenable {
   bool get isInitialized;
   bool get isPlaying;
 
+  /// True once a non-looping video has played to its end. Never true for
+  /// media whose length is unknown (a stream, or a file without duration
+  /// metadata) — the player cannot know it has reached an end it cannot see.
+  bool get isCompleted;
+
   /// Null until initialized, and null for media whose size never resolves.
   double? get aspectRatio;
 
@@ -67,6 +72,13 @@ class _VideoPlayerPlayback implements FeedVideoPlayback {
 
   @override
   bool get isPlaying => _controller.value.isPlaying;
+
+  @override
+  bool get isCompleted =>
+      // video_player reports an unknown (infinite) web duration as a large
+      // negative one, which its position clamp then reads as "completed" on
+      // the first tick.
+      _controller.value.isCompleted && _controller.value.duration > Duration.zero;
 
   @override
   double? get aspectRatio =>

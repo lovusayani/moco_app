@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/feed_api.dart';
+import '../../core/api/listeners_api.dart';
 import '../../core/errors/api_exception.dart';
 import '../../core/providers.dart';
 import '../../shared/models/feed.dart';
@@ -12,6 +13,7 @@ class FeedState {
     this.isLoadingMore = false,
     this.hasMore = true,
     this.error,
+    this.pinned,
   });
 
   /// Newest first, exactly as the server ordered them.
@@ -21,11 +23,23 @@ class FeedState {
   final bool hasMore;
   final ApiException? error;
 
-  bool get isEmpty => !isLoading && error == null && posts.isEmpty;
+  /// A post opened from a shared link. Shown first, ahead of the feed, and
+  /// never duplicated if the feed also contains it.
+  final Post? pinned;
+
+  /// What the pager shows: the pinned post (if any), then the feed.
+  List<Post> get visiblePosts {
+    final first = pinned;
+    if (first == null) return posts;
+    return [first, ...posts.where((p) => p.id != first.id)];
+  }
+
+  bool get isEmpty =>
+      !isLoading && error == null && posts.isEmpty && pinned == null;
 
   /// An error with nothing to show is a full-screen retry; an error with posts
   /// already on screen must not blank the feed the user is looking at.
-  bool get isFatalError => error != null && posts.isEmpty;
+  bool get isFatalError => error != null && visiblePosts.isEmpty;
 
   FeedState copyWith({
     List<Post>? posts,
@@ -34,6 +48,8 @@ class FeedState {
     bool? hasMore,
     ApiException? error,
     bool clearError = false,
+    Post? pinned,
+    bool clearPinned = false,
   }) {
     return FeedState(
       posts: posts ?? this.posts,
@@ -41,6 +57,7 @@ class FeedState {
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       hasMore: hasMore ?? this.hasMore,
       error: clearError ? null : (error ?? this.error),
+      pinned: clearPinned ? null : (pinned ?? this.pinned),
     );
   }
 }
@@ -51,11 +68,15 @@ class FeedState {
 /// message is, so there is no socket subscription here and no second
 /// connection. Pull-to-refresh and pagination are the whole update model.
 class FeedController extends StateNotifier<FeedState> {
-  FeedController(this._api) : super(const FeedState()) {
+  FeedController(this._api, {this.listeners}) : super(const FeedState()) {
     load();
   }
 
   final FeedApi _api;
+
+  /// The existing listener follow API — Follow in the feed is that follow,
+  /// not a second system.
+  final ListenersApi? listeners;
 
   /// The id of the last post held, sent as `cursor`. Null means "from the top".
   int? _cursor;
@@ -76,8 +97,7 @@ class FeedController extends StateNotifier<FeedState> {
     for (final post in [...existing, ...incoming]) {
       byId[post.id] = post;
     }
-    final merged = byId.values.toList()
-      ..sort((a, b) => b.id.compareTo(a.id));
+    final merged = byId.values.toList()..sort((a, b) => b.id.compareTo(a.id));
     return merged;
   }
 
@@ -138,10 +158,165 @@ class FeedController extends StateNotifier<FeedState> {
   void removeLocally(int postId) {
     state = state.copyWith(
       posts: state.posts.where((p) => p.id != postId).toList(),
+      clearPinned: state.pinned?.id == postId,
     );
+  }
+
+  Post? postById(int postId) {
+    for (final post in state.visiblePosts) {
+      if (post.id == postId) return post;
+    }
+    return null;
+  }
+
+  /// Applies [change] to the post wherever it is held (feed and pinned).
+  void _updatePost(int postId, Post Function(Post) change) {
+    final pinned = state.pinned;
+    state = state.copyWith(
+      posts: [for (final p in state.posts) p.id == postId ? change(p) : p],
+      pinned: pinned != null && pinned.id == postId ? change(pinned) : null,
+    );
+  }
+
+  // --- a shared link ---------------------------------------------------------
+
+  /// Loads one post for a shared link and pins it to the top. Returns false
+  /// when it is gone (deleted, removed, or blocked either way).
+  Future<bool> openPost(int postId) async {
+    try {
+      final post = await _api.post(postId);
+      if (!mounted) return false;
+      state = state.copyWith(pinned: post);
+      return true;
+    } on ApiException {
+      return false;
+    }
+  }
+
+  void clearPinned() => state = state.copyWith(clearPinned: true);
+
+  // --- likes -----------------------------------------------------------------
+
+  /// What the user last asked for, per post, while a request is in flight.
+  final _likeWanted = <int, bool>{};
+  final _likeInFlight = <int>{};
+
+  /// Optimistic like toggle. Taps are applied at once; requests are sent one
+  /// at a time per post, and a tap that lands while one is in flight is sent
+  /// after it — so the server always ends on the user's last choice and the
+  /// count is the server's, never double-counted.
+  void toggleLike(int postId) {
+    final post = postById(postId);
+    if (post == null) return;
+    final want = !post.liked;
+    _updatePost(
+      postId,
+      (p) => p.copyWith(
+        liked: want,
+        likeCount: (p.likeCount + (want ? 1 : -1)).clamp(0, 1 << 31),
+      ),
+    );
+    _likeWanted[postId] = want;
+    if (!_likeInFlight.contains(postId)) _syncLike(postId);
+  }
+
+  Future<void> _syncLike(int postId) async {
+    _likeInFlight.add(postId);
+    try {
+      while (true) {
+        final want = _likeWanted[postId]!;
+        final result = await _api.setLiked(postId, liked: want);
+        if (!mounted) return;
+        if (_likeWanted[postId] == want) {
+          _updatePost(
+            postId,
+            (p) => p.copyWith(liked: result.liked, likeCount: result.likeCount),
+          );
+          return;
+        }
+      }
+    } on ApiException {
+      if (!mounted) return;
+      // Put back what the server still has.
+      final want = _likeWanted[postId]!;
+      _updatePost(
+        postId,
+        (p) => p.copyWith(
+          liked: !want,
+          likeCount: (p.likeCount + (want ? -1 : 1)).clamp(0, 1 << 31),
+        ),
+      );
+    } finally {
+      _likeInFlight.remove(postId);
+      _likeWanted.remove(postId);
+    }
+  }
+
+  // --- follow ----------------------------------------------------------------
+
+  final _followInFlight = <int>{};
+
+  /// Follow / unfollow the post's author through the existing listener follow
+  /// API. Applied to every post by that author at once; reverted (and the
+  /// error rethrown for the screen to show) if the server refuses.
+  Future<void> toggleFollow(int postId) async {
+    final post = postById(postId);
+    final listeners = this.listeners;
+    if (post == null || listeners == null || !post.author.canFollow) return;
+    final authorId = post.author.id;
+    if (_followInFlight.contains(authorId)) return;
+    final want = !post.author.isFollowing;
+
+    void apply(bool following) {
+      final pinned = state.pinned;
+      Post set(Post p) => p.author.id == authorId
+          ? p.copyWith(author: p.author.copyWith(isFollowing: following))
+          : p;
+      state = state.copyWith(
+        posts: [for (final p in state.posts) set(p)],
+        pinned: pinned == null ? null : set(pinned),
+      );
+    }
+
+    apply(want);
+    _followInFlight.add(authorId);
+    try {
+      final result = await listeners.setRelation(
+        listenerId: authorId,
+        kind: 'follow',
+        active: want,
+      );
+      if (mounted) apply(result.active);
+    } on ApiException {
+      if (mounted) apply(!want);
+      rethrow;
+    } finally {
+      _followInFlight.remove(authorId);
+    }
+  }
+
+  // --- comments and shares ---------------------------------------------------
+
+  /// The server's comment total after the comments sheet added or deleted one.
+  void setCommentCount(int postId, int count) =>
+      _updatePost(postId, (p) => p.copyWith(commentCount: count));
+
+  /// Records a share the user actually made (a completed share sheet or a
+  /// copied link) and adopts the server's count. Best-effort: a failure here
+  /// never undoes the share itself.
+  Future<void> recordShare(int postId, {required String method}) async {
+    try {
+      final count = await _api.recordShare(postId, method: method);
+      if (mounted) _updatePost(postId, (p) => p.copyWith(shareCount: count));
+    } on ApiException {
+      // The link was shared; only the counter missed it.
+    }
   }
 }
 
 final feedControllerProvider = StateNotifierProvider<FeedController, FeedState>(
-  (ref) => FeedController(ref.watch(feedApiProvider)),
+  (ref) => FeedController(
+    ref.watch(feedApiProvider),
+    listeners: ref.watch(listenersApiProvider),
+  ),
 );

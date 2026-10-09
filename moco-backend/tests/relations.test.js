@@ -42,7 +42,8 @@ async function call(method, path, { token, body } = {}) {
 async function approvedListener(name = 'Priya') {
   const user = await createUser({ listener: true });
   await db.query('UPDATE users SET display_name = $2 WHERE id = $1', [user.id, name]);
-  await db.query('UPDATE listener_profiles SET is_online = TRUE WHERE user_id = $1', [user.id]);
+  // Eligible = approved KYC + the minimum photo count (photos are not under test).
+  await db.query('UPDATE listener_profiles SET is_online = TRUE, photo_count = 3 WHERE user_id = $1', [user.id]);
   return user;
 }
 

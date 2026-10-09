@@ -7,6 +7,7 @@ import '../../core/theme/moco_theme.dart';
 import '../../core/widgets/moco_background.dart';
 import '../../core/widgets/moco_surfaces.dart';
 import 'app_settings_controller.dart';
+import '../feed/feed_preferences.dart';
 import '../../core/routing/app_router.dart';
 import '../../core/routing/pop_or_go.dart';
 
@@ -47,6 +48,10 @@ class AppSettingsScreen extends ConsumerWidget {
               MocoSectionHeader(title: 'Discovery layout'),
               SizedBox(height: MocoSpacing.md),
               _DiscoveryLayoutSection(),
+              SizedBox(height: MocoSpacing.xl),
+              MocoSectionHeader(title: 'Feed'),
+              SizedBox(height: MocoSpacing.md),
+              _FeedSection(),
             ],
           ),
         ),
@@ -217,6 +222,46 @@ class _DiscoveryLayoutSection extends ConsumerWidget {
             onTap: () => controller.setColumns(3),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FeedSection extends ConsumerWidget {
+  const _FeedSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final enabled = ref.watch(feedAutoScrollProvider);
+
+    return MocoGlassCard(
+      padding: const EdgeInsets.symmetric(vertical: MocoSpacing.xs),
+      // Its own Material so the tile's ink is not hidden by the glass card.
+      child: Material(
+        type: MaterialType.transparency,
+        child: SwitchListTile.adaptive(
+          key: const Key('app_settings_feed_auto_scroll'),
+          value: enabled,
+          onChanged: (value) =>
+              ref.read(feedAutoScrollProvider.notifier).setEnabled(value),
+          activeTrackColor: MocoColors.accentPrimary,
+          secondary: Icon(
+            Icons.swipe_up_alt_rounded,
+            color: enabled ? MocoColors.accentSoft : MocoColors.textSecondary,
+          ),
+          title: Text(
+            'Feed auto-scroll',
+            style: TextStyle(
+              color: MocoColors.textPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            'Moves to the next post when a video ends, or after 5 seconds on '
+            'a photo. Touching the feed pauses it until you come back.',
+            style: TextStyle(color: MocoColors.textSecondary, fontSize: 12.5),
+          ),
+        ),
       ),
     );
   }

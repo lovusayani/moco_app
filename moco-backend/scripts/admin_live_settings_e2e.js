@@ -129,7 +129,7 @@ async function main() {
   await page.waitForFunction((n) => [...document.querySelectorAll('[data-results] [data-add="hidden"]')].some((b) => b.dataset.name === n), { timeout: 10000 }, hideMe);
   await page.evaluate((n) => [...document.querySelectorAll('[data-results] [data-add="hidden"]')].find((b) => b.dataset.name === n).click(), hideMe);
   await waitPreview();
-  check('"All eligible" ignores the hidden list', (await previewNames()).includes(hideMe));
+  check('a hidden model stays hidden even in "All eligible"', !(await previewNames()).includes(hideMe), await previewNames());
   await clickEl('input[name="ls-mode"][value="all_except_blocked"]');
   await waitPreview();
   check('"All except hidden" removes the hidden model', !(await previewNames()).includes(hideMe), await previewNames());

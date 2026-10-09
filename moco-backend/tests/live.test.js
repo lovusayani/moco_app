@@ -95,6 +95,7 @@ test.after(async () => {
 });
 
 test.beforeEach(async () => {
+  await live.waitForRefresh();
   providerCalls.length = 0;
   onlineReply = () => json(200, { count: 0, total: 0, models: [] });
   deletedReply = () => json(200, { count: 0, models: [] });
@@ -820,4 +821,145 @@ test('in production only the allow-listed site origins may frame the player', as
     env.isProduction = savedProd;
     env.cors.origins = savedOrigins;
   }
+});
+
+// --- cold first visit: stale-while-revalidate ---------------------------------
+
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+const ageSnapshot = (seconds) =>
+  query(`UPDATE live_provider_state SET last_ok_sync_at = now() - make_interval(secs => $1)`, [seconds]);
+
+async function timedGet(path, opts) {
+  const started = Date.now();
+  const res = await get(path, opts);
+  return { ...res, ms: Date.now() - started };
+}
+
+test('warm request: fresh snapshot, answered without calling the provider', async () => {
+  await syncWith([model('w1'), model('w2')]);
+  providerCalls.length = 0;
+  const token = signToken(await createUser());
+  const res = await get('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
+  assert.equal(res.body.freshness, 'fresh');
+  assert.deepEqual(names(res), ['w1', 'w2']);
+  assert.equal(providerCalls.length, 0);
+});
+
+test('cold request with a recent snapshot: answered at once from it, refreshed in the background', async () => {
+  await syncWith([model('old_a'), model('old_b')]);
+  await ageSnapshot(120);
+  await redis.del('live:stripcash:rate_slot');
+  // The provider now takes far longer than a client would wait.
+  onlineReply = async () => {
+    await delay(1500);
+    return json(200, { count: 1, total: 1, models: [model('new_c')] });
+  };
+  const token = signToken(await createUser());
+
+  const first = await timedGet('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
+  assert.equal(first.body.freshness, 'stale');
+  assert.deepEqual(names(first), ['old_a', 'old_b'], 'the last good list, geobans applied');
+  assert.ok(first.ms < 1200, `answered without waiting for the provider (${first.ms} ms)`);
+
+  await live.waitForRefresh();
+  const next = await get('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
+  assert.equal(next.body.freshness, 'fresh');
+  assert.deepEqual(names(next), ['new_c'], 'the next request sees the refreshed list');
+});
+
+test('stale-while-revalidate still applies geobans at request time', async () => {
+  await syncWith([
+    model('ok_model'),
+    model('ua_banned', { geobans: { blockedCountries: ['ua'], blockedRegions: {}, blockedLanguages: [] } }),
+  ]);
+  await ageSnapshot(200);
+  await redis.del('live:stripcash:rate_slot');
+  onlineReply = async () => {
+    await delay(500);
+    return json(503, {});
+  };
+  const token = signToken(await createUser());
+  const res = await get('/api/live/models', { token, headers: { 'cf-ipcountry': 'UA' } });
+  assert.equal(res.body.freshness, 'stale');
+  assert.deepEqual(names(res), ['ok_model']);
+});
+
+test('a snapshot older than the 5-minute window is never served', async () => {
+  await syncWith([model('too_old')]);
+  await ageSnapshot(live.SERVE_STALE_SECONDS + 30);
+  await redis.del('live:stripcash:rate_slot');
+  live.tuning.coldWaitMs = 300;
+  onlineReply = async () => {
+    await delay(1500);
+    return json(200, { count: 1, total: 1, models: [model('fresh_one')] });
+  };
+  try {
+    const token = signToken(await createUser());
+    const res = await get('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
+    assert.equal(res.body.freshness, 'warming');
+    assert.deepEqual(res.body.models, [], 'stale-data fail-safe');
+  } finally {
+    live.tuning.coldWaitMs = live.COLD_WAIT_MS;
+  }
+});
+
+test('cold request with no stored list and a quick provider: waits briefly and answers fresh', async () => {
+  onlineReply = async () => {
+    await delay(300);
+    return json(200, { count: 1, total: 1, models: [model('first_ever')] });
+  };
+  const token = signToken(await createUser());
+  const res = await get('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
+  assert.equal(res.body.freshness, 'fresh');
+  assert.deepEqual(names(res), ['first_ever']);
+});
+
+test('provider refresh longer than a client would wait: "warming" first, models once it lands', async () => {
+  live.tuning.coldWaitMs = 300;
+  onlineReply = async () => {
+    await delay(1500);
+    return json(200, { count: 1, total: 1, models: [model('slow_one')] });
+  };
+  try {
+    const token = signToken(await createUser());
+    const first = await timedGet('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
+    assert.equal(first.body.freshness, 'warming');
+    assert.equal(first.body.retryAfterMs, 3000);
+    assert.deepEqual(first.body.models, []);
+    assert.ok(first.ms < 1200, `answered before the provider finished (${first.ms} ms)`);
+
+    // A second request while it is still running does not start another one.
+    const again = await get('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
+    assert.equal(again.body.freshness, 'warming');
+    assert.equal(providerCalls.length, 1);
+
+    await live.waitForRefresh();
+    const ready = await get('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
+    assert.equal(ready.body.freshness, 'fresh');
+    assert.deepEqual(names(ready), ['slow_one']);
+  } finally {
+    live.tuning.coldWaitMs = live.COLD_WAIT_MS;
+  }
+});
+
+test('provider failure with a recent list: the list is still served', async () => {
+  await syncWith([model('kept_a')]);
+  await ageSnapshot(90);
+  await redis.del('live:stripcash:rate_slot');
+  onlineReply = () => json(503, {});
+  const token = signToken(await createUser());
+  const res = await get('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
+  assert.equal(res.body.freshness, 'stale');
+  assert.deepEqual(names(res), ['kept_a']);
+  await live.waitForRefresh();
+  assert.equal((await live.getState()).last_sync_ok, false, 'the failure is recorded');
+});
+
+test('provider failure with no usable list: "unavailable", no models', async () => {
+  onlineReply = () => json(503, {});
+  const token = signToken(await createUser());
+  const res = await get('/api/live/models', { token, headers: { 'cf-ipcountry': 'DE' } });
+  assert.equal(res.body.freshness, 'unavailable');
+  assert.deepEqual(res.body.models, []);
+  assert.equal(res.body.available, true, 'Live is configured; the provider is just down');
 });

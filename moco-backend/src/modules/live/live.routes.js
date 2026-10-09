@@ -39,13 +39,19 @@ router.get(
   }),
 );
 
-/** Ensures the sync is running and the stored list is fresh enough. */
+/**
+ * Keeps the 30-second sync chain alive while people browse, and decides how
+ * fresh this answer can be without making the viewer wait for the provider
+ * (live.prepareListing: fresh / stale-while-revalidate / warming /
+ * unavailable).
+ */
 async function keepFresh() {
   await live.noteDemand();
-  // Keep the 30-second chain alive while people browse; if it had gone idle,
-  // refresh now rather than serve an empty or stale page.
   await jobs.ensureLiveSync().catch((err) => logger.warn({ err: { message: err.message } }, 'live sync enqueue failed'));
-  await live.syncIfStale().catch((err) => logger.warn({ err: { message: err.message } }, 'live inline sync failed'));
+  return live.prepareListing().catch((err) => {
+    logger.warn({ err: { message: err.message } }, 'live listing preparation failed');
+    return { freshness: 'warming', retryAfterMs: 3000 };
+  });
 }
 
 router.get(
@@ -72,13 +78,23 @@ router.get(
       return;
     }
 
-    await keepFresh();
+    const plan = await keepFresh();
+    const state = await live.getState();
+    // No usable snapshot yet: answer now and let the client retry, instead of
+    // holding the request open for the whole provider refresh.
+    if (!plan.windowSeconds) {
+      res.json({
+        ...body,
+        freshness: plan.freshness,
+        ...(plan.retryAfterMs ? { retryAfterMs: plan.retryAfterMs } : {}),
+        updatedAt: state?.last_ok_sync_at ?? null,
+        models: [],
+      });
+      return;
+    }
     const viewer = live.viewerFromRequest(req);
-    const [models, state] = await Promise.all([
-      live.list(viewer, { ...req.query, limit, sort }, settings),
-      live.getState(),
-    ]);
-    res.json({ ...body, updatedAt: state?.last_sync_at ?? null, models });
+    const models = await live.list(viewer, { ...req.query, limit, sort, windowSeconds: plan.windowSeconds }, settings);
+    res.json({ ...body, freshness: plan.freshness, updatedAt: state?.last_ok_sync_at ?? null, models });
   }),
 );
 

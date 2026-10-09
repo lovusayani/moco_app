@@ -36,6 +36,18 @@ const SEEN_REFRESH_MS = 6 * 3600 * 1000;
 const KNOWN_STATUSES = Object.freeze(['public', 'p2p', 'private', 'groupShow', 'virtualPrivate', 'p2pVoice']);
 /** A listing request triggers a sync itself when the data is older than this. */
 const STALE_AFTER_SECONDS = 45;
+/**
+ * Stale-while-revalidate: a listing request may be answered from the last
+ * good snapshot for up to this long after it was taken, while a refresh runs
+ * in the background. Geobans, status and curation are still applied at
+ * request time; only "who is online" may be up to this old. Older than this
+ * the snapshot is never served (stale-data fail-safe).
+ */
+const SERVE_STALE_SECONDS = 300;
+/** With no usable snapshot, a request waits this long for the refresh before answering "warming". */
+const COLD_WAIT_MS = 8000;
+/** Adjustable in tests only. */
+const tuning = { coldWaitMs: COLD_WAIT_MS };
 /** Provider terms: remove everything about a model absent this long. */
 const ABSENT_RETENTION_DAYS = 30;
 /** Someone browsed Live recently: keep the 30-second sync chain running. */
@@ -231,6 +243,69 @@ async function syncIfStale() {
   return sync();
 }
 
+let inflight = null;
+
+/**
+ * Starts a provider refresh unless this instance already has one running,
+ * and keeps the function alive for it after the response (Vercel waitUntil).
+ * Across instances the provider's 5-second request slot still applies.
+ * Resolves with sync()'s result and never rejects.
+ */
+function refreshInBackground() {
+  if (!inflight) {
+    inflight = sync()
+      .catch((err) => {
+        logger.warn({ err: { message: err.message } }, 'live background refresh failed');
+        return { status: 'failed', error: 'error' };
+      })
+      .finally(() => {
+        inflight = null;
+      });
+    try {
+      // eslint-disable-next-line global-require
+      require('@vercel/functions').waitUntil(inflight);
+    } catch {
+      // Not on Vercel: the process stays up anyway.
+    }
+  }
+  return inflight;
+}
+
+const okAgeSeconds = (state) =>
+  state?.last_ok_sync_at ? (Date.now() - new Date(state.last_ok_sync_at).getTime()) / 1000 : Infinity;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * How to answer a listing request without making the viewer wait for the
+ * provider (its full ~12k-model list takes ~10 s or more to refresh):
+ *
+ *   fresh   — snapshot < 45 s old: list normally.
+ *   stale   — 45 s – 5 min old: list from it now (online window widened to
+ *             5 min), refresh in the background for the next request.
+ *   warming — no usable snapshot and the refresh did not finish within
+ *             COLD_WAIT_MS: no models now; the client retries shortly.
+ *   unavailable — no usable snapshot and the provider refresh failed.
+ *
+ * Returns { freshness, windowSeconds?, retryAfterMs? }.
+ */
+async function prepareListing({ coldWaitMs = tuning.coldWaitMs } = {}) {
+  if (!stripcash.isConfigured()) return { freshness: 'unavailable' };
+  const age = okAgeSeconds(await getState());
+  if (age < STALE_AFTER_SECONDS) return { freshness: 'fresh', windowSeconds: ONLINE_WINDOW_SECONDS };
+
+  const refresh = refreshInBackground();
+  if (age <= SERVE_STALE_SECONDS) return { freshness: 'stale', windowSeconds: SERVE_STALE_SECONDS };
+
+  const result = await Promise.race([refresh, sleep(coldWaitMs).then(() => null)]);
+  if (result?.status === 'synced') return { freshness: 'fresh', windowSeconds: ONLINE_WINDOW_SECONDS };
+  if (result === null || result.status === 'rate_limited') {
+    // Still running here, or another instance is refreshing right now.
+    return { freshness: 'warming', retryAfterMs: 3000 };
+  }
+  return { freshness: 'unavailable' };
+}
+
 // --- viewer / geobans -------------------------------------------------------
 
 const UNKNOWN_COUNTRIES = new Set(['', 'xx', 't1', 'a1', 'a2', 'o1']);
@@ -385,9 +460,14 @@ const NO_CURATION = Object.freeze({
  * Request filters: language, country, tag. Sort: the request's, else the
  * admin's default.
  */
-async function list(viewer, { limit = 24, offset = 0, language, country, tag, sort } = {}, settings = NO_CURATION) {
+async function list(
+  viewer,
+  { limit = 24, offset = 0, language, country, tag, sort, windowSeconds = ONLINE_WINDOW_SECONDS } = {},
+  settings = NO_CURATION,
+) {
   const sel = settings.selection || NO_CURATION.selection;
-  const params = [PROVIDER, ONLINE_WINDOW_SECONDS];
+  // Never wider than the stale-while-revalidate bound.
+  const params = [PROVIDER, Math.min(windowSeconds, SERVE_STALE_SECONDS)];
   const p = (value) => {
     params.push(value);
     return `$${params.length}`;
@@ -489,7 +569,6 @@ async function storedCounts() {
 
 // --- cleanup ----------------------------------------------------------------
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Provider terms: remove every stored model the provider reports deleted,
@@ -548,6 +627,13 @@ module.exports = {
   KNOWN_STATUSES,
   contentHash,
   STALE_AFTER_SECONDS,
+  SERVE_STALE_SECONDS,
+  COLD_WAIT_MS,
+  prepareListing,
+  refreshInBackground,
+  tuning,
+  /** Resolves when this instance has no refresh running (tests). */
+  waitForRefresh: () => inflight || Promise.resolve(),
   ABSENT_RETENTION_DAYS,
   SORTS,
   sync,

@@ -331,6 +331,8 @@ class LiveModelsPage {
     required this.models,
     this.limit = 24,
     this.offset = 0,
+    this.freshness = 'fresh',
+    this.retryAfterMs,
   });
 
   /// False when Live is off or the provider is not configured.
@@ -339,12 +341,27 @@ class LiveModelsPage {
   final int limit;
   final int offset;
 
+  /// The backend's answer to "how current is this list": `fresh`, `stale`
+  /// (the last good list, being refreshed), `warming` (no list yet — ask
+  /// again after [retryAfterMs]) or `unavailable` (the provider is down and
+  /// there is no recent list).
+  final String freshness;
+  final int? retryAfterMs;
+
+  bool get isWarming => freshness == 'warming';
+  bool get isUnavailable => freshness == 'unavailable';
+
   factory LiveModelsPage.fromJson(Map<String, dynamic> json) {
     final raw = json['models'];
+    final retry = json['retryAfterMs'];
     return LiveModelsPage(
       available: json['available'] == true,
       limit: _int(json['limit'], 24),
       offset: _int(json['offset'], 0),
+      freshness: json['freshness'] is String
+          ? json['freshness'] as String
+          : 'fresh',
+      retryAfterMs: retry is num ? retry.toInt() : null,
       models: raw is List
           ? raw
                 .whereType<Map>()

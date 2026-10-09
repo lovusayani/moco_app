@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+
 import '../../shared/models/live.dart';
 import 'api_client.dart';
 
@@ -17,12 +19,16 @@ class LiveApi {
     );
   }
 
-  /// `GET /live/models` — one page, in the backend's order.
+  /// `GET /live/models` — one page, in the backend's order. A longer wait
+  /// than other calls: after Live has been idle the backend may spend a few
+  /// seconds refreshing the provider's list before it answers (it answers
+  /// "warming" rather than make the app wait for the whole refresh).
   Future<LiveModelsPage> models({required int limit, int offset = 0}) {
     return _client.request(
       () => _client.dio.get<dynamic>(
         '/live/models',
         queryParameters: {'limit': limit, 'offset': offset},
+        options: Options(receiveTimeout: const Duration(seconds: 45)),
       ),
       (data) => LiveModelsPage.fromJson(Map<String, dynamic>.from(data as Map)),
     );

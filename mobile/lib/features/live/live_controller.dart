@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/live_api.dart';
@@ -76,15 +78,63 @@ class LiveModelsController extends StateNotifier<LiveModelsState> {
   final LiveApi _api;
   final int pageSize;
 
+  /// While the backend is still fetching the provider's list for the first
+  /// time ("warming"), keep showing the loading state and ask again — up to
+  /// about a minute — instead of failing early.
+  static const maxWarmingRetries = 20;
+
+  Timer? _retry;
+  int _warmingRetries = 0;
+
+  @override
+  void dispose() {
+    _retry?.cancel();
+    super.dispose();
+  }
+
   Future<void> load() async {
+    _retry?.cancel();
+    _warmingRetries = 0;
     state = state.copyWith(
       isLoading: true,
       clearError: true,
       clearLoadMoreError: true,
     );
+    await _loadFirstPage();
+  }
+
+  Future<void> _loadFirstPage() async {
     try {
       final page = await _api.models(limit: pageSize);
       if (!mounted) return;
+      if (page.isWarming) {
+        if (_warmingRetries++ < maxWarmingRetries) {
+          state = state.copyWith(isLoading: true);
+          _retry = Timer(
+            Duration(milliseconds: page.retryAfterMs ?? 3000),
+            () => mounted ? _loadFirstPage() : null,
+          );
+          return;
+        }
+        state = state.copyWith(
+          isLoading: false,
+          error: const ApiException(
+            kind: ApiErrorKind.timeout,
+            message: 'Live shows are taking longer than usual to load. Please try again.',
+          ),
+        );
+        return;
+      }
+      if (page.isUnavailable && page.models.isEmpty) {
+        state = state.copyWith(
+          isLoading: false,
+          error: const ApiException(
+            kind: ApiErrorKind.server,
+            message: 'The live provider isn’t reachable right now. Please try again in a moment.',
+          ),
+        );
+        return;
+      }
       state = LiveModelsState(
         models: page.models,
         available: page.available,

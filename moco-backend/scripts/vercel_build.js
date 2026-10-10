@@ -80,4 +80,4 @@ fs.writeFileSync(
 `,
 );
 
-console.log(`[moco-api build] ok (${migrations.length} migrations)`);
+console.log(`[moco-api build] ok — ${migrations.length} migrations indexed`);

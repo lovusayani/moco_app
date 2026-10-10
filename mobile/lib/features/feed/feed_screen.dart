@@ -327,6 +327,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                 ),
               ),
             ),
+          Positioned(
+            left: MocoSpacing.lg,
+            top: MediaQuery.paddingOf(context).top + MocoSpacing.md,
+            child: const _FeedHomeButton(),
+          ),
         ],
       ),
     );
@@ -525,6 +530,81 @@ class _FeedLoading extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _FeedHomeButton extends StatefulWidget {
+  const _FeedHomeButton();
+
+  @override
+  State<_FeedHomeButton> createState() => _FeedHomeButtonState();
+}
+
+class _FeedHomeButtonState extends State<_FeedHomeButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final canPop = Navigator.of(context).canPop();
+
+    return Semantics(
+      button: true,
+      label: canPop ? 'Back' : 'Home',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          key: const Key('feed_home_button'),
+          onTapDown: (_) => setState(() => _pressed = true),
+          onTapUp: (_) => setState(() => _pressed = false),
+          onTapCancel: () => setState(() => _pressed = false),
+          onTap: () {
+            if (canPop) {
+              Navigator.of(context).pop();
+            } else {
+              context.go(Routes.discovery);
+            }
+          },
+          child: AnimatedScale(
+            scale: _pressed ? 0.88 : 1.0,
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOutBack,
+            child: Container(
+              width: 38,
+              height: 38,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withValues(alpha: 0.14),
+                    Colors.white.withValues(alpha: 0.05),
+                  ],
+                ),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.15),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.22),
+                    blurRadius: 12,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+              child: Icon(
+                canPop
+                    ? Icons.arrow_back_ios_new_rounded
+                    : Icons.home_rounded,
+                color: Colors.white,
+                size: 17,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

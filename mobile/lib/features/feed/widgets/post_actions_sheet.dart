@@ -97,10 +97,96 @@ class _PostActionsSheet extends StatelessWidget {
   }
 
   Future<void> _deletePost(BuildContext context) async {
-    // Capture the messenger BEFORE popping: afterwards this sheet's context is
-    // defunct, and a toast looked up through it would silently never appear.
     final messenger = ScaffoldMessenger.maybeOf(context);
-    Navigator.of(context).pop();
+    final navigator = Navigator.of(context);
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: MocoColors.backgroundElevated,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(MocoRadius.xl)),
+      ),
+      builder: (confirmContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(MocoSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 38,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: MocoSpacing.lg),
+                decoration: BoxDecoration(
+                  color: MocoColors.borderStrong,
+                  borderRadius: BorderRadius.circular(MocoRadius.pill),
+                ),
+              ),
+              Icon(Icons.delete_outline_rounded,
+                  color: MocoColors.danger, size: 36),
+              const SizedBox(height: MocoSpacing.md),
+              Text(
+                'Delete this post?',
+                style: TextStyle(
+                  color: MocoColors.textPrimary,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: MocoSpacing.sm),
+              Text(
+                'This action cannot be undone.',
+                style: TextStyle(
+                  color: MocoColors.textSecondary,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: MocoSpacing.xl),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(confirmContext).pop(false),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: MocoColors.textPrimary,
+                        side: BorderSide(color: MocoColors.borderStrong),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: MocoSpacing.md),
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(MocoRadius.pill),
+                        ),
+                      ),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: MocoSpacing.md),
+                  Expanded(
+                    child: FilledButton(
+                      key: const Key('post_delete_confirm'),
+                      onPressed: () => Navigator.of(confirmContext).pop(true),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: MocoColors.danger,
+                        foregroundColor: Colors.white,
+                        padding:
+                            const EdgeInsets.symmetric(vertical: MocoSpacing.md),
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(MocoRadius.pill),
+                        ),
+                      ),
+                      child: const Text('Delete'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (confirmed != true) return;
+    navigator.pop();
     try {
       await parentRef.read(feedApiProvider).deletePost(post.id);
       parentRef.read(feedControllerProvider.notifier).removeLocally(post.id);

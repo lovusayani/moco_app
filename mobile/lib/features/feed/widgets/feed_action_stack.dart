@@ -147,9 +147,15 @@ class _FeedFollowPillState extends State<FeedFollowPill> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(999),
-                color: following ? _glassFill : null,
                 gradient: following
-                    ? null
+                    ? LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Colors.white.withValues(alpha: 0.12),
+                          Colors.white.withValues(alpha: 0.04),
+                        ],
+                      )
                     : const LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
@@ -163,8 +169,9 @@ class _FeedFollowPillState extends State<FeedFollowPill> {
                 boxShadow: [
                   BoxShadow(
                     color: (following ? Colors.black : MocoColors.accentPrimary)
-                        .withValues(alpha: following ? 0.18 : 0.38),
-                    blurRadius: following ? 10 : 14,
+                        .withValues(alpha: following ? 0.20 : 0.38),
+                    blurRadius: following ? 12 : 14,
+                    spreadRadius: following ? 1 : 0,
                   ),
                 ],
               ),
@@ -207,11 +214,11 @@ class _FeedFollowPillState extends State<FeedFollowPill> {
 
 const _purple = Color(0xFF8E5CF7);
 
-const _glassFill = Color(0x52000000);
-final _glassBorder = Colors.white.withValues(alpha: 0.18);
+final _glassBorder = Colors.white.withValues(alpha: 0.15);
+final _glassHighlight = Colors.white.withValues(alpha: 0.08);
 
 /// One round glass control with an optional count underneath.
-class _ActionButton extends StatelessWidget {
+class _ActionButton extends StatefulWidget {
   const _ActionButton({
     required this.buttonKey,
     required this.semanticLabel,
@@ -231,62 +238,87 @@ class _ActionButton extends StatelessWidget {
   final bool highlighted;
 
   @override
+  State<_ActionButton> createState() => _ActionButtonState();
+}
+
+class _ActionButtonState extends State<_ActionButton> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
-    final gradient = highlighted
+    final gradient = widget.highlighted
         ? const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [MocoColors.accentPrimary, _purple],
           )
-        : null;
+        : LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.white.withValues(alpha: 0.12),
+              Colors.white.withValues(alpha: 0.04),
+            ],
+          );
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Semantics(
           button: true,
-          label: semanticLabel,
-          child: Material(
-            color: Colors.transparent,
-            shape: const CircleBorder(),
-            child: InkWell(
-              key: buttonKey,
-              onTap: onTap,
-              customBorder: const CircleBorder(),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOut,
-                width: size,
-                height: size,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: gradient == null ? _glassFill : null,
-                  gradient: gradient,
-                  border: Border.all(
-                    color: gradient == null
-                        ? _glassBorder
-                        : Colors.white.withValues(alpha: 0.28),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color:
-                          (gradient == null
-                                  ? Colors.black
-                                  : MocoColors.accentPrimary)
-                              .withValues(
-                                alpha: gradient == null ? 0.18 : 0.38,
-                              ),
-                      blurRadius: gradient == null ? 10 : 16,
+          label: widget.semanticLabel,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              key: widget.buttonKey,
+              onTapDown: (_) => setState(() => _pressed = true),
+              onTapUp: (_) => setState(() => _pressed = false),
+              onTapCancel: () => setState(() => _pressed = false),
+              onTap: widget.onTap,
+              child: AnimatedScale(
+                scale: _pressed ? 0.88 : 1.0,
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOutBack,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
+                  width: widget.size,
+                  height: widget.size,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: gradient,
+                    border: Border.all(
+                      color: widget.highlighted
+                          ? Colors.white.withValues(alpha: 0.28)
+                          : _glassBorder,
                     ),
-                  ],
+                    boxShadow: [
+                      BoxShadow(
+                        color: (widget.highlighted
+                                ? MocoColors.accentPrimary
+                                : Colors.black)
+                            .withValues(
+                              alpha: widget.highlighted ? 0.38 : 0.22,
+                            ),
+                        blurRadius: widget.highlighted ? 16 : 12,
+                        spreadRadius: widget.highlighted ? 0 : 1,
+                      ),
+                      if (!widget.highlighted)
+                        BoxShadow(
+                          color: _glassHighlight,
+                          blurRadius: 0,
+                          spreadRadius: 0.5,
+                        ),
+                    ],
+                  ),
+                  child: widget.child,
                 ),
-                child: child,
               ),
             ),
           ),
         ),
-        if (label != null) ...[const SizedBox(height: 3), label!],
+        if (widget.label != null) ...[const SizedBox(height: 3), widget.label!],
       ],
     );
   }

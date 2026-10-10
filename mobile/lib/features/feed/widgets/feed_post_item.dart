@@ -268,18 +268,13 @@ class _Overlay extends StatelessWidget {
                   onTap: onFollow!,
                 ),
               ],
-              const SizedBox(width: MocoSpacing.xs),
-              if (onMoreTap != null)
-                IconButton(
+              if (onMoreTap != null) ...[
+                const SizedBox(width: MocoSpacing.xs),
+                _MoreButton(
                   key: const Key('feed_post_more'),
-                  onPressed: onMoreTap,
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(
-                    Icons.more_horiz_rounded,
-                    color: MocoColors.textPrimary,
-                  ),
-                  tooltip: 'Report or block',
+                  onTap: onMoreTap!,
                 ),
+              ],
             ],
           ),
           if (post.hasCaption) ...[
@@ -373,6 +368,64 @@ class _AuthorRow extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(MocoRadius.pill),
       child: content,
+    );
+  }
+}
+
+class _MoreButton extends StatefulWidget {
+  const _MoreButton({super.key, required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  State<_MoreButton> createState() => _MoreButtonState();
+}
+
+class _MoreButtonState extends State<_MoreButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'More options',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTapDown: (_) => setState(() => _pressed = true),
+          onTapUp: (_) => setState(() => _pressed = false),
+          onTapCancel: () => setState(() => _pressed = false),
+          onTap: widget.onTap,
+          child: AnimatedScale(
+            scale: _pressed ? 0.88 : 1.0,
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOutBack,
+            child: Container(
+              width: 32,
+              height: 32,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.10),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.14),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.20),
+                    blurRadius: 10,
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.more_horiz_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

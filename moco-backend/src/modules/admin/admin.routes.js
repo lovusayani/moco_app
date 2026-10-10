@@ -3,19 +3,20 @@
 const express = require('express');
 const { query } = require('../../config/db');
 const { asyncHandler } = require('../../middleware/error');
-const { authenticate, requireAdmin } = require('../../middleware/auth');
+const { authenticateAdmin } = require('./admin.auth');
 const { listenerEligibleSql } = require('../../utils/constants');
 
 /**
  * /api/admin — every route below, including every mounted module, sits
- * behind authenticate + requireAdmin (server-side ADMIN_PHONES allow-list).
- * Hiding a button in the console is never the access control.
+ * behind authenticateAdmin (email+password JWT, checked against
+ * admin_accounts). Hiding a button in the console is never the access
+ * control.
  */
 const router = express.Router();
-router.use(authenticate, requireAdmin);
+router.use(authenticateAdmin);
 
 router.get('/me', (req, res) => {
-  res.json({ id: req.user.id, phone: req.user.phone, email: req.user.email, name: req.user.display_name, isAdmin: true });
+  res.json({ id: req.admin.id, email: req.admin.email, displayName: req.admin.display_name, role: req.admin.role, isAdmin: true });
 });
 
 router.use(require('./users.admin'));

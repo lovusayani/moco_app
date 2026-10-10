@@ -28,6 +28,7 @@ const purchasesRoutes = require('./modules/purchases/purchases.routes');
 const payoutsRoutes = require('./modules/payouts/payouts.routes');
 const safetyRoutes = require('./modules/safety/safety.routes');
 const adminRoutes = require('./modules/admin/admin.routes');
+const { router: adminAuthRoutes } = require('./modules/admin/admin.auth');
 
 function createApp() {
   const app = express();
@@ -150,6 +151,7 @@ function createApp() {
   app.use('/api/purchases', purchasesRoutes);
   app.use('/api/payouts', payoutsRoutes);
   app.use('/api/safety', safetyRoutes);
+  app.use('/api/admin/auth', adminAuthRoutes);
   app.use('/api/admin/live', liveAdminRoutes);
   app.use('/api/admin', adminRoutes);
 

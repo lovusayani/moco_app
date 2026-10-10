@@ -34,7 +34,6 @@ const REQUIRED = [
   'CRON_SECRET',
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
-  'ADMIN_PHONES',
 ];
 
 if (process.env.VERCEL) {

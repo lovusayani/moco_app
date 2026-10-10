@@ -15,23 +15,11 @@
 
 const API = '/api';
 const TOKEN_KEY = 'moco_admin_token';
-const PHONE_KEY = 'moco_admin_phone';
+const ADMIN_EMAIL_KEY = 'moco_admin_email';
+const ADMIN_ROLE_KEY = 'moco_admin_role';
 
 let token = localStorage.getItem(TOKEN_KEY);
-let pendingIdentifier = '';
-// 'email' or 'sms' — decided from what the admin typed.
-let pendingChannel = 'email';
-
-/** Email → email code; a phone number (+91… or 10 digits) → SMS code. The
- * admin allow-list (ADMIN_EMAILS / ADMIN_PHONES) is checked server-side. */
-function parseAdminIdentifier(raw) {
-  const value = raw.trim();
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return { channel: 'email', identifier: value.toLowerCase() };
-  const digits = value.replace(/[\s-]/g, '');
-  if (/^\+[1-9]\d{7,14}$/.test(digits)) return { channel: 'sms', identifier: digits };
-  if (/^\d{10}$/.test(digits)) return { channel: 'sms', identifier: `+91${digits}` };
-  return null;
-}
+let adminRole = localStorage.getItem(ADMIN_ROLE_KEY) || '';
 
 /* =====================================================================
  * Core
@@ -666,72 +654,97 @@ if ('serviceWorker' in navigator) {
 
 const loginEl = document.getElementById('login');
 const appEl = document.getElementById('app');
-const loginErr = document.getElementById('login-error');
 
-function showLoginError(message) {
-  loginErr.textContent = message;
-  loginErr.hidden = false;
+function showError(id, message) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = message; el.hidden = false; }
+}
+function hideError(id) {
+  const el = document.getElementById(id);
+  if (el) el.hidden = true;
 }
 
-document.getElementById('phone-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  loginErr.hidden = true;
-  const parsed = parseAdminIdentifier(document.getElementById('login-email').value);
-  if (!parsed) {
-    showLoginError('Enter an email address or a phone number like +919876543210.');
-    return;
-  }
-  pendingIdentifier = parsed.identifier;
-  pendingChannel = parsed.channel;
+/** Check whether any admin account exists. */
+async function checkAdminStatus() {
   try {
-    // One sign-in flow for the whole product (POST /auth/otp/send).
-    await api('/auth/otp/send', { method: 'POST', body: { channel: pendingChannel, identifier: pendingIdentifier } });
-    document.getElementById('phone-form').hidden = true;
-    document.getElementById('code-form').hidden = false;
-    document.getElementById('code').focus();
-  } catch (err) {
-    showLoginError(err.message);
+    const { hasAdmin } = await api('/admin/auth/status');
+    document.getElementById('login-checking').hidden = true;
+    if (hasAdmin) {
+      document.getElementById('login-form-wrap').hidden = false;
+    } else {
+      document.getElementById('bootstrap-form-wrap').hidden = false;
+    }
+  } catch {
+    document.getElementById('login-checking').hidden = true;
+    document.getElementById('login-form-wrap').hidden = false;
   }
-});
+}
 
-document.getElementById('code-form').addEventListener('submit', async (e) => {
+/** Bootstrap: create the first admin account. */
+document.getElementById('bootstrap-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  loginErr.hidden = true;
+  hideError('bootstrap-error');
+  const email = document.getElementById('bs-email').value.trim();
+  const displayName = document.getElementById('bs-name').value.trim();
+  const password = document.getElementById('bs-pass').value;
+  const confirmPassword = document.getElementById('bs-confirm').value;
+  if (password !== confirmPassword) { showError('bootstrap-error', 'Passwords do not match.'); return; }
+  if (password.length < 8) { showError('bootstrap-error', 'Password must be at least 8 characters.'); return; }
   try {
-    const result = await api('/auth/otp/verify', {
+    const result = await api('/admin/auth/bootstrap', {
       method: 'POST',
-      body: { channel: pendingChannel, identifier: pendingIdentifier, code: document.getElementById('code').value.trim() },
+      body: { email, password, confirmPassword, displayName: displayName || undefined },
     });
     token = result.token;
+    adminRole = result.admin.role;
     localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem(PHONE_KEY, pendingIdentifier);
-    await api('/admin/me'); // server-side allow-list check
+    localStorage.setItem(ADMIN_EMAIL_KEY, result.admin.email);
+    localStorage.setItem(ADMIN_ROLE_KEY, result.admin.role);
     enterConsole();
   } catch (err) {
-    if (err.status === 403) {
-      showLoginError('That account signed in, but it is not an admin (not in ADMIN_EMAILS / ADMIN_PHONES).');
-      token = null;
-      localStorage.removeItem(TOKEN_KEY);
-    } else showLoginError(err.message);
+    showError('bootstrap-error', err.message);
   }
 });
 
-document.getElementById('back-btn').addEventListener('click', () => {
-  document.getElementById('code-form').hidden = true;
-  document.getElementById('phone-form').hidden = false;
-  loginErr.hidden = true;
+/** Normal admin login. */
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  hideError('login-error');
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-pass').value;
+  try {
+    const result = await api('/admin/auth/login', {
+      method: 'POST',
+      body: { email, password },
+    });
+    token = result.token;
+    adminRole = result.admin.role;
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(ADMIN_EMAIL_KEY, result.admin.email);
+    localStorage.setItem(ADMIN_ROLE_KEY, result.admin.role);
+    enterConsole();
+  } catch (err) {
+    showError('login-error', err.message);
+  }
 });
 
 document.getElementById('logout-btn').addEventListener('click', signOut);
 
 function signOut() {
   token = null;
+  adminRole = '';
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(ADMIN_EMAIL_KEY);
+  localStorage.removeItem(ADMIN_ROLE_KEY);
   appEl.hidden = true;
   loginEl.hidden = false;
   drawer.close();
-  document.getElementById('code-form').hidden = true;
-  document.getElementById('phone-form').hidden = false;
+  // Reset login state
+  document.getElementById('login-checking').hidden = true;
+  document.getElementById('bootstrap-form-wrap').hidden = true;
+  document.getElementById('login-form-wrap').hidden = false;
+  hideError('login-error');
+  hideError('bootstrap-error');
 }
 
 /* =====================================================================
@@ -743,19 +756,29 @@ const view = (id, label, group, render, countKey) => VIEWS.push({ id, label, gro
 const main = document.getElementById('main');
 
 // Sidebar order (and grouping) is fixed here, independent of the order views
-// are registered in below.
-const NAV_ORDER = ['overview', 'users', 'listeners', 'kyc', 'content', 'calls', 'wallet', 'payouts', 'reports', 'audit', 'system'];
+// are registered in below. Settings and Admin Management are at the bottom.
+const NAV_ORDER = ['overview', 'users', 'listeners', 'kyc', 'content', 'calls', 'wallet', 'payouts', 'reports', 'audit', 'system', 'admin-mgmt', 'settings'];
+
+const NAV_ICONS = {
+  'settings': '⚙',
+  'admin-mgmt': '🛡',
+};
 
 function renderNav() {
-  VIEWS.sort((a, b) => NAV_ORDER.indexOf(a.id) - NAV_ORDER.indexOf(b.id));
+  const visible = VIEWS.filter((v) => {
+    if (v.id === 'admin-mgmt' && adminRole !== 'super_admin') return false;
+    return true;
+  });
+  visible.sort((a, b) => NAV_ORDER.indexOf(a.id) - NAV_ORDER.indexOf(b.id));
   let html = '';
   let group = null;
-  for (const v of VIEWS) {
+  for (const v of visible) {
     if (v.group !== group) {
       group = v.group;
       html += `<div class="nav-group">${esc(group)}</div>`;
     }
-    html += `<button class="nav-item" data-view="${v.id}">${esc(v.label)}${
+    const icon = NAV_ICONS[v.id] ? `<span class="nav-icon">${NAV_ICONS[v.id]}</span> ` : '';
+    html += `<button class="nav-item" data-view="${v.id}">${icon}${esc(v.label)}${
       v.countKey ? `<span class="nav-count" id="count-${v.countKey}" data-count="0"></span>` : ''}</button>`;
   }
   const nav = document.getElementById('nav');
@@ -804,7 +827,14 @@ async function refreshCounts() {
 async function enterConsole() {
   loginEl.hidden = true;
   appEl.hidden = false;
-  document.getElementById('admin-phone').textContent = localStorage.getItem(PHONE_KEY) || '';
+  try {
+    const me = await api('/admin/me');
+    document.getElementById('admin-name').textContent = me.displayName || me.email || '';
+    adminRole = me.role || adminRole;
+    localStorage.setItem(ADMIN_ROLE_KEY, adminRole);
+  } catch {
+    document.getElementById('admin-name').textContent = localStorage.getItem(ADMIN_EMAIL_KEY) || '';
+  }
   if (!document.getElementById('nav').children.length) renderNav();
   refreshCounts();
   route();
@@ -2150,7 +2180,7 @@ view('system', 'System / Reconcile', 'System', (el) => {
 
 /* ---------- Settings ---------- */
 
-view('settings', 'Settings', 'System', (el) => {
+view('settings', 'Settings', 'Setup', (el) => {
   el.innerHTML = head('Settings', 'App settings managed from the console. Every change is recorded in the audit log.') +
     '<div id="lb"></div>';
   renderLoginBackground(el.querySelector('#lb'));
@@ -2308,12 +2338,134 @@ async function renderLoginBackground(host) {
   });
 }
 
-(async () => {
-  if (!token) return;
-  try {
-    await api('/admin/me');
-    enterConsole();
-  } catch {
-    signOut();
+/* =====================================================================
+ * Admin Management (super_admin only)
+ * ===================================================================== */
+
+view('admin-mgmt', 'Admin Management', 'Setup', async (el) => {
+  el.innerHTML = head('Admin Management', 'Manage admin accounts, change password or email.') +
+    '<div class="admin-mgmt-sections">' +
+    '<div class="panel" id="amg-password"><h3>Change Password</h3>' +
+    '  <form id="chpw-form">' +
+    '    <div class="field"><label for="chpw-current">Current password</label><input id="chpw-current" type="password" required></div>' +
+    '    <div class="field"><label for="chpw-new">New password</label><input id="chpw-new" type="password" minlength="8" required></div>' +
+    '    <div class="field"><label for="chpw-confirm">Confirm new password</label><input id="chpw-confirm" type="password" minlength="8" required></div>' +
+    '    <div class="error-msg" id="chpw-error" hidden></div>' +
+    '    <button class="btn-primary inline" type="submit">Update Password</button>' +
+    '  </form>' +
+    '</div>' +
+    '<div class="panel" id="amg-email"><h3>Change Email</h3>' +
+    '  <form id="chem-form">' +
+    '    <div class="field"><label for="chem-pass">Current password</label><input id="chem-pass" type="password" required></div>' +
+    '    <div class="field"><label for="chem-new">New email</label><input id="chem-new" type="email" required></div>' +
+    '    <div class="error-msg" id="chem-error" hidden></div>' +
+    '    <button class="btn-primary inline" type="submit">Update Email</button>' +
+    '  </form>' +
+    '</div>' +
+    '<div class="panel" id="amg-sub"><h3>Sub Admins</h3>' +
+    '  <div id="sub-list"><div class="empty">Loading…</div></div>' +
+    '  <h4 style="margin-top:24px">Add Sub Admin</h4>' +
+    '  <form id="addsub-form">' +
+    '    <div class="field"><label for="sub-email">Email</label><input id="sub-email" type="email" required></div>' +
+    '    <div class="field"><label for="sub-pass">Initial password</label><input id="sub-pass" type="password" minlength="8" required></div>' +
+    '    <div class="field"><label for="sub-name">Display name <span class="sub">(optional)</span></label><input id="sub-name" type="text" maxlength="100"></div>' +
+    '    <div class="error-msg" id="addsub-error" hidden></div>' +
+    '    <button class="btn-primary inline" type="submit">Create Sub Admin</button>' +
+    '  </form>' +
+    '</div>' +
+    '</div>';
+
+  // Change Password
+  el.querySelector('#chpw-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = el.querySelector('#chpw-error');
+    errEl.hidden = true;
+    const currentPassword = el.querySelector('#chpw-current').value;
+    const newPassword = el.querySelector('#chpw-new').value;
+    const confirmPassword = el.querySelector('#chpw-confirm').value;
+    if (newPassword !== confirmPassword) { errEl.textContent = 'Passwords do not match.'; errEl.hidden = false; return; }
+    if (newPassword.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; errEl.hidden = false; return; }
+    try {
+      await api('/admin/auth/change-password', { method: 'POST', body: { currentPassword, newPassword, confirmPassword } });
+      toast('Password updated successfully');
+      e.target.reset();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
+  });
+
+  // Change Email
+  el.querySelector('#chem-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = el.querySelector('#chem-error');
+    errEl.hidden = true;
+    const currentPassword = el.querySelector('#chem-pass').value;
+    const newEmail = el.querySelector('#chem-new').value.trim();
+    try {
+      const result = await api('/admin/auth/change-email', { method: 'POST', body: { currentPassword, newEmail } });
+      toast(`Email updated to ${esc(result.email)}`);
+      localStorage.setItem(ADMIN_EMAIL_KEY, result.email);
+      document.getElementById('admin-name').textContent = result.email;
+      e.target.reset();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
+  });
+
+  // Sub Admin list
+  async function loadSubs() {
+    const box = el.querySelector('#sub-list');
+    try {
+      const { admins } = await api('/admin/auth/sub-admins');
+      if (!admins.length) { box.innerHTML = '<div class="empty">No admin accounts yet.</div>'; return; }
+      box.innerHTML = miniTable([
+        { label: 'ID', render: (a) => a.id },
+        { label: 'Email', render: (a) => esc(a.email) },
+        { label: 'Name', render: (a) => esc(a.display_name || '—') },
+        { label: 'Role', render: (a) => badge(a.role === 'super_admin' ? 'super' : 'sub', a.role === 'super_admin' ? 'pink' : 'blue') },
+        { label: 'Created', render: (a) => fmtDate(a.created_at) },
+      ], admins);
+    } catch (err) {
+      box.innerHTML = `<div class="empty">! ${esc(err.message)}</div>`;
+    }
   }
+  loadSubs();
+
+  // Add Sub Admin
+  el.querySelector('#addsub-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = el.querySelector('#addsub-error');
+    errEl.hidden = true;
+    const email = el.querySelector('#sub-email').value.trim();
+    const password = el.querySelector('#sub-pass').value;
+    const displayName = el.querySelector('#sub-name').value.trim();
+    try {
+      await api('/admin/auth/sub-admins', { method: 'POST', body: { email, password, displayName: displayName || undefined } });
+      toast(`Sub admin ${esc(email)} created`);
+      e.target.reset();
+      loadSubs();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
+  });
+});
+
+/* =====================================================================
+ * Boot
+ * ===================================================================== */
+
+(async () => {
+  if (token) {
+    try {
+      await api('/admin/me');
+      enterConsole();
+      return;
+    } catch {
+      signOut();
+    }
+  }
+  checkAdminStatus();
 })();

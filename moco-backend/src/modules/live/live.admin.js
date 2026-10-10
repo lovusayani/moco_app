@@ -8,7 +8,7 @@ const stripcash = require('../../integrations/stripcash');
 const audit = require('../admin/audit.service');
 const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
-const { authenticate, requireAdmin } = require('../../middleware/auth');
+const { authenticateAdmin } = require('../admin/admin.auth');
 const { badRequest } = require('../../utils/errors');
 
 /**
@@ -20,7 +20,7 @@ const { badRequest } = require('../../utils/errors');
  * own location, geobans included.
  */
 const router = express.Router();
-router.use(authenticate, requireAdmin);
+router.use(authenticateAdmin);
 
 /** Settings, the choices the console offers, and provider status (no secrets). */
 router.get(

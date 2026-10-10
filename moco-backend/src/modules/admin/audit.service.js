@@ -14,13 +14,14 @@ async function record(client, { admin, action, targetType, targetId, reason, met
   const run = client ? client.query.bind(client) : query;
   const { rows } = await run(
     `INSERT INTO admin_audit_log
-       (admin_user_id, admin_phone, admin_email, action, target_type, target_id, reason, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (admin_user_id, admin_phone, admin_email, admin_account_id, action, target_type, target_id, reason, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING id`,
     [
-      admin.id,
+      admin.id ?? null,
       admin.phone ?? null,
       admin.email ?? null,
+      admin.adminAccountId ?? admin.id ?? null,
       action,
       targetType,
       targetId == null ? null : String(targetId),

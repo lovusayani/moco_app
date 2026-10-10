@@ -4,44 +4,67 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Moco Admin</title>
-  <!-- Inline so the console makes no extra request and cannot 404. -->
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23e54f9a'/%3E%3Ctext x='16' y='23' font-family='sans-serif' font-size='19' font-weight='bold' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="admin.css">
   <link rel="stylesheet" href="live-settings.css">
 </head>
 <body>
 
-<!-- Login. Reuses the ordinary OTP flow; the admin allow-list is enforced
-     server-side on every /api/admin request, so signing in here grants
-     nothing by itself. -->
+<!-- Login / Bootstrap -->
 <div id="login" class="login-wrap">
   <div class="login-card">
     <div class="brand">
       <div class="brand-mark">M</div>
       <div class="brand-name">Moco Admin</div>
     </div>
-    <p class="login-sub">Sign in with your admin email address or phone number.</p>
 
-    <div id="login-error" class="error-msg" hidden></div>
+    <!-- State: checking -->
+    <div id="login-checking">
+      <p class="login-sub">Checking admin status…</p>
+    </div>
 
-    <form id="phone-form">
-      <div class="field">
-        <label for="login-email">Email or phone</label>
-        <input id="login-email" type="text" inputmode="email" placeholder="admin@example.com or +919876543210" autocomplete="username" required>
-      </div>
-      <button class="btn-primary" type="submit">Send code</button>
-    </form>
+    <!-- State: bootstrap (no admin exists) -->
+    <div id="bootstrap-form-wrap" hidden>
+      <h2 class="login-title">First Admin Setup</h2>
+      <p class="login-sub">Create your admin account. This will be the primary super admin.</p>
+      <div id="bootstrap-error" class="error-msg" hidden></div>
+      <form id="bootstrap-form">
+        <div class="field">
+          <label for="bs-email">Admin email</label>
+          <input id="bs-email" type="email" placeholder="admin@example.com" autocomplete="email" required>
+        </div>
+        <div class="field">
+          <label for="bs-name">Display name <span class="optional">(optional)</span></label>
+          <input id="bs-name" type="text" placeholder="Admin" autocomplete="name" maxlength="100">
+        </div>
+        <div class="field">
+          <label for="bs-pass">Password</label>
+          <input id="bs-pass" type="password" minlength="8" maxlength="128" autocomplete="new-password" required>
+        </div>
+        <div class="field">
+          <label for="bs-confirm">Confirm password</label>
+          <input id="bs-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" required>
+        </div>
+        <button class="btn-primary" type="submit">Create Admin Account</button>
+      </form>
+    </div>
 
-    <form id="code-form" hidden>
-      <div class="field">
-        <label for="code">Verification code</label>
-        <input id="code" inputmode="numeric" maxlength="8" placeholder="000000" required>
-      </div>
-      <button class="btn-primary" type="submit">Verify</button>
-      <button class="btn-ghost" type="button" id="back-btn" style="width:100%;margin-top:8px">Use a different email or phone</button>
-    </form>
-
-    <p class="hint">Access is limited to the server's admin allow-list (ADMIN_EMAILS / ADMIN_PHONES).</p>
+    <!-- State: normal login -->
+    <div id="login-form-wrap" hidden>
+      <p class="login-sub">Sign in with your admin credentials.</p>
+      <div id="login-error" class="error-msg" hidden></div>
+      <form id="login-form">
+        <div class="field">
+          <label for="login-email">Email</label>
+          <input id="login-email" type="email" placeholder="admin@example.com" autocomplete="username" required>
+        </div>
+        <div class="field">
+          <label for="login-pass">Password</label>
+          <input id="login-pass" type="password" autocomplete="current-password" required>
+        </div>
+        <button class="btn-primary" type="submit">Sign in</button>
+      </form>
+    </div>
   </div>
 </div>
 
@@ -55,7 +78,7 @@
     <nav id="nav"></nav>
     <div class="sidebar-foot">
       Signed in as
-      <strong id="admin-phone"></strong>
+      <strong id="admin-name"></strong>
       <button class="btn-ghost btn-sm" id="logout-btn" style="margin-top:8px;width:100%">Sign out</button>
     </div>
   </aside>
@@ -67,7 +90,6 @@
 
 <script src="monitoring.js"></script>
 <script src="admin.js"></script>
-<!-- Settings → Live (separate file; extends the Settings view). -->
 <script src="live-settings.js"></script>
 </body>
 </html>

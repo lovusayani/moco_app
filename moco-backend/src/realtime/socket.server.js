@@ -35,11 +35,15 @@ function init(httpServer) {
     pingTimeout: 25_000,
   });
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth?.token || socket.handshake.query?.token;
       if (!token) return next(new Error('unauthorized'));
       const payload = verifyToken(token);
+      // Same rule as HTTP authenticate: a still-valid token for a deleted or
+      // suspended account must not open a realtime session either.
+      const { rows } = await query('SELECT status FROM users WHERE id = $1', [payload.sub]);
+      if (rows[0]?.status !== 'active') return next(new Error('unauthorized'));
       socket.userId = String(payload.sub);
       return next();
     } catch {
@@ -150,9 +154,21 @@ function emitToRoom(room, event, payload) {
 
 const getIo = () => io;
 
+/**
+ * Drops every open socket for a user — used when an admin deletes the
+ * account, so sessions end now rather than at the next reconnect. Returns
+ * false where this process has no socket server (workers).
+ */
+function disconnectUser(userId) {
+  if (!io) return false;
+  io.in(`user:${userId}`).disconnectSockets(true);
+  return true;
+}
+
 module.exports = {
   init,
   emitToUser,
   emitToRoom,
   getIo,
+  disconnectUser,
 };

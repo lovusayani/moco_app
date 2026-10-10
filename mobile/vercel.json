@@ -33,6 +33,21 @@
       ]
     },
     {
+      "source": "/(main.dart.js|flutter_bootstrap.js)",
+      "has": [
+        {
+          "type": "query",
+          "key": "v"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
       "source": "/sw.js",
       "headers": [
         {

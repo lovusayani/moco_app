@@ -57,6 +57,9 @@ class AppPreferences {
   static const _themeModeKey = 'moco_theme_mode';
   static const _fontChoiceKey = 'moco_font_choice';
   static const _discoveryColumnsKey = 'moco_discovery_columns';
+  static const _liveAgeConfirmedKey = 'moco_live_age_confirmed';
+  static const _feedMutedKey = 'moco_feed_muted';
+  static const _feedAutoScrollKey = 'moco_feed_auto_scroll';
 
   static Future<AppPreferences> create() async =>
       AppPreferences(await SharedPreferences.getInstance());
@@ -97,4 +100,24 @@ class AppPreferences {
 
   Future<void> setDiscoveryColumns(int value) =>
       _prefs.setInt(_discoveryColumnsKey, value);
+
+  /// Whether this browser/device already confirmed Live's 18+ gate. Asked
+  /// once per device, not on every visit; the backend still requires a
+  /// signed-in account for every Live request.
+  bool get liveAgeConfirmed => _prefs.getBool(_liveAgeConfirmedKey) ?? false;
+
+  Future<void> setLiveAgeConfirmed(bool value) =>
+      _prefs.setBool(_liveAgeConfirmedKey, value);
+
+  /// Feed sound, shared by every post: muted until the user turns sound on,
+  /// then remembered across posts and visits.
+  bool get feedMuted => _prefs.getBool(_feedMutedKey) ?? true;
+
+  Future<void> setFeedMuted(bool value) => _prefs.setBool(_feedMutedKey, value);
+
+  /// Feed auto-scroll (App Settings). Off unless the user turns it on.
+  bool get feedAutoScroll => _prefs.getBool(_feedAutoScrollKey) ?? false;
+
+  Future<void> setFeedAutoScroll(bool value) =>
+      _prefs.setBool(_feedAutoScrollKey, value);
 }

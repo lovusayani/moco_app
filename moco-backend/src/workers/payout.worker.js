@@ -60,6 +60,7 @@ async function handlePayout(job) {
       userId: payout.listener_id,
       title: 'Withdrawal sent',
       body: `Your withdrawal of ${payout.amount} has been processed.`,
+      data: { type: 'payout_paid', payoutId: String(payoutId) },
     });
     await notifications.create({
       userId: payout.listener_id,

@@ -15,13 +15,18 @@
     "seed": "node src/db/seed.js",
     "test": "node --test --test-concurrency=1 tests/*.test.js",
     "smoke": "node scripts/supabase_smoke_test.js",
-    "build:vercel": "node scripts/vercel_build.js"
+    "build:vercel": "node scripts/vercel_build.js",
+    "e2e:admin-content-delete": "node scripts/admin_content_delete_e2e.js",
+    "e2e:admin-dialog-visibility": "node scripts/admin_dialog_visibility_e2e.js",
+    "e2e:admin-manage": "node scripts/admin_manage_e2e.js"
   },
   "dependencies": {
+    "@sentry/core": "^10.76.1",
     "@supabase/supabase-js": "^2.45.4",
     "@vercel/functions": "^3.9.11",
     "@vercel/queue": "^0.7.0",
     "agora-token": "^2.0.5",
+    "bcryptjs": "^3.0.3",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
@@ -33,6 +38,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "pino-pretty": "^13.0.0"
+    "pino-pretty": "^13.0.0",
+    "puppeteer-core": "^24.43.1"
   }
 }

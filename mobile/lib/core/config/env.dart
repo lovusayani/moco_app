@@ -56,6 +56,16 @@ class Env {
 
   static const String _socketUrlDefine = String.fromEnvironment('SOCKET_URL');
 
+  /// The public web app's origin, used for links that leave the app (a
+  /// shared Feed post). On web the page's own origin wins, so a local or
+  /// preview build shares links to itself.
+  static String get webAppUrl => kIsWeb ? Uri.base.origin : _webAppUrlDefine;
+
+  static const String _webAppUrlDefine = String.fromEnvironment(
+    'WEB_APP_URL',
+    defaultValue: 'https://lovcamx.online',
+  );
+
   /// Needed only once calling ships (Phase 2). Empty is valid until then.
   static const String agoraAppId = String.fromEnvironment('AGORA_APP_ID');
 

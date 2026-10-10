@@ -15,10 +15,11 @@
 
 const API = '/api';
 const TOKEN_KEY = 'moco_admin_token';
-const PHONE_KEY = 'moco_admin_phone';
+const ADMIN_EMAIL_KEY = 'moco_admin_email';
+const ADMIN_ROLE_KEY = 'moco_admin_role';
 
 let token = localStorage.getItem(TOKEN_KEY);
-let pendingIdentifier = '';
+let adminRole = localStorage.getItem(ADMIN_ROLE_KEY) || '';
 
 /* =====================================================================
  * Core
@@ -104,14 +105,14 @@ function duration(start, end) {
 }
 
 let toastTimer;
-function toast(message, ok = true) {
+function toast(message, ok = true, ms = 3600) {
   document.querySelector('.toast')?.remove();
   const el = document.createElement('div');
   el.className = `toast${ok ? '' : ' bad'}`;
   el.textContent = message;
   document.body.appendChild(el);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.remove(), 3600);
+  toastTimer = setTimeout(() => el.remove(), ms);
 }
 
 const empty = (mark, message) => `<div class="empty"><div class="empty-mark">${mark}</div>${esc(message)}</div>`;
@@ -244,7 +245,7 @@ function dataTable(host, cfg) {
       .map((c) => {
         const active = c.sort && st.sort === c.sort;
         const arrow = active ? `<span class="arrow">${st.dir === 'asc' ? '▲' : '▼'}</span>` : '';
-        return `<th class="${c.sort ? 'sortable' : ''} ${c.num ? 'num' : ''}" data-sort="${c.sort || ''}">${esc(c.label)}${arrow}</th>`;
+        return `<th class="${c.sort ? 'sortable' : ''} ${c.num ? 'num' : ''} ${c.pin ? 'col-pin' : ''}" data-sort="${c.sort || ''}">${esc(c.label)}${arrow}</th>`;
       })
       .join('')}</tr>`;
   }
@@ -278,7 +279,7 @@ function dataTable(host, cfg) {
       tbody.innerHTML = rows.length
         ? rows
             .map((r, i) => `<tr data-i="${i}" class="${cfg.onRow ? 'clickable' : ''}">${cfg.columns
-              .map((c) => `<td class="${c.num ? 'num' : ''}">${c.render(r)}</td>`)
+              .map((c) => `<td class="${c.num ? 'num' : ''} ${c.pin ? 'col-pin' : ''}">${c.render(r)}</td>`)
               .join('')}</tr>`)
             .join('')
         : `<tr><td colspan="${cfg.columns.length}">${empty('∅', cfg.emptyText || 'Nothing matches these filters.')}</td></tr>`;
@@ -371,7 +372,8 @@ const drawer = {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (document.getElementById('modal-root').innerHTML) document.getElementById('modal-root').innerHTML = '';
+  if (closeActiveDialog) closeActiveDialog();
+  else if (document.getElementById('modal-root').innerHTML) document.getElementById('modal-root').innerHTML = '';
   else drawer.close();
 });
 
@@ -385,86 +387,265 @@ document.addEventListener('keydown', (e) => {
  * the error is shown inside the dialog and it stays open — so a server
  * refusal (e.g. "needs 3 photos") is read in context, not lost in a toast.
  */
-function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', danger = false, onSubmit }) {
+/** Cancels the dialog on screen, if any (Escape uses it). */
+let closeActiveDialog = null;
+
+/**
+ * Why a rendered dialog is not genuinely usable, or null if it is. Checks
+ * what a person would see, not just that the element exists: real size,
+ * not hidden/transparent, and actually on top at its centre and at its
+ * confirm button (a hiding stylesheet, extension or covering layer fails
+ * this even though the DOM looks right).
+ */
+function dialogVisibilityProblem(modal) {
+  if (!modal) return 'dialog element missing';
+  const r = modal.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return `dialog has no size (${Math.round(r.width)}x${Math.round(r.height)})`;
+  if (r.bottom <= 0 || r.right <= 0 || r.top >= innerHeight || r.left >= innerWidth) return 'dialog is off-screen';
+  if (modal.checkVisibility && !modal.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
+    return 'dialog is hidden (display/visibility/opacity)';
+  }
+  const onTop = (el) => {
+    if (!el) return false;
+    const b = el.getBoundingClientRect();
+    const x = Math.min(Math.max(b.left + b.width / 2, 0), innerWidth - 1);
+    const y = Math.min(Math.max(b.top + b.height / 2, 0), innerHeight - 1);
+    // A transient toast may float over the footer; look through it.
+    const hit = document.elementsFromPoint(x, y).find((e) => !e.closest('.toast'));
+    return Boolean(hit && modal.contains(hit));
+  };
+  if (!onTop(modal)) return 'dialog is covered or not painted';
+  if (!onTop(modal.querySelector('button[type=submit]'))) return 'confirm button is not reachable';
+  return null;
+}
+
+/**
+ * Last-resort path when the styled dialog cannot be shown: the same dialog
+ * rebuilt as a native <dialog> opened with showModal(). That puts it in the
+ * browser's top layer — above every z-index, overlay or stray stylesheet —
+ * and its look is inline, so nothing the console's CSS does can hide it.
+ * Same fields, validation, loading state and in-dialog errors; never the
+ * browser's alert/prompt/confirm boxes.
+ */
+function topLayerDialog({ title, message, fields, confirmLabel, danger, onSubmit }) {
   return new Promise((resolve) => {
-    const root = document.getElementById('modal-root');
-    const fieldHtml = fields
-      .map((f) => {
-        const id = `f_${f.name}`;
-        const req = f.required ? ' *' : '';
-        let input;
-        if (f.type === 'textarea') {
-          input = `<textarea id="${id}" placeholder="${esc(f.placeholder || '')}">${esc(f.value || '')}</textarea>`;
-        } else if (f.type === 'select') {
-          input = `<select id="${id}">${f.options
-            .map(([v, l]) => `<option value="${esc(v)}" ${String(f.value ?? '') === String(v) ? 'selected' : ''}>${esc(l)}</option>`)
-            .join('')}</select>`;
-        } else if (f.type === 'checkbox') {
-          return `<div class="field"><label style="display:flex;gap:8px;align-items:center;font-weight:500">
-            <input id="${id}" type="checkbox" style="width:auto" ${f.value ? 'checked' : ''}> ${esc(f.label)}</label></div>`;
-        } else if (f.type === 'multi') {
-          return `<div class="field"><label>${esc(f.label)}${req}</label><div style="display:flex;gap:14px">${f.options
-            .map(([v, l]) => `<label style="display:flex;gap:6px;align-items:center;font-weight:500">
-              <input type="checkbox" style="width:auto" data-multi="${esc(f.name)}" value="${esc(v)}"
-              ${(f.value || []).includes(v) ? 'checked' : ''}> ${esc(l)}</label>`)
-            .join('')}</div></div>`;
-        } else {
-          input = `<input id="${id}" type="${f.type || 'text'}" placeholder="${esc(f.placeholder || '')}" value="${esc(f.value ?? '')}">`;
-        }
-        return `<div class="field"><label for="${id}">${esc(f.label)}${req}</label>${input}${
-          f.help ? `<div class="help">${esc(f.help)}</div>` : ''}</div>`;
-      })
-      .join('');
-
-    root.innerHTML = `
-      <div class="modal-backdrop">
-        <div class="modal" role="dialog" aria-label="${esc(title)}">
-          <h3>${esc(title)}</h3>
-          ${message ? `<p>${message}</p>` : ''}
-          <div class="error-msg" hidden></div>
-          <form>${fieldHtml}
-            <div class="modal-actions">
-              <button type="button" class="btn-ghost" data-cancel>Cancel</button>
-              <button type="submit" class="${danger ? 'btn-danger' : 'btn-primary inline'}">${esc(confirmLabel)}</button>
-            </div>
-          </form>
-        </div>
-      </div>`;
-
-    const errEl = root.querySelector('.error-msg');
-    const close = (value) => { root.innerHTML = ''; resolve(value); };
-    root.querySelector('[data-cancel]').addEventListener('click', () => close(null));
-    root.querySelector('form').addEventListener('submit', async (e) => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'toplayer-dialog';
+    dlg.setAttribute('aria-label', title);
+    const box = 'width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;padding:0;border:1px solid #3a2a33;border-radius:14px;background:#1d1419;color:#f3e9ee;font:14px/1.45 system-ui,sans-serif;box-shadow:0 20px 60px rgba(0,0,0,.6)';
+    const input = 'width:100%;box-sizing:border-box;padding:9px 10px;border-radius:9px;border:1px solid #4a3540;background:#140e11;color:#f3e9ee;font:inherit';
+    dlg.style.cssText = box;
+    const fieldHtml = fields.map((f) => {
+      const id = `tl_${f.name}`;
+      if (f.type === 'checkbox') {
+        return `<label style="display:flex;gap:8px;align-items:center;margin:10px 0"><input id="${id}" type="checkbox" ${f.value ? 'checked' : ''}> ${esc(f.label)}</label>`;
+      }
+      let control;
+      if (f.type === 'textarea') control = `<textarea id="${id}" rows="3" style="${input}">${esc(f.value || '')}</textarea>`;
+      else if (f.type === 'select') control = `<select id="${id}" style="${input}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${String(f.value ?? '') === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+      else if (f.type === 'multi') control = f.options.map(([v, l]) => `<label style="margin-right:12px"><input type="checkbox" data-multi="${esc(f.name)}" value="${esc(v)}" ${(f.value || []).includes(v) ? 'checked' : ''}> ${esc(l)}</label>`).join('');
+      else if (f.type === 'file') control = `<input id="${id}" type="file" accept="${esc(f.accept || '')}" style="${input}">`;
+      else control = `<input id="${id}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" style="${input}">`;
+      return `<div style="margin:12px 0"><label for="${id}" style="display:block;font-weight:600;margin-bottom:5px">${esc(f.label)}${f.required ? ' *' : ''}</label>${control}${f.help ? `<div style="opacity:.7;font-size:12px;margin-top:4px">${esc(f.help)}</div>` : ''}</div>`;
+    }).join('');
+    dlg.innerHTML = `<form method="dialog" style="margin:0">
+      <div style="padding:16px 18px;border-bottom:1px solid #3a2a33;font-weight:700;font-size:16px">${esc(title)}</div>
+      <div style="padding:6px 18px 4px">${message ? `<div style="margin:10px 0">${message}</div>` : ''}
+        <div data-err role="alert" hidden style="margin:10px 0;padding:9px 11px;border-radius:9px;background:#4a1c27;color:#ffd5de"></div>${fieldHtml}</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #3a2a33">
+        <button type="button" data-cancel style="padding:8px 14px;border-radius:9px;border:1px solid #4a3540;background:transparent;color:inherit;font:inherit;cursor:pointer">Cancel</button>
+        <button type="submit" data-ok style="padding:8px 14px;border-radius:9px;border:0;background:${danger ? '#c2364f' : '#d6407a'};color:#fff;font:inherit;font-weight:600;cursor:pointer">${esc(confirmLabel)}</button>
+      </div></form>`;
+    let settled = false;
+    const finish = (v) => { if (settled) return; settled = true; dlg.close(); dlg.remove(); resolve(v); };
+    const err = dlg.querySelector('[data-err]');
+    const ok = dlg.querySelector('[data-ok]');
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); finish(null); });
+    dlg.querySelector('[data-cancel]').addEventListener('click', () => finish(null));
+    dlg.querySelector('form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const values = {};
       for (const f of fields) {
-        if (f.type === 'multi') {
-          values[f.name] = [...root.querySelectorAll(`[data-multi="${f.name}"]:checked`)].map((c) => c.value);
-        } else if (f.type === 'checkbox') {
-          values[f.name] = root.querySelector(`#f_${f.name}`).checked;
-        } else {
-          values[f.name] = root.querySelector(`#f_${f.name}`).value.trim();
-        }
+        if (f.type === 'multi') values[f.name] = [...dlg.querySelectorAll(`[data-multi="${f.name}"]:checked`)].map((c) => c.value);
+        else if (f.type === 'checkbox') values[f.name] = dlg.querySelector(`#tl_${f.name}`).checked;
+        else if (f.type === 'file') values[f.name] = dlg.querySelector(`#tl_${f.name}`).files[0] || null;
+        else values[f.name] = dlg.querySelector(`#tl_${f.name}`).value.trim();
         const v = values[f.name];
-        if (f.required && (v === '' || (Array.isArray(v) && v.length === 0))) {
-          errEl.textContent = `${f.label} is required.`;
-          errEl.hidden = false;
+        const missing = f.required && (v === '' || v === null || (Array.isArray(v) && v.length === 0));
+        const short = f.minLength && typeof v === 'string' && v.length < f.minLength;
+        if (missing || short) {
+          err.textContent = missing ? `${f.label} is required.` : `${f.label} needs at least ${f.minLength} characters.`;
+          err.hidden = false;
           return;
         }
       }
-      const btn = root.querySelector('button[type=submit]');
-      btn.disabled = true;
+      const label = ok.textContent;
+      ok.disabled = true;
+      ok.textContent = 'Working…';
       try {
-        const result = onSubmit ? await onSubmit(values) : values;
-        close(result ?? true);
-      } catch (err) {
-        errEl.textContent = err.message;
-        errEl.hidden = false;
-        btn.disabled = false;
+        finish((onSubmit ? await onSubmit(values) : values) ?? true);
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.hidden = false;
+        ok.disabled = false;
+        ok.textContent = label;
       }
     });
-    root.querySelector('input, textarea, select')?.focus();
+    document.body.appendChild(dlg);
+    dlg.showModal();
+    dlg.querySelector('input, textarea, select')?.focus();
   });
+}
+
+/**
+ * dialog({ title, message, fields, confirmLabel, danger, wide, onSubmit(values) })
+ * Resolves to onSubmit's result, or null if cancelled. If onSubmit throws,
+ * the error is shown inside the dialog and it stays open — so a server
+ * refusal (e.g. "needs 3 photos") is read in context, not lost in a toast.
+ *
+ * It can never leave the admin stuck behind a bare overlay: a rendering
+ * error removes the overlay and says so; a dialog that renders but is not
+ * genuinely visible (see dialogVisibilityProblem) is replaced by the
+ * browser's own prompts; Escape and a click on the backdrop cancel.
+ */
+function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', danger = false, wide = false, onSubmit }) {
+  return new Promise((resolve) => {
+    const root = document.getElementById('modal-root');
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      root.innerHTML = '';
+      closeActiveDialog = null;
+      resolve(value);
+    };
+
+    try {
+      const fieldHtml = fields
+        .map((f) => {
+          const id = `f_${f.name}`;
+          const req = f.required ? ' *' : '';
+          let input;
+          if (f.type === 'textarea') {
+            input = `<textarea id="${id}" placeholder="${esc(f.placeholder || '')}">${esc(f.value || '')}</textarea>`;
+          } else if (f.type === 'select') {
+            input = `<select id="${id}">${f.options
+              .map(([v, l]) => `<option value="${esc(v)}" ${String(f.value ?? '') === String(v) ? 'selected' : ''}>${esc(l)}</option>`)
+              .join('')}</select>`;
+          } else if (f.type === 'checkbox') {
+            return `<div class="field"><label style="display:flex;gap:8px;align-items:center;font-weight:500">
+              <input id="${id}" type="checkbox" style="width:auto" ${f.value ? 'checked' : ''}> ${esc(f.label)}</label></div>`;
+          } else if (f.type === 'multi') {
+            return `<div class="field"><label>${esc(f.label)}${req}</label><div style="display:flex;gap:14px">${f.options
+              .map(([v, l]) => `<label style="display:flex;gap:6px;align-items:center;font-weight:500">
+                <input type="checkbox" style="width:auto" data-multi="${esc(f.name)}" value="${esc(v)}"
+                ${(f.value || []).includes(v) ? 'checked' : ''}> ${esc(l)}</label>`)
+              .join('')}</div></div>`;
+          } else if (f.type === 'file') {
+            input = `<input id="${id}" type="file" accept="${esc(f.accept || '')}">`;
+          } else {
+            input = `<input id="${id}" type="${f.type || 'text'}" placeholder="${esc(f.placeholder || '')}" value="${esc(f.value ?? '')}">`;
+          }
+          return `<div class="field"><label for="${id}">${esc(f.label)}${req}</label>${input}${
+            f.help ? `<div class="help">${esc(f.help)}</div>` : ''}</div>`;
+        })
+        .join('');
+
+      root.innerHTML = `
+        <div class="modal-backdrop">
+          <div class="modal${wide ? ' wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+            <form class="modal-form" novalidate>
+              <div class="modal-head"><h3>${esc(title)}</h3></div>
+              <div class="modal-body">
+                ${message ? `<div class="modal-msg">${message}</div>` : ''}
+                <div class="error-msg" hidden></div>
+                ${fieldHtml}
+              </div>
+              <div class="modal-actions">
+                <button type="button" class="btn-ghost" data-cancel>Cancel</button>
+                <button type="submit" class="${danger ? 'btn-danger' : 'btn-primary inline'}">${esc(confirmLabel)}</button>
+              </div>
+            </form>
+          </div>
+        </div>`;
+
+      const errEl = root.querySelector('.error-msg');
+      const showError = (text) => {
+        errEl.textContent = text;
+        errEl.hidden = false;
+        errEl.scrollIntoView({ block: 'nearest' });
+      };
+      closeActiveDialog = () => finish(null);
+      root.querySelector('[data-cancel]').addEventListener('click', () => finish(null));
+      // A click on the dim backdrop itself (not inside the dialog) cancels.
+      const backdrop = root.querySelector('.modal-backdrop');
+      backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) finish(null); });
+      root.querySelector('form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const values = {};
+        for (const f of fields) {
+          if (f.type === 'multi') {
+            values[f.name] = [...root.querySelectorAll(`[data-multi="${f.name}"]:checked`)].map((c) => c.value);
+          } else if (f.type === 'checkbox') {
+            values[f.name] = root.querySelector(`#f_${f.name}`).checked;
+          } else if (f.type === 'file') {
+            values[f.name] = root.querySelector(`#f_${f.name}`).files[0] || null;
+          } else {
+            values[f.name] = root.querySelector(`#f_${f.name}`).value.trim();
+          }
+          const v = values[f.name];
+          if (f.required && (v === '' || v === null || (Array.isArray(v) && v.length === 0))) {
+            showError(`${f.label} is required.`);
+            return;
+          }
+          if (f.minLength && typeof v === 'string' && v.length < f.minLength) {
+            showError(`${f.label} needs at least ${f.minLength} characters.`);
+            return;
+          }
+        }
+        const btn = root.querySelector('button[type=submit]');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Working…';
+        try {
+          const result = onSubmit ? await onSubmit(values) : values;
+          finish(result ?? true);
+        } catch (err) {
+          showError(err.message);
+          btn.disabled = false;
+          btn.textContent = label;
+        }
+      });
+      root.querySelector('input, textarea, select')?.focus();
+    } catch (err) {
+      // Never leave an overlay without a dialog on it.
+      console.error('dialog failed to render', err);
+      finish(null);
+      toast(`Could not open "${title}": ${err.message}`, false, 9000);
+      return;
+    }
+
+    // After layout and paint: is the dialog really there for a person?
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (settled) return;
+      const problem = dialogVisibilityProblem(root.querySelector('.modal'));
+      if (!problem) return;
+      console.error(`dialog "${title}" is not visible: ${problem}`);
+      settled = true;
+      root.innerHTML = '';
+      closeActiveDialog = null;
+      topLayerDialog({ title, message, fields, confirmLabel, danger, onSubmit }).then(resolve);
+    }));
+  });
+}
+
+// The console uses no service worker. One scoped to /admin (left over from
+// an earlier build served here) could keep serving stale console files, so
+// remove it; root-scoped workers belong to other apps and are left alone.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations()
+    .then((regs) => regs.filter((r) => new URL(r.scope).pathname.startsWith('/admin')).forEach((r) => r.unregister()))
+    .catch(() => {});
 }
 
 /* =====================================================================
@@ -473,67 +654,97 @@ function dialog({ title, message = '', fields = [], confirmLabel = 'Confirm', da
 
 const loginEl = document.getElementById('login');
 const appEl = document.getElementById('app');
-const loginErr = document.getElementById('login-error');
 
-function showLoginError(message) {
-  loginErr.textContent = message;
-  loginErr.hidden = false;
+function showError(id, message) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = message; el.hidden = false; }
+}
+function hideError(id) {
+  const el = document.getElementById(id);
+  if (el) el.hidden = true;
 }
 
-document.getElementById('phone-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  loginErr.hidden = true;
-  pendingIdentifier = document.getElementById('login-email').value.trim();
+/** Check whether any admin account exists. */
+async function checkAdminStatus() {
   try {
-    // One sign-in flow for the whole product (POST /auth/otp/send); the
-    // console uses the email channel.
-    await api('/auth/otp/send', { method: 'POST', body: { channel: 'email', identifier: pendingIdentifier } });
-    document.getElementById('phone-form').hidden = true;
-    document.getElementById('code-form').hidden = false;
-    document.getElementById('code').focus();
-  } catch (err) {
-    showLoginError(err.message);
+    const { hasAdmin } = await api('/admin/auth/status');
+    document.getElementById('login-checking').hidden = true;
+    if (hasAdmin) {
+      document.getElementById('login-form-wrap').hidden = false;
+    } else {
+      document.getElementById('bootstrap-form-wrap').hidden = false;
+    }
+  } catch {
+    document.getElementById('login-checking').hidden = true;
+    document.getElementById('login-form-wrap').hidden = false;
   }
-});
+}
 
-document.getElementById('code-form').addEventListener('submit', async (e) => {
+/** Bootstrap: create the first admin account. */
+document.getElementById('bootstrap-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  loginErr.hidden = true;
+  hideError('bootstrap-error');
+  const email = document.getElementById('bs-email').value.trim();
+  const displayName = document.getElementById('bs-name').value.trim();
+  const password = document.getElementById('bs-pass').value;
+  const confirmPassword = document.getElementById('bs-confirm').value;
+  if (password !== confirmPassword) { showError('bootstrap-error', 'Passwords do not match.'); return; }
+  if (password.length < 8) { showError('bootstrap-error', 'Password must be at least 8 characters.'); return; }
   try {
-    const result = await api('/auth/otp/verify', {
+    const result = await api('/admin/auth/bootstrap', {
       method: 'POST',
-      body: { channel: 'email', identifier: pendingIdentifier, code: document.getElementById('code').value.trim() },
+      body: { email, password, confirmPassword, displayName: displayName || undefined },
     });
     token = result.token;
+    adminRole = result.admin.role;
     localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem(PHONE_KEY, pendingIdentifier);
-    await api('/admin/me'); // server-side allow-list check
+    localStorage.setItem(ADMIN_EMAIL_KEY, result.admin.email);
+    localStorage.setItem(ADMIN_ROLE_KEY, result.admin.role);
     enterConsole();
   } catch (err) {
-    if (err.status === 403) {
-      showLoginError('That account signed in, but it is not an admin (not in ADMIN_EMAILS / ADMIN_PHONES).');
-      token = null;
-      localStorage.removeItem(TOKEN_KEY);
-    } else showLoginError(err.message);
+    showError('bootstrap-error', err.message);
   }
 });
 
-document.getElementById('back-btn').addEventListener('click', () => {
-  document.getElementById('code-form').hidden = true;
-  document.getElementById('phone-form').hidden = false;
-  loginErr.hidden = true;
+/** Normal admin login. */
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  hideError('login-error');
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-pass').value;
+  try {
+    const result = await api('/admin/auth/login', {
+      method: 'POST',
+      body: { email, password },
+    });
+    token = result.token;
+    adminRole = result.admin.role;
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(ADMIN_EMAIL_KEY, result.admin.email);
+    localStorage.setItem(ADMIN_ROLE_KEY, result.admin.role);
+    enterConsole();
+  } catch (err) {
+    showError('login-error', err.message);
+  }
 });
 
 document.getElementById('logout-btn').addEventListener('click', signOut);
 
 function signOut() {
   token = null;
+  adminRole = '';
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(ADMIN_EMAIL_KEY);
+  localStorage.removeItem(ADMIN_ROLE_KEY);
   appEl.hidden = true;
   loginEl.hidden = false;
   drawer.close();
-  document.getElementById('code-form').hidden = true;
-  document.getElementById('phone-form').hidden = false;
+  // Reset login state
+  document.getElementById('login-checking').hidden = true;
+  document.getElementById('bootstrap-form-wrap').hidden = true;
+  document.getElementById('login-form-wrap').hidden = false;
+  hideError('login-error');
+  hideError('bootstrap-error');
 }
 
 /* =====================================================================
@@ -545,19 +756,29 @@ const view = (id, label, group, render, countKey) => VIEWS.push({ id, label, gro
 const main = document.getElementById('main');
 
 // Sidebar order (and grouping) is fixed here, independent of the order views
-// are registered in below.
-const NAV_ORDER = ['overview', 'users', 'listeners', 'kyc', 'content', 'calls', 'wallet', 'payouts', 'reports', 'audit', 'system'];
+// are registered in below. Settings and Admin Management are at the bottom.
+const NAV_ORDER = ['overview', 'users', 'listeners', 'kyc', 'content', 'calls', 'wallet', 'payouts', 'reports', 'audit', 'system', 'admin-mgmt', 'settings'];
+
+const NAV_ICONS = {
+  'settings': '⚙',
+  'admin-mgmt': '🛡',
+};
 
 function renderNav() {
-  VIEWS.sort((a, b) => NAV_ORDER.indexOf(a.id) - NAV_ORDER.indexOf(b.id));
+  const visible = VIEWS.filter((v) => {
+    if (v.id === 'admin-mgmt' && adminRole !== 'super_admin') return false;
+    return true;
+  });
+  visible.sort((a, b) => NAV_ORDER.indexOf(a.id) - NAV_ORDER.indexOf(b.id));
   let html = '';
   let group = null;
-  for (const v of VIEWS) {
+  for (const v of visible) {
     if (v.group !== group) {
       group = v.group;
       html += `<div class="nav-group">${esc(group)}</div>`;
     }
-    html += `<button class="nav-item" data-view="${v.id}">${esc(v.label)}${
+    const icon = NAV_ICONS[v.id] ? `<span class="nav-icon">${NAV_ICONS[v.id]}</span> ` : '';
+    html += `<button class="nav-item" data-view="${v.id}">${icon}${esc(v.label)}${
       v.countKey ? `<span class="nav-count" id="count-${v.countKey}" data-count="0"></span>` : ''}</button>`;
   }
   const nav = document.getElementById('nav');
@@ -606,7 +827,14 @@ async function refreshCounts() {
 async function enterConsole() {
   loginEl.hidden = true;
   appEl.hidden = false;
-  document.getElementById('admin-phone').textContent = localStorage.getItem(PHONE_KEY) || '';
+  try {
+    const me = await api('/admin/me');
+    document.getElementById('admin-name').textContent = me.displayName || me.email || '';
+    adminRole = me.role || adminRole;
+    localStorage.setItem(ADMIN_ROLE_KEY, adminRole);
+  } catch {
+    document.getElementById('admin-name').textContent = localStorage.getItem(ADMIN_EMAIL_KEY) || '';
+  }
   if (!document.getElementById('nav').children.length) renderNav();
   refreshCounts();
   route();
@@ -630,6 +858,330 @@ async function changeUserStatus(user, status) {
   });
 }
 
+/* ---------- Permanent deletion ---------- */
+
+/** Must match REASON in deletion.admin.js — the server re-checks it. */
+const REASON_MIN = 3;
+const deleteReasonField = () => ({
+  name: 'reason', label: 'Reason', type: 'textarea', required: true, minLength: REASON_MIN,
+  help: `At least ${REASON_MIN} characters. Recorded in the audit log.`,
+});
+
+const countList = (obj) => Object.entries(obj)
+  .map(([k, v]) => `<li>${esc(k.replace(/([A-Z])/g, ' $1').toLowerCase())}: <b>${esc(typeof v === 'number' ? num(v) : String(v ?? '—'))}</b></li>`)
+  .join('');
+
+/**
+ * Permanently deletes an account after showing exactly what goes and what
+ * stays. The server re-checks everything (admin, blockers, typed id); this
+ * dialog only makes the consequences impossible to miss.
+ */
+async function deleteAccount(id, label) {
+  let preview;
+  try {
+    preview = await api(`/admin/users/${id}/deletion-preview`);
+  } catch (err) {
+    toast(`Could not load the deletion preview: ${err.message}`, false);
+    return null;
+  }
+  if (preview.blockers.length) {
+    await dialog({
+      title: `${label} cannot be deleted yet`,
+      message: `<ul class="del-list">${preview.blockers.map((b) => `<li>${esc(b.message)}</li>`).join('')}</ul>`,
+      confirmLabel: 'OK',
+    });
+    return null;
+  }
+  const result = await dialog({
+    title: `Permanently delete ${label}?`,
+    message: `<b class="del-warn">This cannot be undone.</b>
+      <div class="del-cols">
+        <div><h4>Deleted (rows and stored files)</h4><ul class="del-list">${countList(preview.deleted)}</ul></div>
+        <div><h4>Anonymised</h4><ul class="del-list">${countList(preview.anonymized)}</ul></div>
+        <div><h4>Retained for accounting and audit</h4><ul class="del-list">${countList(preview.retained)}</ul></div>
+      </div>`,
+    fields: [
+      deleteReasonField(),
+      { name: 'confirm', label: `Type the account id (${id}) to confirm`, required: true },
+    ],
+    confirmLabel: 'Delete permanently',
+    danger: true,
+    wide: true,
+    onSubmit: (v) => api(`/admin/users/${id}`, { method: 'DELETE', body: { reason: v.reason, confirm: v.confirm } }),
+  });
+  if (result && result.status === 'deleted') {
+    const files = Object.values(result.storageObjectsRemoved).reduce((a, b) => a + b, 0);
+    toast(`Account #${id} deleted — ${files} stored file(s) removed, financial history kept (audit #${result.auditId})`, true, 9000);
+  }
+  return result;
+}
+
+/** Permanently deletes one upload (post, creator photo or chat photo). */
+/** What a post is, for the delete dialog: ID, author, media type, caption.
+ * Only fields already shown in the Content table — nothing extra. */
+function postDeleteDetails(p) {
+  const caption = (p.caption || '').trim();
+  return [
+    ['Post', `#${p.id}`],
+    ['Author', `${p.author_name || '—'} (#${p.author_id})`],
+    ['Media', p.media_type === 'video' ? 'Video' : 'Image'],
+    ['Status', p.status === 'removed' ? (p.removed_by_admin ? 'Removed by admin' : 'Removed by author') : 'Active'],
+    ['Caption', caption ? (caption.length > 140 ? `${caption.slice(0, 140)}…` : caption) : '—'],
+  ];
+}
+
+async function deleteUpload(kind, id, details = null) {
+  const spec = {
+    post: { path: `/admin/posts/${id}`, what: `post #${id}`, note: 'The post and its image/video file are deleted. Use "Remove" instead if it may need restoring.' },
+    photo: { path: `/admin/listener-photos/${id}`, what: `creator photo #${id}`, note: 'The photo and its file are deleted. A creator left below the photo minimum is taken offline.' },
+    chat: { path: `/admin/chat-media/${id}`, what: `chat photo (message #${id})`, note: 'The message, its reactions and the stored image are deleted from the conversation.' },
+  }[kind];
+  const result = await dialog({
+    title: `Permanently delete ${spec.what}?`,
+    message: `<b class="del-warn">This cannot be undone.</b> ${esc(spec.note)}${
+      details ? `<dl class="del-details">${details.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : ''}`,
+    fields: [deleteReasonField()],
+    confirmLabel: 'Delete permanently',
+    danger: true,
+    onSubmit: (v) => api(spec.path, { method: 'DELETE', body: { reason: v.reason } }),
+  });
+  if (result && result.deleted) {
+    const files = result.storageObjectsRemoved ? `${result.storageObjectsRemoved} file removed` : 'file was already gone';
+    toast(`Deleted ${spec.what} (${files}${result.takenOffline ? '; creator taken offline' : ''})`, true, 9000);
+  }
+  return result;
+}
+
+/** The "Uploads" panel in a user drawer: every post, creator photo and chat
+ * photo the account owns, each with its own permanent delete. */
+async function renderUploads(host, userId) {
+  host.innerHTML = '<div class="sub">Loading uploads…</div>';
+  let up;
+  try {
+    up = await api(`/admin/users/${userId}/uploads`);
+  } catch (err) {
+    host.innerHTML = `<div class="sub">! ${esc(err.message)}</div>`;
+    return;
+  }
+  const tile = (media, meta, kind, id) => `
+    <div class="upload-tile">${media}<div class="sub">${meta}</div>
+      ${kind === 'chat' ? `<button class="btn-ghost btn-sm" data-view-chat="${id}">View photo</button>` : ''}
+      <button class="btn-danger btn-sm" data-del="${kind}" data-id="${id}">Delete permanently</button></div>`;
+  const posts = up.posts.map((p) => tile(postPreview(p), `Post #${p.id} · ${badge(p.media_type)} ${p.status !== 'active' ? badge(p.status) : ''}`, 'post', p.id)).join('');
+  const photos = up.photos.map((p) => tile(
+    p.url ? `<img src="${esc(p.url)}" alt="" class="thumb" style="width:64px;height:64px" loading="lazy">` : postPreview({}),
+    `Photo #${p.id}`, 'photo', p.id)).join('');
+  const chat = up.chatPhotos.map((m) => tile(
+    '<div class="ph" style="width:64px;height:64px;border-radius:8px;display:grid;place-items:center;color:var(--text-faint);font-size:11px;border:1px solid var(--border)">private</div>',
+    `Message #${m.id} · to #${m.other_user_id} · ${when(m.created_at)}`, 'chat', m.id)).join('');
+  host.innerHTML = `
+    <h4>Feed posts (${up.posts.length})</h4><div class="upload-grid">${posts || '<span class="sub">None.</span>'}</div>
+    <h4>Creator photos (${up.photos.length})</h4><div class="upload-grid">${photos || '<span class="sub">None.</span>'}</div>
+    <h4>Chat photos sent (${up.chatPhotos.length}) <span class="sub">— not previewed; private messages</span></h4>
+    <div class="upload-grid">${chat || '<span class="sub">None.</span>'}</div>`;
+  host.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (await deleteUpload(b.dataset.del, b.dataset.id)) renderUploads(host, userId);
+  }));
+  host.querySelectorAll('[data-view-chat]').forEach((b) => b.addEventListener('click', () => openChatPhoto(b.dataset.viewChat, userId)));
+}
+
+/** Inspector for ONE chat photo: the image itself (a 5-minute signed URL;
+ * every view is audit-logged server-side), who sent it to whom, and the
+ * permanent delete. Opened only by an explicit click — chat photos are
+ * never previewed in bulk. */
+function openChatPhoto(messageId, backToUserId) {
+  drawer.open(`Chat photo · message #${messageId}`, async (body) => {
+    const m = await api(`/admin/chat-media/${messageId}`);
+    body.innerHTML = `
+      <div class="drawer-actions">
+        <button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>
+        ${backToUserId ? '<button class="btn-ghost btn-sm" data-act="back">Back to user</button>' : ''}
+      </div>
+      <div class="panel">${m.url
+        ? `<img src="${esc(m.url)}" alt="chat photo" style="max-width:100%;max-height:480px;border-radius:10px;display:block">`
+        : '<div class="empty">The stored image could not be loaded.</div>'}</div>
+      <div class="panel"><h3>Message</h3>${kv([
+        ['Sent by', `${esc(m.sender.name || '—')} #${m.sender.id}`],
+        ['Sent to', `${esc(m.recipient.name || '—')} #${m.recipient.id}`],
+        ['Conversation', `#${m.conversationId}`],
+        ['Sent', esc(fmtDate(m.createdAt))],
+        ['Note', 'Private message. This view was recorded in the audit log.'],
+      ])}</div>`;
+    body.querySelector('[data-act=delete]').addEventListener('click', async () => {
+      if (!(await deleteUpload('chat', m.id))) return;
+      if (backToUserId) openUser(backToUserId); else drawer.close();
+    });
+    body.querySelector('[data-act=back]')?.addEventListener('click', () => openUser(backToUserId));
+  });
+}
+
+/* ---------- Edit dialogs (users, creators, posts) and call records ---------- */
+
+const LANG_OPTIONS = [['en', 'English'], ['hi', 'Hindi'], ['te', 'Telugu']];
+
+/** Only the fields that changed; '' clears an optional one. */
+function changedFields(original, values) {
+  const out = {};
+  for (const [k, v] of Object.entries(values)) {
+    const before = original[k] ?? '';
+    if (Array.isArray(v) ? JSON.stringify(v) !== JSON.stringify(before) : String(v) !== String(before)) out[k] = v;
+  }
+  return out;
+}
+
+/** Edit an account: name, sign-in identity (phone/email), avatar URL,
+ * language, gender. The server checks uniqueness and keeps at least one
+ * identity; an admin's own identity is refused there. */
+async function editUser(u) {
+  const original = {
+    displayName: u.name || '', email: u.email || '', phone: u.phone || '',
+    avatarUrl: u.avatarUrl || '', language: u.language || 'en', gender: u.gender || '',
+  };
+  const done = await dialog({
+    title: `Edit ${u.name || `user #${u.id}`}`,
+    message: `<dl class="del-details"><dt>Account</dt><dd>#${u.id}</dd><dt>Status</dt><dd>${esc(u.status || '—')}</dd></dl>`
+      + (u.isAdmin ? '<p class="help">This is an admin account: its phone and email cannot be changed here.</p>' : ''),
+    wide: true,
+    fields: [
+      { name: 'displayName', label: 'Name', value: original.displayName },
+      { name: 'phone', label: 'Mobile', value: original.phone, placeholder: '+919876543210', help: 'International format. Must not belong to another account. Leave empty to remove (an email must remain).' },
+      { name: 'email', label: 'Email', type: 'email', value: original.email, help: 'Must not belong to another account. Leave empty to remove (a phone must remain).' },
+      { name: 'avatarUrl', label: 'Avatar URL', value: original.avatarUrl, placeholder: 'https://…', help: 'Leave empty to remove the avatar.' },
+      { name: 'language', label: 'App language', type: 'select', value: original.language, options: LANG_OPTIONS },
+      { name: 'gender', label: 'Gender', type: 'select', value: original.gender, options: [['', '—'], ['female', 'Female'], ['male', 'Male'], ['other', 'Other']] },
+      deleteReasonField(),
+    ],
+    confirmLabel: 'Save changes',
+    onSubmit: async (v) => {
+      const { reason, ...rest } = v;
+      const changes = changedFields(original, rest);
+      if (Object.keys(changes).length === 0) throw new Error('Nothing was changed.');
+      return api(`/admin/users/${u.id}`, { method: 'PATCH', body: { ...changes, reason } });
+    },
+  });
+  if (done) toast(`Saved account #${u.id} (${done.changed.join(', ')})`);
+  return done;
+}
+
+/** Edit a creator's profile: bio, languages, call types they accept. */
+async function editCreator(l) {
+  const original = {
+    bio: l.bio || '', languages: l.languages || [],
+    acceptsAudio: Boolean(l.capabilities?.acceptsAudio), acceptsVideo: Boolean(l.capabilities?.acceptsVideo),
+  };
+  const done = await dialog({
+    title: `Edit creator ${l.name || `#${l.id}`}`,
+    message: '<p class="help">Rates, KYC identity and payout details are not editable here. Name, mobile and email: use Edit account.</p>',
+    wide: true,
+    fields: [
+      { name: 'bio', label: 'Bio', type: 'textarea', value: original.bio },
+      { name: 'languages', label: 'Languages', type: 'multi', value: original.languages, options: LANG_OPTIONS, required: true },
+      { name: 'acceptsAudio', label: 'Accepts audio calls', type: 'checkbox', value: original.acceptsAudio },
+      { name: 'acceptsVideo', label: 'Accepts video calls', type: 'checkbox', value: original.acceptsVideo },
+      deleteReasonField(),
+    ],
+    confirmLabel: 'Save changes',
+    onSubmit: async (v) => {
+      const { reason, ...rest } = v;
+      if (!rest.acceptsAudio && !rest.acceptsVideo) throw new Error('A creator must accept audio, video or both.');
+      const changes = changedFields(original, rest);
+      if (Object.keys(changes).length === 0) throw new Error('Nothing was changed.');
+      return api(`/admin/listeners/${l.id}/profile`, { method: 'PATCH', body: { ...changes, reason } });
+    },
+  });
+  if (done) toast(`Saved creator #${l.id} (${done.changed.join(', ')})`);
+  return done;
+}
+
+/** Upload a creator photo on their behalf (JPEG/PNG/WebP, 8 MB max). */
+async function addCreatorPhoto(l) {
+  const done = await dialog({
+    title: `Add a photo for ${l.name || `creator #${l.id}`}`,
+    message: `<p class="help">${l.photoCount} of ${l.maxPhotos} photos used.</p>`,
+    fields: [
+      { name: 'file', label: 'Photo', type: 'file', accept: 'image/jpeg,image/png,image/webp', required: true },
+      deleteReasonField(),
+    ],
+    confirmLabel: 'Upload photo',
+    onSubmit: async (v) => {
+      const file = v.file;
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Choose a JPEG, PNG or WebP image.');
+      if (file.size > 8 * 1024 * 1024) throw new Error('That photo is larger than 8 MB.');
+      const up = await api(`/admin/listeners/${l.id}/photos/upload-url`, { method: 'POST', body: { mimeType: file.type } });
+      const put = await fetch(up.uploadUrl, { method: 'PUT', headers: { Authorization: `Bearer ${up.token}`, 'Content-Type': file.type }, body: file });
+      if (!put.ok) throw new Error(`Upload failed (${put.status}). Try again.`);
+      return api(`/admin/listeners/${l.id}/photos`, { method: 'POST', body: { path: up.path, reason: v.reason } });
+    },
+  });
+  if (done) toast(`Photo added to creator #${l.id} (${done.photoCount} now)`);
+  return done;
+}
+
+async function editPostCaption(p) {
+  const done = await dialog({
+    title: `Edit caption of post #${p.id}`,
+    message: `<dl class="del-details"><dt>Author</dt><dd>${esc(p.author_name || '—')} (#${p.author_id})</dd><dt>Media</dt><dd>${p.media_type === 'video' ? 'Video' : 'Image'}</dd></dl>`,
+    fields: [
+      { name: 'caption', label: 'Caption', type: 'textarea', value: p.caption || '', help: 'Leave empty to remove the caption.' },
+      deleteReasonField(),
+    ],
+    confirmLabel: 'Save caption',
+    onSubmit: (v) => {
+      if (v.caption === (p.caption || '')) throw new Error('Nothing was changed.');
+      return api(`/admin/posts/${p.id}`, { method: 'PATCH', body: { caption: v.caption, reason: v.reason } });
+    },
+  });
+  if (done) toast(`Caption of post #${p.id} saved`);
+  return done;
+}
+
+/** A call row that never connected or billed (the server re-checks). */
+const callLooksUnbilled = (c) => !c.started_at && Number(c.coins_spent) === 0 && Number(c.listener_earned) === 0
+  && Number(c.billed_minutes) === 0 && (c.status === 'ended' || c.status === 'failed');
+
+async function deleteCallRecord(c) {
+  const done = await dialog({
+    title: `Delete call record #${c.id}?`,
+    message: `<b class="del-warn">This cannot be undone.</b> Only calls that never connected and never billed can be deleted; billing history always stays.
+      <dl class="del-details"><dt>Call</dt><dd>#${c.id} · ${esc(c.type)} · ${esc(c.status)}</dd>
+      <dt>Caller</dt><dd>${esc(c.caller_name || '—')} (#${c.caller_id})</dd><dt>Listener</dt><dd>${esc(c.listener_name || '—')} (#${c.listener_id})</dd>
+      <dt>End reason</dt><dd>${esc(c.end_reason || '—')}</dd></dl>`,
+    fields: [deleteReasonField()],
+    confirmLabel: 'Delete call record',
+    danger: true,
+    onSubmit: (v) => api(`/admin/calls/${c.id}`, { method: 'DELETE', body: { reason: v.reason } }),
+  });
+  if (done) toast(`Deleted call record #${c.id}`);
+  return done;
+}
+
+/** A visible per-row Delete for account tables. Admin accounts and
+ * already-deleted ones get none (the server refuses admins regardless). */
+function rowDeleteButton(id, label, { isAdmin = false, deleted = false, edit = 'user' } = {}) {
+  if (deleted) return '<span class="sub">deleted</span>';
+  const editBtn = `<button class="btn-ghost btn-sm" data-row-edit="${id}" data-kind="${edit}" title="Edit #${id}">Edit</button>`;
+  if (isAdmin) return `<span class="row-actions">${editBtn}<span class="sub">admin</span></span>`;
+  return `<span class="row-actions">${editBtn}<button class="btn-danger btn-sm" data-row-del="${id}" data-label="${esc(label || `#${id}`)}" title="Permanently delete account #${id}">Delete</button></span>`;
+}
+
+function wireRowDeletes(tbody, onDone) {
+  tbody.querySelectorAll('[data-row-del]').forEach((b) => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (await deleteAccount(b.dataset.rowDel, b.dataset.label)) onDone();
+  }));
+  tbody.querySelectorAll('[data-row-edit]').forEach((b) => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try {
+      const done = b.dataset.kind === 'creator'
+        ? await editCreator(await api(`/admin/listeners/${b.dataset.rowEdit}`))
+        : await editUser(await api(`/admin/users/${b.dataset.rowEdit}`));
+      if (done) onDone();
+    } catch (err) {
+      toast(err.message, false);
+    }
+  }));
+}
+
 function openUser(id) {
   drawer.open(`User #${id}`, async (body) => {
     const u = await api(`/admin/users/${id}`);
@@ -640,17 +1192,23 @@ function openUser(id) {
         ${u.status === 'suspended' ? '<button class="btn-ok btn-sm" data-act="restore">Restore account</button>' : ''}
         ${L ? '<button class="btn-ghost btn-sm" data-act="listener">Open creator profile</button>' : ''}
         ${typeof openWallet === 'function' ? '<button class="btn-ghost btn-sm" data-act="wallet">Wallet & ledger</button>' : ''}
+        ${u.pushRegistered ? '<button class="btn-ghost btn-sm" data-act="test-push">Send test push</button>' : ''}
+        ${u.status !== 'deleted' ? '<button class="btn-ghost btn-sm" data-act="edit">Edit details</button>' : ''}
+        ${!u.isAdmin && u.status !== 'deleted' ? '<button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>' : ''}
       </div>
       <div class="cols-2">
         <div class="panel"><h3>Profile</h3>${kv([
           ['Name', esc(u.name || '—')],
-          ['Phone', `<span class="mono">${esc(u.phone)}</span>${u.isAdmin ? ' ' + badge('admin') : ''}`],
+          ['Phone', `<span class="mono">${esc(u.phone || '—')}</span>${u.isAdmin ? ' ' + badge('admin') : ''}`],
+          ['Email', `<span class="mono">${esc(u.email || '—')}</span>`],
+          ['Avatar', u.avatarUrl ? `<a href="${esc(u.avatarUrl)}" target="_blank" rel="noopener noreferrer">open ↗</a>` : '—'],
           ['Account status', badge(u.status)],
           ['Role', badge(u.role)],
           ['Language / gender', `${esc(u.language || '—')} / ${esc(u.gender || '—')}`],
           ['Joined', esc(fmtDate(u.createdAt))],
           ['Last sign-in', when(u.lastActive)],
           ['Free trial', u.freeTrialUsed ? 'used' : 'available'],
+          ['Push notifications', u.pushRegistered ? badge('device registered', 'green') : badge('no device', 'grey')],
         ])}</div>
         <div class="panel"><h3>Wallet & activity</h3>${kv([
           ['Coin balance', coins(u.wallet.coinBalance)],
@@ -693,8 +1251,16 @@ function openUser(id) {
         { label: 'Status', render: (r) => badge(r.status) },
         { label: 'When', render: (r) => when(r.created_at) },
       ], u.reports, 'No reports.')}</div>
+      <div class="panel"><h3>Uploads</h3><div data-uploads></div></div>
       <div class="panel"><h3>Admin history</h3>${timeline(u.history)}</div>`;
 
+    renderUploads(body.querySelector('[data-uploads]'), u.id);
+    body.querySelector('[data-act=edit]')?.addEventListener('click', async () => {
+      if (await editUser(u)) drawer.refresh();
+    });
+    body.querySelector('[data-act=delete]')?.addEventListener('click', async () => {
+      if (await deleteAccount(u.id, u.name || `user #${u.id}`)) drawer.refresh();
+    });
     body.querySelector('[data-act=suspend]')?.addEventListener('click', async () => {
       if (await changeUserStatus(u, 'suspended')) { toast('Account suspended'); drawer.refresh(); }
     });
@@ -703,6 +1269,18 @@ function openUser(id) {
     });
     body.querySelector('[data-act=listener]')?.addEventListener('click', () => openListener(u.id));
     body.querySelector('[data-act=wallet]')?.addEventListener('click', () => openWallet(u.id));
+    body.querySelector('[data-act=test-push]')?.addEventListener('click', async (e) => {
+      const button = e.currentTarget;
+      button.disabled = true;
+      try {
+        await api(`/admin/users/${u.id}/test-push`, { method: 'POST' });
+        toast('Test push queued — it should arrive on the device within a few seconds');
+      } catch (err) {
+        toast(err.message, false);
+      } finally {
+        button.disabled = false;
+      }
+    });
     body.querySelectorAll('[data-report]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();
       openReport(a.dataset.report);
@@ -746,6 +1324,10 @@ function openListener(id) {
         ${k.status === 'pending' ? '<button class="btn-ok btn-sm" data-act="approve">Approve application</button><button class="btn-danger btn-sm" data-act="reject">Reject</button>' : ''}
         ${k.status === 'approved' ? '<button class="btn-danger btn-sm" data-act="reject">Revoke approval</button>' : ''}
         <button class="btn-ghost btn-sm" data-act="user">Open user account</button>
+        ${l.accountStatus !== 'deleted' ? `<button class="btn-ghost btn-sm" data-act="edit">Edit profile</button>
+        <button class="btn-ghost btn-sm" data-act="edit-account">Edit account</button>
+        ${l.photoCount < l.maxPhotos ? '<button class="btn-ghost btn-sm" data-act="add-photo">Add photo</button>' : ''}
+        <button class="btn-danger btn-sm" data-act="delete">Delete permanently</button>` : ''}
       </div>
       <div class="cols-2">
         <div class="panel"><h3>Status</h3>${kv([
@@ -757,7 +1339,8 @@ function openListener(id) {
         ])}</div>
         <div class="panel"><h3>Profile</h3>${kv([
           ['Name', esc(l.name || '—')],
-          ['Phone', `<span class="mono">${esc(l.phone)}</span>`],
+          ['Phone', `<span class="mono">${esc(l.phone || '—')}</span>`],
+          ['Email', `<span class="mono">${esc(l.email || '—')}</span>`],
           ['Languages', esc((l.languages || []).join(', '))],
           ['Capabilities', `${l.capabilities.acceptsAudio ? badge('audio') : ''} ${l.capabilities.acceptsVideo ? badge('video') : ''}`],
           ['Rates (coins/min)', `audio ${l.capabilities.audioRate} · video ${l.capabilities.videoRate}`],
@@ -766,9 +1349,9 @@ function openListener(id) {
         ])}</div>
       </div>
       <div class="panel"><h3>Photos (${l.photos.length})</h3>${l.photos.length
-        ? `<div class="photo-grid">${l.photos.map((p) => p.url
+        ? `<div class="photo-grid">${l.photos.map((p) => `<div class="photo-cell">${p.url
             ? `<a href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.url)}" alt="photo ${p.id}" loading="lazy"></a>`
-            : '<div class="ph"></div>').join('')}</div>`
+            : '<div class="ph"></div>'}<button class="btn-danger btn-sm" data-photo-del="${p.id}">Delete photo #${p.id}</button></div>`).join('')}</div>`
         : '<div class="empty" style="padding:14px">No photos uploaded yet.</div>'}</div>
       <div class="panel"><h3>KYC (admin only)</h3>${kv([
         ['Status', badge(k.status)],
@@ -811,6 +1394,23 @@ function openListener(id) {
     body.querySelector('[data-act=approve]')?.addEventListener('click', () => reviewKyc(l, true, () => drawer.refresh()));
     body.querySelector('[data-act=reject]')?.addEventListener('click', () => reviewKyc(l, false, () => drawer.refresh()));
     body.querySelector('[data-act=user]').addEventListener('click', () => openUser(l.id));
+    body.querySelectorAll('[data-photo-del]').forEach((b) => b.addEventListener('click', async () => {
+      if (await deleteUpload('photo', b.dataset.photoDel)) drawer.refresh();
+    }));
+    body.querySelector('[data-act=delete]')?.addEventListener('click', async () => {
+      if (await deleteAccount(l.id, l.name || `creator #${l.id}`)) drawer.refresh();
+    });
+    body.querySelector('[data-act=edit]')?.addEventListener('click', async () => {
+      if (await editCreator(l)) drawer.refresh();
+    });
+    body.querySelector('[data-act=edit-account]')?.addEventListener('click', async () => {
+      try {
+        if (await editUser(await api(`/admin/users/${l.id}`))) drawer.refresh();
+      } catch (err) { toast(err.message, false); }
+    });
+    body.querySelector('[data-act=add-photo]')?.addEventListener('click', async () => {
+      if (await addCreatorPhoto(l)) drawer.refresh();
+    });
     body.querySelectorAll('[data-report]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();
       openReport(a.dataset.report);
@@ -922,6 +1522,14 @@ view('overview', 'Overview', 'Operate', async (el) => {
     }));
   };
   el.querySelector('[data-r]').addEventListener('click', load);
+  el.querySelector('[data-mt]').addEventListener('click', async () => {
+    try {
+      await api('/admin/system/monitoring-test', { method: 'POST' });
+      toast('Test error sent — check Sentry (moco-api) for "Moco API monitoring test event"');
+    } catch (err) {
+      toast(err.message, false);
+    }
+  });
   load();
 });
 
@@ -947,8 +1555,10 @@ view('users', 'Users', 'Operate', (el) => {
       { label: 'Coins', sort: 'balance', num: true, render: (r) => coins(r.coinBalance) },
       { label: 'Joined', sort: 'created', render: (r) => when(r.createdAt) },
       { label: 'Last sign-in', sort: 'lastActive', render: (r) => when(r.lastActive) },
+      { label: 'Actions', pin: true, render: (r) => rowDeleteButton(r.id, r.name || r.phone, { isAdmin: r.isAdmin, deleted: r.status === 'deleted' }) },
     ],
     onRow: (r) => openUser(r.id),
+    afterLoad: (rows, tbody) => wireRowDeletes(tbody, () => table.reload()),
   });
   el.querySelector('[data-create]').addEventListener('click', async () => {
     const created = await dialog({
@@ -1008,8 +1618,10 @@ view('listeners', 'Creators / Listeners', 'Operate', (el) => {
       { label: 'Rating', sort: 'rating', num: true, render: (r) => r.rating.toFixed(1) },
       { label: 'Account', render: (r) => badge(r.accountStatus) },
       { label: 'Created', sort: 'created', render: (r) => when(r.createdAt) },
+      { label: 'Actions', pin: true, render: (r) => rowDeleteButton(r.id, r.name || `creator #${r.id}`, { deleted: r.accountStatus === 'deleted', edit: 'creator' }) },
     ],
     onRow: (r) => openListener(r.id),
+    afterLoad: (rows, tbody) => wireRowDeletes(tbody, () => table.reload()),
   });
   el.querySelector('[data-create]').addEventListener('click', async () => {
     const created = await dialog({
@@ -1153,11 +1765,14 @@ function openWallet(userId) {
   else go('wallet');
 }
 
-function openCall(id) {
+function openCall(id, onChange) {
   drawer.open(`Call #${id}`, async (body) => {
-    const c = await api(`/admin/calls/${id}`);
+    const [c, del] = await Promise.all([api(`/admin/calls/${id}`), api(`/admin/calls/${id}/deletability`)]);
     body.innerHTML = `
-      <div class="panel"><h3>Call (read-only)</h3>${kv([
+      <div class="drawer-actions">${del.deletable
+        ? '<button class="btn-danger btn-sm" data-act="delete-call">Delete call record</button><span class="sub">Never connected or billed, so it can be removed.</span>'
+        : `<span class="sub">Read-only: ${esc(del.blocker?.message || 'billing history')}</span>`}</div>
+      <div class="panel"><h3>Call</h3>${kv([
         ['Type / status', `${badge(c.type)} ${badge(c.status)}`],
         ['Caller', `<a href="#" data-user="${c.caller_id}">${esc(c.caller_name || '—')} #${c.caller_id}</a> <span class="sub mono">${esc(c.caller_phone)}</span>`],
         ['Listener', `<a href="#" data-listener="${c.listener_id}">${esc(c.listener_name || '—')} #${c.listener_id}</a> <span class="sub mono">${esc(c.listener_phone)}</span>`],
@@ -1187,6 +1802,9 @@ function openCall(id) {
     body.querySelectorAll('[data-user]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openUser(a.dataset.user); }));
     body.querySelectorAll('[data-listener]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openListener(a.dataset.listener); }));
     body.querySelectorAll('[data-report]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openReport(a.dataset.report); }));
+    body.querySelector('[data-act=delete-call]')?.addEventListener('click', async () => {
+      if (await deleteCallRecord(c)) { drawer.close(); onChange?.(); }
+    });
   });
 }
 
@@ -1201,7 +1819,7 @@ function postPreview(p, big = false) {
 /* ---------- Content ---------- */
 
 view('content', 'Content / Posts', 'Activity', (el) => {
-  el.innerHTML = head('Content / Posts', 'Feed posts. Removing hides a post but keeps its media so it can be restored; posts their author deleted cannot be restored. Every action needs a reason and is audit-logged.') + '<div id="t"></div>';
+  el.innerHTML = head('Content / Posts', 'Feed posts. Removing hides a post but keeps its media so it can be restored; posts their author deleted cannot be restored. Delete permanently (in a post) erases the post and its stored file for good. Every action needs a reason and is audit-logged.') + '<div id="t"></div>';
   const table = dataTable(el.querySelector('#t'), {
     endpoint: '/admin/posts',
     search: 'Caption, author, phone or #id…',
@@ -1220,9 +1838,20 @@ view('content', 'Content / Posts', 'Activity', (el) => {
       { label: 'Author reports', sort: 'reports', num: true, render: (p) => num(p.author_reports) },
       { label: 'Status', render: (p) => (p.status === 'removed' ? `${badge('removed')}<span class="sub">${p.removed_by_admin ? 'by admin' : 'by author'}</span>` : badge('active')) },
       { label: 'Posted', sort: 'created', render: (p) => when(p.created_at) },
+      { label: 'Actions', pin: true, render: (p) => `<span class="row-actions"><button class="btn-ghost btn-sm" data-post-edit="${p.id}" title="Edit the caption of post #${p.id}">Edit</button><button class="btn-danger btn-sm" data-post-del="${p.id}" title="Permanently delete post #${p.id} and its file">Delete</button></span>` },
     ],
     onRow: (p) => openPost(p, () => table.reload()),
     afterLoad: (rows, tbody) => {
+      tbody.querySelectorAll('[data-post-del]').forEach((b) => b.addEventListener('click', async (e) => {
+        const post = rows.find((r) => String(r.id) === b.dataset.postDel);
+        e.stopPropagation();
+        if (await deleteUpload('post', b.dataset.postDel, post ? postDeleteDetails(post) : null)) table.reload();
+      }));
+      tbody.querySelectorAll('[data-post-edit]').forEach((b) => b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const post = rows.find((r) => String(r.id) === b.dataset.postEdit);
+        if (post && (await editPostCaption(post))) table.reload();
+      }));
       tbody.querySelectorAll('[data-author]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openUser(a.dataset.author); }));
     },
   });
@@ -1234,6 +1863,8 @@ function openPost(p, onChange) {
       <div class="drawer-actions">
         ${p.status === 'active' ? '<button class="btn-danger btn-sm" data-act="remove">Remove post</button>' : ''}
         ${p.restorable ? '<button class="btn-ok btn-sm" data-act="restore">Restore post</button>' : ''}
+        <button class="btn-ghost btn-sm" data-act="edit">Edit caption</button>
+        <button class="btn-danger btn-sm" data-act="purge">Delete permanently</button>
         <button class="btn-ghost btn-sm" data-act="author">Open author</button>
       </div>
       <div class="panel">${postPreview(p, true)}</div>
@@ -1251,7 +1882,7 @@ function openPost(p, onChange) {
       const done = await dialog({
         title: action === 'remove' ? `Remove post #${p.id}?` : `Restore post #${p.id}?`,
         message: action === 'remove' ? 'It disappears from the feed immediately. Its media is kept so it can be restored.' : 'It returns to the feed.',
-        fields: [{ name: 'reason', label: 'Reason', type: 'textarea', required: true }],
+        fields: [deleteReasonField()],
         confirmLabel: action === 'remove' ? 'Remove' : 'Restore',
         danger: action === 'remove',
         onSubmit: (v) => api(`/admin/posts/${p.id}`, { method: 'POST', body: { action, reason: v.reason } }),
@@ -1260,6 +1891,12 @@ function openPost(p, onChange) {
     };
     body.querySelector('[data-act=remove]')?.addEventListener('click', act('remove'));
     body.querySelector('[data-act=restore]')?.addEventListener('click', act('restore'));
+    body.querySelector('[data-act=purge]').addEventListener('click', async () => {
+      if (await deleteUpload('post', p.id, postDeleteDetails(p))) { drawer.close(); onChange?.(); }
+    });
+    body.querySelector('[data-act=edit]').addEventListener('click', async () => {
+      if (await editPostCaption(p)) { drawer.close(); onChange?.(); }
+    });
     body.querySelector('[data-act=author]').addEventListener('click', () => openUser(p.author_id));
   });
 }
@@ -1267,8 +1904,8 @@ function openPost(p, onChange) {
 /* ---------- Calls ---------- */
 
 view('calls', 'Calls', 'Activity', (el) => {
-  el.innerHTML = head('Calls', 'Read-only call and billing history. Nothing here edits historical billing.') + '<div id="t"></div>';
-  dataTable(el.querySelector('#t'), {
+  el.innerHTML = head('Calls', 'Call and billing history is read-only. Only a call that never connected and never billed (missed, declined, failed) can be deleted; the server re-checks every time.') + '<div id="t"></div>';
+  const table = dataTable(el.querySelector('#t'), {
     endpoint: '/admin/calls',
     search: 'Caller/listener name, phone or call #…',
     sort: 'created',
@@ -1290,8 +1927,18 @@ view('calls', 'Calls', 'Activity', (el) => {
       { label: 'Listener earned', sort: 'earned', num: true, render: (c) => rupees(c.listener_earned) },
       { label: 'End reason', render: (c) => esc(c.end_reason || '—') },
       { label: 'Status', render: (c) => badge(c.status === 'active' ? 'live' : c.status) },
+      { label: 'Actions', pin: true, render: (c) => (callLooksUnbilled(c)
+        ? `<button class="btn-danger btn-sm" data-call-del="${c.id}" title="Delete never-billed call record #${c.id}">Delete</button>`
+        : '<span class="sub" title="Billing history stays read-only">read-only</span>') },
     ],
-    onRow: (c) => openCall(c.id),
+    onRow: (c) => openCall(c.id, () => table.reload()),
+    afterLoad: (rows, tbody) => {
+      tbody.querySelectorAll('[data-call-del]').forEach((b) => b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const c = rows.find((r) => String(r.id) === b.dataset.callDel);
+        if (c && (await deleteCallRecord(c))) table.reload();
+      }));
+    },
   });
 });
 
@@ -1471,7 +2118,7 @@ view('payouts', 'Payouts', 'Money', (el) => {
 /* ---------- System ---------- */
 
 view('system', 'System / Reconcile', 'System', (el) => {
-  el.innerHTML = head('System', 'Live dependency health and money reconciliation. No hosts, keys or credentials are ever shown.', '<button class="btn-ghost btn-sm" data-r>Re-check</button>') +
+  el.innerHTML = head('System', 'Live dependency health and money reconciliation. No hosts, keys or credentials are ever shown.', '<button class="btn-ghost btn-sm" data-mt>Send test error</button> <button class="btn-ghost btn-sm" data-r>Re-check</button>') +
     '<div class="section-title">Health</div><div class="health-grid" id="hl"><div class="empty">Checking…</div></div>' +
     '<div class="section-title">Queues</div><div id="qs"></div>' +
     '<div class="section-title">Coin wallets ↔ coin ledger</div><div id="rec"></div>' +
@@ -1489,6 +2136,8 @@ view('system', 'System / Reconcile', 'System', (el) => {
         card('Redis', h.redis.ok, h.redis.ok ? `${h.redis.latencyMs} ms` : esc(h.redis.error)),
         card('Storage', h.storage.ok, h.storage.ok ? `${h.storage.latencyMs} ms · ${h.storage.buckets.map((b) => `${esc(b.name)} ${b.private ? badge('private', 'green') : badge('PUBLIC', 'red')}`).join(' ')}` : esc(h.storage.error || 'not configured')),
         card('Tick worker (billing)', h.tickWorker.ok, h.tickWorker.ok ? `last heartbeat ${h.tickWorker.ageSeconds}s ago` : esc(h.tickWorker.error)),
+        card('Push notifications (FCM)', h.push?.ok, h.push?.ok ? 'service account configured' : 'FCM_SERVICE_ACCOUNT_JSON not set — pushes are not sent'),
+        card('Error monitoring (Sentry)', h.monitoring?.ok, h.monitoring?.ok ? 'reporting API errors' : 'SENTRY_DSN not set — errors are only in Vercel logs'),
       ].join('');
       el.querySelector('#qs').innerHTML = h.queues.ok
         ? `<div class="panel">${miniTable([
@@ -1529,12 +2178,294 @@ view('system', 'System / Reconcile', 'System', (el) => {
  * Boot
  * ===================================================================== */
 
-(async () => {
-  if (!token) return;
+/* ---------- Settings ---------- */
+
+view('settings', 'Settings', 'Setup', (el) => {
+  el.innerHTML = head('Settings', 'App settings managed from the console. Every change is recorded in the audit log.') +
+    '<div id="lb"></div>';
+  renderLoginBackground(el.querySelector('#lb'));
+});
+
+/**
+ * Login screen background: Default / Image / Video. Files go straight to
+ * Storage with a backend-signed upload URL (no Storage credentials here);
+ * the server re-checks type, size and ownership before saving.
+ */
+async function renderLoginBackground(host) {
+  host.innerHTML = '<div class="panel"><h3>Login screen background</h3><div class="sub">Loading…</div></div>';
+  let s;
   try {
-    await api('/admin/me');
-    enterConsole();
-  } catch {
-    signOut();
+    s = await api('/admin/settings/login-background');
+  } catch (err) {
+    host.innerHTML = `<div class="panel"><h3>Login screen background</h3><div class="sub">! ${esc(err.message)}</div></div>`;
+    return;
   }
+  const L = s.limits;
+  // Draft = what will be saved; preview URLs are local object URLs for new uploads.
+  const draft = { type: s.type, imagePath: s.imagePath, videoPath: s.videoPath, imageUrl: s.imageUrl, videoUrl: s.videoUrl };
+  const mb = (bytes) => `${Math.round(bytes / 1024 / 1024)} MB`;
+
+  host.innerHTML = `
+    <div class="panel lb-panel">
+      <h3>Login screen background</h3>
+      <p class="sub">Shown full-screen behind the web app's login. A video plays muted and looped; the image is also its fallback.</p>
+      <div class="lb-grid">
+        <div class="lb-controls">
+          <div class="lb-types" role="radiogroup" aria-label="Background type">
+            ${['default', 'image', 'video'].map((t) => `
+              <label class="lb-type"><input type="radio" name="lbtype" value="${t}" ${draft.type === t ? 'checked' : ''}>
+                ${t === 'default' ? 'Default' : t === 'image' ? 'Image' : 'Video'}</label>`).join('')}
+          </div>
+          <div class="field lb-row" data-row="image">
+            <label>Image <span class="sub">(JPEG, PNG or WebP, up to ${mb(L.image.maxBytes)})</span></label>
+            <input type="file" accept="${L.image.mimeTypes.join(',')}" data-file="image">
+            <div class="help" data-status="image">${draft.imagePath ? 'Current image set.' : 'No image yet.'}</div>
+          </div>
+          <div class="field lb-row" data-row="video">
+            <label>Video <span class="sub">(MP4, up to ${mb(L.video.maxBytes)}, ${L.video.maxSeconds}s max)</span></label>
+            <input type="file" accept="${L.video.mimeTypes.join(',')}" data-file="video">
+            <div class="help" data-status="video">${draft.videoPath ? 'Current video set.' : 'No video yet.'}</div>
+          </div>
+          <div class="error-msg" data-err hidden></div>
+          <div class="lb-actions">
+            <button class="btn-primary inline" data-save>Save</button>
+            ${s.type !== 'default' ? '<button class="btn-danger btn-sm" data-reset>Remove / revert to default</button>' : ''}
+          </div>
+          <div class="help">${s.updatedAt ? `Last changed ${esc(fmtDate(s.updatedAt))}.` : 'Using the app default.'}</div>
+        </div>
+        <div class="lb-phone" aria-label="Preview">
+          <div class="lb-media" data-preview></div>
+          <div class="lb-overlay"></div>
+          <div class="lb-mock"><div class="lb-mock-toggle"><span>Email</span><span>SMS</span></div>
+            <div class="lb-mock-input">Type Email Id</div><div class="lb-mock-btn">→</div></div>
+        </div>
+      </div>
+    </div>`;
+
+  const $ = (sel) => host.querySelector(sel);
+  const errEl = $('[data-err]');
+  const showErr = (m) => { errEl.textContent = m; errEl.hidden = !m; };
+
+  function renderPreview() {
+    const p = $('[data-preview]');
+    if (draft.type === 'video' && draft.videoUrl) {
+      p.innerHTML = `<video src="${esc(draft.videoUrl)}" muted autoplay loop playsinline ${draft.imageUrl ? `poster="${esc(draft.imageUrl)}"` : ''}></video>`;
+    } else if (draft.type !== 'default' && draft.imageUrl) {
+      p.innerHTML = `<img src="${esc(draft.imageUrl)}" alt="">`;
+    } else {
+      p.innerHTML = '<div class="lb-default">App default</div>';
+    }
+    host.querySelector('[data-row="image"]').style.opacity = draft.type === 'default' ? 0.45 : 1;
+    host.querySelector('[data-row="video"]').hidden = draft.type !== 'video';
+  }
+  renderPreview();
+
+  host.querySelectorAll('input[name=lbtype]').forEach((r) => r.addEventListener('change', () => {
+    draft.type = r.value;
+    showErr('');
+    renderPreview();
+  }));
+
+  const videoSeconds = (file) => new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.onloadedmetadata = () => { URL.revokeObjectURL(v.src); resolve(v.duration); };
+    v.onerror = () => resolve(NaN);
+    v.src = URL.createObjectURL(file);
+  });
+
+  host.querySelectorAll('[data-file]').forEach((input) => input.addEventListener('change', async () => {
+    const kind = input.dataset.file;
+    const file = input.files[0];
+    const status = $(`[data-status="${kind}"]`);
+    showErr('');
+    if (!file) return;
+    if (!L[kind].mimeTypes.includes(file.type)) { showErr(`Use ${L[kind].mimeTypes.join(', ')} for the ${kind}.`); input.value = ''; return; }
+    if (file.size > L[kind].maxBytes) { showErr(`That ${kind} is ${mb(file.size)}; the limit is ${mb(L[kind].maxBytes)}.`); input.value = ''; return; }
+    if (kind === 'video') {
+      const secs = await videoSeconds(file);
+      if (!Number.isFinite(secs)) { showErr('That video cannot be played in a browser. Use an H.264 MP4.'); input.value = ''; return; }
+      if (secs > L.video.maxSeconds) { showErr(`That video is ${Math.round(secs)}s; keep it to ${L.video.maxSeconds}s or less.`); input.value = ''; return; }
+    }
+    status.textContent = 'Uploading…';
+    try {
+      const up = await api('/admin/settings/login-background/upload-url', { method: 'POST', body: { kind, mimeType: file.type } });
+      const put = await fetch(up.uploadUrl, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${up.token}`, 'Content-Type': file.type, 'x-upsert': 'false' },
+        body: file,
+      });
+      if (!put.ok) throw new Error(`Upload failed (${put.status}).`);
+      draft[`${kind}Path`] = up.path;
+      draft[`${kind}Url`] = URL.createObjectURL(file);
+      if (draft.type === 'default') {
+        draft.type = kind;
+        host.querySelector(`input[name=lbtype][value=${kind}]`).checked = true;
+      }
+      status.textContent = `Uploaded ${file.name} — press Save to use it.`;
+      renderPreview();
+    } catch (err) {
+      status.textContent = '';
+      showErr(err.message);
+    }
+  }));
+
+  $('[data-save]').addEventListener('click', async (e) => {
+    showErr('');
+    e.target.disabled = true;
+    try {
+      await api('/admin/settings/login-background', {
+        method: 'PUT',
+        body: { type: draft.type, imagePath: draft.imagePath, videoPath: draft.videoPath },
+      });
+      toast(draft.type === 'default' ? 'Login background set to the default' : 'Login background saved');
+      renderLoginBackground(host);
+    } catch (err) {
+      showErr(err.message);
+      e.target.disabled = false;
+    }
+  });
+
+  $('[data-reset]')?.addEventListener('click', async () => {
+    const done = await dialog({
+      title: 'Revert the login background to the default?',
+      message: 'The current background media is deleted from storage. This is recorded in the audit log.',
+      confirmLabel: 'Revert to default',
+      danger: true,
+      onSubmit: () => api('/admin/settings/login-background', { method: 'DELETE' }),
+    });
+    if (done) { toast('Login background reverted to the default'); renderLoginBackground(host); }
+  });
+}
+
+/* =====================================================================
+ * Admin Management (super_admin only)
+ * ===================================================================== */
+
+view('admin-mgmt', 'Admin Management', 'Setup', async (el) => {
+  el.innerHTML = head('Admin Management', 'Manage admin accounts, change password or email.') +
+    '<div class="admin-mgmt-sections">' +
+    '<div class="panel" id="amg-password"><h3>Change Password</h3>' +
+    '  <form id="chpw-form">' +
+    '    <div class="field"><label for="chpw-current">Current password</label><input id="chpw-current" type="password" required></div>' +
+    '    <div class="field"><label for="chpw-new">New password</label><input id="chpw-new" type="password" minlength="8" required></div>' +
+    '    <div class="field"><label for="chpw-confirm">Confirm new password</label><input id="chpw-confirm" type="password" minlength="8" required></div>' +
+    '    <div class="error-msg" id="chpw-error" hidden></div>' +
+    '    <button class="btn-primary inline" type="submit">Update Password</button>' +
+    '  </form>' +
+    '</div>' +
+    '<div class="panel" id="amg-email"><h3>Change Email</h3>' +
+    '  <form id="chem-form">' +
+    '    <div class="field"><label for="chem-pass">Current password</label><input id="chem-pass" type="password" required></div>' +
+    '    <div class="field"><label for="chem-new">New email</label><input id="chem-new" type="email" required></div>' +
+    '    <div class="error-msg" id="chem-error" hidden></div>' +
+    '    <button class="btn-primary inline" type="submit">Update Email</button>' +
+    '  </form>' +
+    '</div>' +
+    '<div class="panel" id="amg-sub"><h3>Sub Admins</h3>' +
+    '  <div id="sub-list"><div class="empty">Loading…</div></div>' +
+    '  <h4 style="margin-top:24px">Add Sub Admin</h4>' +
+    '  <form id="addsub-form">' +
+    '    <div class="field"><label for="sub-email">Email</label><input id="sub-email" type="email" required></div>' +
+    '    <div class="field"><label for="sub-pass">Initial password</label><input id="sub-pass" type="password" minlength="8" required></div>' +
+    '    <div class="field"><label for="sub-name">Display name <span class="sub">(optional)</span></label><input id="sub-name" type="text" maxlength="100"></div>' +
+    '    <div class="error-msg" id="addsub-error" hidden></div>' +
+    '    <button class="btn-primary inline" type="submit">Create Sub Admin</button>' +
+    '  </form>' +
+    '</div>' +
+    '</div>';
+
+  // Change Password
+  el.querySelector('#chpw-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = el.querySelector('#chpw-error');
+    errEl.hidden = true;
+    const currentPassword = el.querySelector('#chpw-current').value;
+    const newPassword = el.querySelector('#chpw-new').value;
+    const confirmPassword = el.querySelector('#chpw-confirm').value;
+    if (newPassword !== confirmPassword) { errEl.textContent = 'Passwords do not match.'; errEl.hidden = false; return; }
+    if (newPassword.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; errEl.hidden = false; return; }
+    try {
+      await api('/admin/auth/change-password', { method: 'POST', body: { currentPassword, newPassword, confirmPassword } });
+      toast('Password updated successfully');
+      e.target.reset();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
+  });
+
+  // Change Email
+  el.querySelector('#chem-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = el.querySelector('#chem-error');
+    errEl.hidden = true;
+    const currentPassword = el.querySelector('#chem-pass').value;
+    const newEmail = el.querySelector('#chem-new').value.trim();
+    try {
+      const result = await api('/admin/auth/change-email', { method: 'POST', body: { currentPassword, newEmail } });
+      toast(`Email updated to ${esc(result.email)}`);
+      localStorage.setItem(ADMIN_EMAIL_KEY, result.email);
+      document.getElementById('admin-name').textContent = result.email;
+      e.target.reset();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
+  });
+
+  // Sub Admin list
+  async function loadSubs() {
+    const box = el.querySelector('#sub-list');
+    try {
+      const { admins } = await api('/admin/auth/sub-admins');
+      if (!admins.length) { box.innerHTML = '<div class="empty">No admin accounts yet.</div>'; return; }
+      box.innerHTML = miniTable([
+        { label: 'ID', render: (a) => a.id },
+        { label: 'Email', render: (a) => esc(a.email) },
+        { label: 'Name', render: (a) => esc(a.display_name || '—') },
+        { label: 'Role', render: (a) => badge(a.role === 'super_admin' ? 'super' : 'sub', a.role === 'super_admin' ? 'pink' : 'blue') },
+        { label: 'Created', render: (a) => fmtDate(a.created_at) },
+      ], admins);
+    } catch (err) {
+      box.innerHTML = `<div class="empty">! ${esc(err.message)}</div>`;
+    }
+  }
+  loadSubs();
+
+  // Add Sub Admin
+  el.querySelector('#addsub-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = el.querySelector('#addsub-error');
+    errEl.hidden = true;
+    const email = el.querySelector('#sub-email').value.trim();
+    const password = el.querySelector('#sub-pass').value;
+    const displayName = el.querySelector('#sub-name').value.trim();
+    try {
+      await api('/admin/auth/sub-admins', { method: 'POST', body: { email, password, displayName: displayName || undefined } });
+      toast(`Sub admin ${esc(email)} created`);
+      e.target.reset();
+      loadSubs();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
+  });
+});
+
+/* =====================================================================
+ * Boot
+ * ===================================================================== */
+
+(async () => {
+  if (token) {
+    try {
+      await api('/admin/me');
+      enterConsole();
+      return;
+    } catch {
+      signOut();
+    }
+  }
+  checkAdminStatus();
 })();

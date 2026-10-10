@@ -5,12 +5,16 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/api_exception.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/providers.dart';
 import '../../core/theme/moco_colors.dart';
+import '../../core/widgets/moco_app_frame.dart';
 import '../../core/theme/moco_spacing.dart';
 import '../../core/widgets/moco_background.dart';
 import '../../core/widgets/moco_surfaces.dart';
 import '../../shared/models/app_config.dart';
+import 'widgets/login_backdrop.dart';
+import 'widgets/login_glass.dart';
 
 enum _Step { identify, code }
 
@@ -56,8 +60,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   static final _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
 
+  bool _fullBleed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // On web the login background fills the whole window, so the phone-width
+    // app frame steps aside while this screen is up.
+    if (ref.read(platformCapabilitiesProvider).isWeb) {
+      _fullBleed = true;
+      // After this frame: the frame is an ancestor mid-build right now.
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => MocoAppFrame.fullBleedRequests.value++,
+      );
+    }
+  }
+
   @override
   void dispose() {
+    if (_fullBleed) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => MocoAppFrame.fullBleedRequests.value--,
+      );
+    }
     _resendTimer?.cancel();
     _emailController.dispose();
     _phoneController.dispose();
@@ -183,6 +208,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // The web app gets the immersive layout; Android keeps its own for now.
+    // Same state, same _send/_verify — only the presentation differs.
+    if (ref.watch(platformCapabilitiesProvider).isWeb) return _webScaffold();
     return Scaffold(
       body: MocoBackground(
         ambience: MocoAmbience.calm,
@@ -224,6 +252,362 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       ),
     );
   }
+
+  // ---------------------------------------------------------------- web
+
+  static const _webMaxWidth = 360.0;
+
+  LoginBackground? get _background => ref
+      .watch(appConfigProvider)
+      .maybeWhen(data: (c) => c.loginBackground, orElse: () => null);
+
+  Widget _webScaffold() {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          LoginBackdrop(background: _background),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Controls sit in the lower-middle; on short screens (or under
+                // the keyboard) the column scrolls instead of overflowing.
+                // Controls centred on the screen; on short screens (or under
+                // the keyboard) the column scrolls instead of overflowing.
+                const pad = 24.0;
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: pad,
+                  ),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: (constraints.maxHeight - 2 * pad).clamp(
+                        0,
+                        double.infinity,
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              maxWidth: _webMaxWidth,
+                            ),
+                            child: AnimatedSwitcher(
+                              duration: reduceMotion(context)
+                                  ? Duration.zero
+                                  : const Duration(milliseconds: 380),
+                              switchInCurve: Curves.easeOutCubic,
+                              switchOutCurve: Curves.easeInCubic,
+                              transitionBuilder: (child, anim) =>
+                                  FadeTransition(
+                                    opacity: anim,
+                                    child: SlideTransition(
+                                      position: Tween(
+                                        begin: const Offset(0, 0.06),
+                                        end: Offset.zero,
+                                      ).animate(anim),
+                                      child: child,
+                                    ),
+                                  ),
+                              child: Column(
+                                key: ValueKey(_step),
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: _step == _Step.identify
+                                    ? _webIdentifyStep()
+                                    : _webCodeStep(),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _webIdentifyStep() {
+    final auth = _auth;
+    // The first screen offers Email | SMS only.
+    final channel = _channel == OtpChannel.sms
+        ? OtpChannel.sms
+        : OtpChannel.email;
+    final motion = reduceMotion(context)
+        ? Duration.zero
+        : const Duration(milliseconds: 280);
+    return [
+      Entrance(
+        child: GlassSegmented<OtpChannel>(
+          key: const Key('login_form'),
+          values: const [OtpChannel.email, OtpChannel.sms],
+          selected: channel,
+          labelOf: (c) => c == OtpChannel.email ? 'Email' : 'SMS',
+          isEnabled: auth.isAvailable,
+          keyOf: (c) => Key('login_channel_${c.name}'),
+          onChanged: (c) => setState(() {
+            _picked = c;
+            _error = null;
+          }),
+        ),
+      ),
+      const SizedBox(height: 14),
+      Entrance(
+        delay: const Duration(milliseconds: 90),
+        child: AnimatedSwitcher(
+          duration: motion,
+          transitionBuilder: (child, anim) => FadeTransition(
+            opacity: anim,
+            child: SizeTransition(
+              sizeFactor: anim,
+              alignment: Alignment.topCenter,
+              child: child,
+            ),
+          ),
+          child: channel.usesPhone ? _webPhoneField() : _webEmailField(),
+        ),
+      ),
+      if (_error != null) ...[const SizedBox(height: 12), _webError(_error!)],
+      const SizedBox(height: 26),
+      Entrance(
+        delay: const Duration(milliseconds: 180),
+        child: Center(
+          child: PillActionButton(
+            key: const Key('login_send_code'),
+            semanticLabel: 'Send code',
+            loading: _busy,
+            onPressed: _identifierValid && auth.isAvailable(channel)
+                ? () => _send(resend: false)
+                : null,
+          ),
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> _webCodeStep() {
+    final channel = _sentChannel!;
+    final caption = TextStyle(
+      color: Colors.white.withValues(alpha: 0.78),
+      fontSize: 14,
+    );
+    final link = TextStyle(
+      color: Colors.white.withValues(alpha: 0.85),
+      fontSize: 13.5,
+    );
+    return [
+      Text(
+        'Enter the code',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.3,
+        ),
+      ),
+      const SizedBox(height: 6),
+      Text(
+        channel.usesPhone ? 'Sent by SMS to $_sentTo' : 'Sent to $_sentTo',
+        key: const Key('login_sent_to'),
+        textAlign: TextAlign.center,
+        style: caption,
+      ),
+      const SizedBox(height: 18),
+      GlassSurface(
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        child: TextField(
+          key: const Key('login_code_field'),
+          controller: _codeController,
+          keyboardType: TextInputType.number,
+          autofillHints: const [AutofillHints.oneTimeCode],
+          autofocus: true,
+          maxLength: 6,
+          textAlign: TextAlign.center,
+          cursorColor: Colors.white,
+          onChanged: (_) => setState(() {}),
+          onSubmitted: (_) {
+            if (_codeValid && !_busy) _verify();
+          },
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 24,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 10,
+          ),
+          decoration: _webInputDecoration('••••••'),
+        ),
+      ),
+      if (_error != null) ...[const SizedBox(height: 12), _webError(_error!)],
+      const SizedBox(height: 22),
+      Center(
+        child: PillActionButton(
+          key: const Key('login_verify'),
+          semanticLabel: 'Verify',
+          loading: _busy,
+          onPressed: _codeValid ? _verify : null,
+        ),
+      ),
+      const SizedBox(height: 10),
+      TextButton(
+        key: const Key('login_resend'),
+        onPressed: _resendIn > 0 || _busy ? null : () => _send(resend: true),
+        child: Text(
+          _resendIn > 0 ? 'Resend code in ${_resendIn}s' : 'Resend code',
+          style: link.copyWith(
+            color: _resendIn > 0
+                ? Colors.white.withValues(alpha: 0.5)
+                : Colors.white,
+          ),
+        ),
+      ),
+      TextButton(
+        key: const Key('login_change_identifier'),
+        onPressed: _busy ? null : _backToIdentify,
+        child: Text(
+          channel.usesPhone ? 'Change number' : 'Change email',
+          style: link,
+        ),
+      ),
+    ];
+  }
+
+  InputDecoration _webInputDecoration(String hint) => InputDecoration(
+    hintText: hint,
+    hintStyle: TextStyle(
+      color: Colors.white.withValues(alpha: 0.62),
+      fontSize: 16,
+    ),
+    counterText: '',
+    border: InputBorder.none,
+    enabledBorder: InputBorder.none,
+    focusedBorder: InputBorder.none,
+    filled: false,
+    contentPadding: const EdgeInsets.symmetric(vertical: 16),
+  );
+
+  Widget _webEmailField() {
+    return GlassSurface(
+      key: const ValueKey('email'),
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      child: Row(
+        children: [
+          Icon(
+            Icons.mail_outline_rounded,
+            color: Colors.white.withValues(alpha: 0.8),
+            size: 20,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              key: const Key('login_email_field'),
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              autofillHints: const [AutofillHints.email],
+              autocorrect: false,
+              enableSuggestions: false,
+              textInputAction: TextInputAction.go,
+              cursorColor: Colors.white,
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) {
+                if (_identifierValid && !_busy) _send(resend: false);
+              },
+              style: const TextStyle(color: Colors.white, fontSize: 16),
+              decoration: _webInputDecoration('Type Email Id'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _webPhoneField() {
+    return GlassSurface(
+      key: const ValueKey('phone'),
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      child: Row(
+        children: [
+          const Text(
+            _dialCode,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            width: 1,
+            height: 22,
+            color: Colors.white.withValues(alpha: 0.3),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              key: const Key('login_phone_field'),
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              autofillHints: const [AutofillHints.telephoneNumberNational],
+              maxLength: 10,
+              cursorColor: Colors.white,
+              textInputAction: TextInputAction.go,
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) {
+                if (_identifierValid && !_busy) _send(resend: false);
+              },
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                letterSpacing: 1.2,
+              ),
+              decoration: _webInputDecoration('Mobile number'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _webError(String message) {
+    return Container(
+      key: const Key('login_error'),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xCC3A0B16),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: MocoColors.danger.withValues(alpha: 0.55)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.error_outline_rounded,
+            color: Color(0xFFFF8A9A),
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(color: Color(0xFFFFD5DB), fontSize: 13.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------- native
 
   List<Widget> _identifyStep() {
     final auth = _auth;
@@ -368,6 +752,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           labelText: 'Email address',
           hintText: 'you@example.com',
           border: InputBorder.none,
+          // The theme's outlined borders would draw a box inside the card.
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
           filled: false,
           contentPadding: EdgeInsets.symmetric(vertical: 14),
         ),
@@ -410,6 +797,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 hintText: '98765 43210',
                 counterText: '',
                 border: InputBorder.none,
+                // The theme's outlined borders would draw a box inside the card.
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
                 filled: false,
                 contentPadding: EdgeInsets.symmetric(vertical: 14),
               ),
@@ -446,6 +836,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           hintText: '••••••',
           counterText: '',
           border: InputBorder.none,
+          // The theme's outlined borders would draw a box inside the card.
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
           filled: false,
           contentPadding: EdgeInsets.symmetric(vertical: 16),
         ),

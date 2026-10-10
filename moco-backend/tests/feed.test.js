@@ -330,3 +330,219 @@ test('a blank caption cannot be stored as an empty string', async () => {
     /posts_caption_not_blank/,
   );
 });
+
+// --- likes, comments, shares, follow from the feed ---------------------------
+
+async function followableAuthor() {
+  const author = await createUser({ listener: true });
+  // Eligible = approved KYC + the minimum photo count (photos are not under test).
+  await query('UPDATE listener_profiles SET photo_count = 3 WHERE user_id = $1', [author.id]);
+  return author;
+}
+
+const notificationsOf = async (userId, type) =>
+  (await query('SELECT * FROM notifications WHERE user_id = $1 AND type = $2', [userId, type])).rows;
+
+test('feed posts carry zeroed counters and follow state for a new viewer', async () => {
+  await resetDb();
+  const viewer = await createUser();
+  const author = await followableAuthor();
+  await createPost({ author });
+  const feed = await call('GET', '/api/feed', { token: signToken(viewer) });
+  const [post] = feed.body.posts;
+  assert.equal(post.likeCount, 0);
+  assert.equal(post.liked, false);
+  assert.equal(post.commentCount, 0);
+  assert.equal(post.shareCount, 0);
+  assert.equal(post.author.canFollow, true);
+  assert.equal(post.author.isFollowing, false);
+
+  // Your own post is never followable.
+  const own = await call('GET', '/api/feed', { token: signToken(author) });
+  assert.equal(own.body.posts[0].author.canFollow, false);
+});
+
+test('follow from the feed uses the existing listener follow and shows in the feed', async () => {
+  await resetDb();
+  const viewer = await createUser();
+  const author = await followableAuthor();
+  await createPost({ author });
+  const token = signToken(viewer);
+
+  const followed = await call('PUT', `/api/listeners/${author.id}/follow`, { token });
+  assert.equal(followed.status, 200);
+  assert.equal(followed.body.followerCount, 1);
+  let feed = await call('GET', '/api/feed', { token });
+  assert.equal(feed.body.posts[0].author.isFollowing, true);
+
+  // Re-follow and unfollow/follow churn notify the listener exactly once.
+  await call('PUT', `/api/listeners/${author.id}/follow`, { token });
+  await call('DELETE', `/api/listeners/${author.id}/follow`, { token });
+  await call('PUT', `/api/listeners/${author.id}/follow`, { token });
+  assert.equal((await notificationsOf(author.id, 'new_follower')).length, 1);
+
+  const unfollowed = await call('DELETE', `/api/listeners/${author.id}/follow`, { token });
+  assert.equal(unfollowed.body.followerCount, 0);
+  feed = await call('GET', '/api/feed', { token });
+  assert.equal(feed.body.posts[0].author.isFollowing, false);
+});
+
+test('like and unlike are idempotent, counted once, and persist', async () => {
+  await resetDb();
+  const a = await createUser();
+  const b = await createUser();
+  const author = await createUser();
+  const post = await createPost({ author });
+
+  const first = await call('PUT', `/api/feed/${post.id}/like`, { token: signToken(a) });
+  assert.equal(first.status, 200);
+  assert.deepEqual([first.body.liked, first.body.likeCount], [true, 1]);
+  const again = await call('PUT', `/api/feed/${post.id}/like`, { token: signToken(a) });
+  assert.deepEqual([again.body.liked, again.body.likeCount], [true, 1], 'a repeated like must not double-count');
+  const other = await call('PUT', `/api/feed/${post.id}/like`, { token: signToken(b) });
+  assert.equal(other.body.likeCount, 2);
+
+  // Survives a reload: the feed reports the persisted state per viewer.
+  const feedA = await call('GET', '/api/feed', { token: signToken(a) });
+  assert.deepEqual([feedA.body.posts[0].liked, feedA.body.posts[0].likeCount], [true, 2]);
+
+  const unliked = await call('DELETE', `/api/feed/${post.id}/like`, { token: signToken(a) });
+  assert.deepEqual([unliked.body.liked, unliked.body.likeCount], [false, 1]);
+  const unlikedAgain = await call('DELETE', `/api/feed/${post.id}/like`, { token: signToken(a) });
+  assert.equal(unlikedAgain.body.likeCount, 1);
+
+  // One like notification per liker per post, even after unlike + like.
+  await call('PUT', `/api/feed/${post.id}/like`, { token: signToken(a) });
+  assert.equal((await notificationsOf(author.id, 'post_like')).length, 2);
+});
+
+test('liking your own post does not notify you', async () => {
+  await resetDb();
+  const author = await createUser();
+  const post = await createPost({ author });
+  const liked = await call('PUT', `/api/feed/${post.id}/like`, { token: signToken(author) });
+  assert.equal(liked.body.likeCount, 1);
+  assert.equal((await notificationsOf(author.id, 'post_like')).length, 0);
+});
+
+test('a blocked or removed post cannot be liked, commented on or shared', async () => {
+  await resetDb();
+  const viewer = await createUser();
+  const author = await createUser();
+  const removed = await createPost({ author, status: 'removed' });
+  for (const [method, path, body] of [
+    ['PUT', `/api/feed/${removed.id}/like`],
+    ['POST', `/api/feed/${removed.id}/comments`, { body: 'hi' }],
+    ['POST', `/api/feed/${removed.id}/share`, {}],
+    ['GET', `/api/feed/${removed.id}`],
+  ]) {
+    const result = await call(method, path, { token: signToken(viewer), body });
+    assert.equal(result.status, 404, `${method} ${path}`);
+  }
+
+  const post = await createPost({ author });
+  await query('INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1, $2)', [author.id, viewer.id]);
+  const blocked = await call('PUT', `/api/feed/${post.id}/like`, { token: signToken(viewer) });
+  assert.equal(blocked.status, 404);
+});
+
+test('comments: add, load newest first, count, and notify the author', async () => {
+  await resetDb();
+  const viewer = await createUser();
+  const author = await createUser();
+  const post = await createPost({ author });
+  const token = signToken(viewer);
+
+  const blank = await call('POST', `/api/feed/${post.id}/comments`, { token, body: { body: '   ' } });
+  assert.equal(blank.status, 400);
+  const tooLong = await call('POST', `/api/feed/${post.id}/comments`, { token, body: { body: 'x'.repeat(501) } });
+  assert.equal(tooLong.status, 400);
+
+  const one = await call('POST', `/api/feed/${post.id}/comments`, { token, body: { body: '  first  ' } });
+  assert.equal(one.status, 201);
+  assert.equal(one.body.comment.body, 'first');
+  assert.equal(one.body.comment.isOwn, true);
+  assert.equal(one.body.comment.canDelete, true);
+  assert.equal(one.body.commentCount, 1);
+  const two = await call('POST', `/api/feed/${post.id}/comments`, { token, body: { body: 'second' } });
+  assert.equal(two.body.commentCount, 2);
+
+  const list = await call('GET', `/api/feed/${post.id}/comments`, { token });
+  assert.equal(list.status, 200);
+  assert.deepEqual(list.body.comments.map((c) => c.body), ['second', 'first']);
+  assert.equal(list.body.commentCount, 2);
+  assert.equal(list.body.comments[0].author.id, viewer.id);
+
+  const feed = await call('GET', '/api/feed', { token });
+  assert.equal(feed.body.posts[0].commentCount, 2);
+
+  // Two quick comments from one person: one notification (10-minute window).
+  assert.equal((await notificationsOf(author.id, 'post_comment')).length, 1);
+});
+
+test('comments: the commenter or the post author may delete; nobody else', async () => {
+  await resetDb();
+  const commenter = await createUser();
+  const author = await createUser();
+  const stranger = await createUser();
+  const post = await createPost({ author });
+  const c1 = await call('POST', `/api/feed/${post.id}/comments`, { token: signToken(commenter), body: { body: 'a' } });
+  const c2 = await call('POST', `/api/feed/${post.id}/comments`, { token: signToken(commenter), body: { body: 'b' } });
+
+  const asAuthor = await call('GET', `/api/feed/${post.id}/comments`, { token: signToken(author) });
+  assert.equal(asAuthor.body.comments[0].canDelete, true);
+  const asStranger = await call('GET', `/api/feed/${post.id}/comments`, { token: signToken(stranger) });
+  assert.equal(asStranger.body.comments[0].canDelete, false);
+
+  const denied = await call('DELETE', `/api/feed/${post.id}/comments/${c1.body.comment.id}`, {
+    token: signToken(stranger),
+  });
+  assert.equal(denied.status, 403);
+
+  const own = await call('DELETE', `/api/feed/${post.id}/comments/${c1.body.comment.id}`, {
+    token: signToken(commenter),
+  });
+  assert.deepEqual([own.status, own.body.commentCount], [200, 1]);
+  const moderated = await call('DELETE', `/api/feed/${post.id}/comments/${c2.body.comment.id}`, {
+    token: signToken(author),
+  });
+  assert.deepEqual([moderated.status, moderated.body.commentCount], [200, 0]);
+});
+
+test('share is counted only when recorded, once per user per post per hour', async () => {
+  await resetDb();
+  const a = await createUser();
+  const b = await createUser();
+  const author = await createUser();
+  const post = await createPost({ author });
+
+  // Loading the feed or the post is not a share.
+  await call('GET', '/api/feed', { token: signToken(a) });
+  await call('GET', `/api/feed/${post.id}`, { token: signToken(a) });
+  assert.equal((await call('GET', '/api/feed', { token: signToken(a) })).body.posts[0].shareCount, 0);
+
+  const first = await call('POST', `/api/feed/${post.id}/share`, { token: signToken(a), body: { method: 'copy' } });
+  assert.deepEqual([first.status, first.body.shareCount, first.body.counted], [200, 1, true]);
+  const repeat = await call('POST', `/api/feed/${post.id}/share`, { token: signToken(a), body: { method: 'native' } });
+  assert.deepEqual([repeat.body.shareCount, repeat.body.counted], [1, false]);
+  const other = await call('POST', `/api/feed/${post.id}/share`, { token: signToken(b), body: {} });
+  assert.equal(other.body.shareCount, 2);
+
+  const feed = await call('GET', '/api/feed', { token: signToken(b) });
+  assert.equal(feed.body.posts[0].shareCount, 2);
+  const shareNotes = await query("SELECT count(*)::int AS n FROM notifications WHERE type LIKE '%share%'");
+  assert.equal(shareNotes.rows[0].n, 0, 'sharing never notifies');
+});
+
+test('a single post loads by id for a shared link', async () => {
+  await resetDb();
+  const viewer = await createUser();
+  const author = await createUser();
+  const post = await createPost({ author, caption: 'linked' });
+  const one = await call('GET', `/api/feed/${post.id}`, { token: signToken(viewer) });
+  assert.equal(one.status, 200);
+  assert.equal(one.body.post.id, post.id);
+  assert.equal(one.body.post.caption, 'linked');
+  const missing = await call('GET', '/api/feed/999999', { token: signToken(viewer) });
+  assert.equal(missing.status, 404);
+});

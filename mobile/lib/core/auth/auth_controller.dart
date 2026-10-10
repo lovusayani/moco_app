@@ -33,6 +33,11 @@ class AuthController extends ValueNotifier<AuthState> {
   final SecureStore _store;
   final AppPreferences _prefs;
 
+  /// Runs while the session is still valid, just before sign-out clears it
+  /// (the push service unregisters this device here). Bounded and never
+  /// allowed to block or fail the sign-out itself.
+  Future<void> Function()? onSigningOut;
+
   /// Restores a stored session at launch.
   ///
   /// A stored token is not trusted on its own — it is verified by fetching the
@@ -140,6 +145,14 @@ class AuthController extends ValueNotifier<AuthState> {
   }
 
   Future<void> signOut() async {
+    final hook = onSigningOut;
+    if (hook != null) {
+      try {
+        await hook().timeout(const Duration(seconds: 5));
+      } catch (_) {
+        // Best effort: the session is cleared regardless.
+      }
+    }
     await _store.clear();
     value = AuthState(
       status: AuthStatus.unauthenticated,

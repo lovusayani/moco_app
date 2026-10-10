@@ -95,7 +95,8 @@ level, including wallet balance and listener state. (Before Phase 1.1, `PATCH`
 returned raw snake_case columns wrapped in `{ user: ... }`; clients that parsed
 that shape must be updated.)
 | `POST` | `/api/users/me/become-listener` | Opt into listener mode (creates an unverified profile) |
-| `POST` | `/api/users/me/fcm-token` | Register the device push token |
+| `POST` | `/api/users/me/fcm-token` | Register this device's push token `{ token }`; the token is removed from any other account first |
+| `DELETE` | `/api/users/me/fcm-token` | Unregister `{ token }` (sign-out); a no-op if it is not the current token |
 | `DELETE` | `/api/users/me` | Account deletion (Play Store requirement) |
 
 Deletion is a soft delete: personal fields are cleared but the row is retained,
@@ -456,6 +457,85 @@ again is a no-op, not an error.
 Same ownership rule as read. Permanent — there is no undo/archive state.
 
 ---
+
+## Live (external live models)
+
+### `GET /api/live/player-frame`
+Public page (no session) that hosts the official Stripchat player; the web
+app embeds it in an iframe. It is served from the API's origin, so the
+provider's script never runs on the web app's origin. The server injects the
+official script (`STRIPCASH_PLAYER_SCRIPT_URL`, https only) and the
+affiliate id (`STRIPCASH_PLAYER_USER_ID`); nothing comes from the request.
+404 until both are set. The embedding page talks to it by `postMessage`:
+`{ type: 'load', modelName }` (destroys any current player with
+`app.destroy()`, then mounts `new StripchatPlayer({...}).mount(...)`) and
+`{ type: 'destroy' }`; the page reports `loading`, `mounted`, `destroyed`
+and the player's `ready`, `play`, `pause`, `volumeChange`, `muteChange`,
+`fullscreenChange` and `error` (`{ type, fatal }`) events. Player options:
+`strict 1, autoplay playButton, volumeControl 1, fullscreen 1, thumbFit
+smart, usePreroll 2`. CSP `frame-ancestors` = `CORS_ORIGINS` (plus localhost
+outside production); messages are accepted only from the embedding parent on
+one of those origins.
+
+### `GET /api/live/config`
+Signed-in users. What the app may know about Live:
+
+```json
+{ "enabled": true, "provider": "stripcash", "requireAgeConfirmation": true,
+  "player": { "type": "stripchat-player", "userId": "<affiliate userId>", "strict": 1, "autoplay": "all" } }
+```
+
+- `enabled`: provider credentials set and Live not switched off
+  (`app_settings` key `live`, `{ "enabled": false }`).
+- `requireAgeConfirmation`: show an 18+ confirmation the first time a user
+  opens Live. On unless the `live` setting holds an explicit `false`.
+  Separate from sign-in.
+- `player`: settings for the official Stripchat player widget; `null` when
+  Live is off. The affiliate `userId` is a tracking id, not a secret. The
+  provider API key (`STRIPCASH_API_KEY`) is never returned by any endpoint.
+
+#### Viewer location (geobans)
+`GET /api/live/models` reads, in this order:
+
+| Need | Header | Fallback |
+|---|---|---|
+| Country | `CF-IPCountry` (Cloudflare proxy) | `X-Vercel-IP-Country` |
+| Region | `CF-Region-Code` (needs Cloudflare's "Add visitor location headers" managed transform) | `X-Vercel-IP-Country-Region` |
+| Languages | `Accept-Language` (primary subtags, e.g. `uk-UA` → `uk`) | none |
+
+Unknown country (header missing, `XX`, `T1` Tor, etc.): every model with a
+country or regional ban is hidden. Known country, unknown region: every model
+with a regional ban in that country is hidden. No header means no language
+ban applies (there is no language to match).
+
+### `GET /api/live/models`
+Signed-in users. Online, public-status models from the live provider
+(Stripcash), with the provider's geobans always applied for the viewer:
+country and region from the edge's geolocation headers, languages from
+`Accept-Language`. An unknown location hides every model with a country or
+regional ban. No parameter disables this.
+
+| Query | Default | Notes |
+|---|---|---|
+| `limit` | 24 | 1–60 |
+| `offset` | 0 | 0–1000 |
+| `sort` | `default` | `default` (provider rating), `viewers`, `favorites`, `hd` |
+| `language` | | model speaks it, e.g. `es` |
+| `country` | | model's country, e.g. `co` |
+| `tag` | | provider tag, e.g. `girls/latin` |
+
+```json
+{ "provider": "stripcash", "available": true, "updatedAt": "…", "limit": 24, "offset": 0, "sort": "default",
+  "models": [{ "id": 85, "provider": "stripcash", "username": "Luna_Rose",
+    "avatarUrl": "https://…", "snapshotUrl": "https://…", "thumbnailUrl": "https://…",
+    "country": "co", "languages": ["es", "en"], "gender": "female", "broadcastGender": "female",
+    "tags": ["girls", "girls/latin"], "viewers": 80, "favorites": 1200, "isHd": true, "isVr": false,
+    "goal": { "message": "Dance show", "needed": 500, "earned": 320 } }] }
+```
+
+`available: false` (and no models) means the provider is not configured.
+Images are the provider's URLs, used directly. The provider's stream link,
+geobans and API credentials are never returned.
 
 ## Admin
 

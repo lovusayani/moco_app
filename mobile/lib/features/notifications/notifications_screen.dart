@@ -29,6 +29,11 @@ class NotificationsScreen extends ConsumerWidget {
       case 'payout_paid':
         context.push(Routes.earningsLedger);
         break;
+      case 'post_like':
+      case 'post_comment':
+        final postId = (notification.data['postId'] as num?)?.toInt();
+        if (postId != null) context.go(Routes.feedPostPath(postId));
+        break;
       default:
         // An unrecognised type has nowhere honest to navigate — the
         // notification still opens (marked read) but stays where it is,
@@ -165,6 +170,9 @@ class _NotificationRow extends StatelessWidget {
     'payout_approved' => Icons.check_circle_outline_rounded,
     'payout_rejected' => Icons.cancel_outlined,
     'payout_paid' => Icons.account_balance_wallet_outlined,
+    'post_like' => Icons.favorite_rounded,
+    'post_comment' => Icons.chat_bubble_rounded,
+    'new_follower' => Icons.person_add_alt_1_rounded,
     _ => Icons.notifications_none_rounded,
   };
 

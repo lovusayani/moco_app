@@ -156,6 +156,10 @@ tbody tr { transition: background .1s; }
 tbody tr.clickable { cursor: pointer; }
 tbody tr:hover { background: var(--bg-hover); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* The row actions column stays on screen even when a wide table scrolls sideways. */
+th.col-pin, td.col-pin { position: sticky; right: 0; background: var(--bg-panel); box-shadow: -8px 0 8px -8px rgba(0,0,0,.6); }
+th.col-pin { z-index: 2; }
+tbody tr:hover td.col-pin { background: var(--bg-hover); }
 td .sub { display: block; color: var(--text-faint); font-size: 11.5px; }
 .dt-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; color: var(--text-faint); font-size: 12px; }
 .dt-foot .pager { display: flex; align-items: center; gap: 6px; }
@@ -204,6 +208,8 @@ td .sub { display: block; color: var(--text-faint); font-size: 11.5px; }
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
 .photo-grid a, .photo-grid .ph { display: block; aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--bg-input); }
 .photo-grid img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-cell { display: flex; flex-direction: column; gap: 6px; }
+.photo-cell .btn-sm { width: 100%; }
 .thumb { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border); display: block; background: var(--bg-input); }
 .thumbs { display: flex; gap: 4px; }
 .timeline { list-style: none; margin: 0; padding: 0; }
@@ -213,11 +219,43 @@ td .sub { display: block; color: var(--text-faint); font-size: 11.5px; }
 .blockers { display: flex; flex-wrap: wrap; gap: 4px; }
 
 /* ---------- Dialog ---------- */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(5,2,5,.65); z-index: 60; display: grid; place-items: center; padding: 20px; }
-.modal { width: min(460px, 100%); background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 14px; padding: 20px; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
-.modal h3 { margin: 0 0 6px; font-size: 16px; }
-.modal p { color: var(--text-dim); margin: 0 0 14px; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+/* Dialog layout. The overlay is a fixed full-viewport flex box and the
+   dialog centres with margin:auto — "safe" centring: when the dialog fits it
+   is centred, when it does not it starts at the top edge instead of being
+   pushed above/left of the viewport (which grid place-items:center does, and
+   a fixed overlay cannot be scrolled to reach). Width and height come from
+   the viewport, never from content; the body scrolls inside the dialog and
+   the header and the Cancel/Confirm footer always stay visible. */
+.modal-backdrop {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+  z-index: 60; background: rgba(5,2,5,.65);
+  display: flex; padding: 16px;
+  overflow: auto; overscroll-behavior: contain;
+}
+.modal {
+  margin: auto;
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  display: flex; flex-direction: column;
+  background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 14px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.5); overflow: hidden;
+}
+.modal.wide { width: min(860px, calc(100vw - 32px)); }
+.modal-form { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; margin: 0; }
+.modal-head { padding: 18px 20px 6px; flex: 0 0 auto; }
+.modal-body { padding: 6px 20px 14px; overflow-y: auto; min-height: 0; flex: 1 1 auto; }
+.modal h3 { margin: 0; font-size: 16px; }
+.modal p, .modal .modal-msg { color: var(--text-dim); margin: 0 0 14px; }
+.del-warn { color: var(--red); display: block; margin-bottom: 8px; }
+.del-cols { display: grid; gap: 10px; }
+@media (min-width: 760px) { .del-cols { grid-template-columns: repeat(3, 1fr); } }
+.del-cols h4, .panel h4 { margin: 10px 0 4px; font-size: 12.5px; color: var(--text); }
+.del-list { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.6; }
+.upload-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; }
+.upload-tile { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; max-width: 170px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; flex: 0 0 auto;
+  padding: 12px 20px; border-top: 1px solid var(--border); background: var(--bg-raised); }
 
 /* ---------- Health ---------- */
 .health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
@@ -230,3 +268,46 @@ td .sub { display: block; color: var(--text-faint); font-size: 11.5px; }
   background: var(--bg-panel); border: 1px solid rgba(53,233,138,.4); color: var(--text);
   padding: 9px 16px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
 .toast.bad { border-color: rgba(242,85,90,.5); }
+
+/* ---------- Settings: login background ---------- */
+.lb-grid { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 22px; align-items: start; }
+@media (max-width: 760px) { .lb-grid { grid-template-columns: 1fr; } }
+.lb-types { display: flex; gap: 8px; margin: 10px 0 14px; flex-wrap: wrap; }
+.lb-type { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer; font-weight: 500; }
+.lb-type input { width: auto; margin: 0; }
+.lb-type:has(input:checked) { border-color: var(--rose); color: var(--text); background: var(--bg-hover); }
+.lb-actions { display: flex; gap: 8px; align-items: center; margin: 6px 0 8px; flex-wrap: wrap; }
+.lb-phone { position: relative; width: 220px; aspect-ratio: 9 / 19.5; border-radius: 26px; overflow: hidden; border: 1px solid var(--border-strong); background: #170c14; }
+.lb-media, .lb-media img, .lb-media video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.lb-default { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-faint); font-size: 11px; background: radial-gradient(circle at 30% 20%, #3a1a33, #120a10 70%); }
+.lb-overlay { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.05) 35%, rgba(0,0,0,.55) 100%); }
+.lb-mock { position: absolute; left: 14px; right: 14px; bottom: 26%; display: flex; flex-direction: column; align-items: center; gap: 9px; }
+.lb-mock-toggle { display: flex; width: 100%; border-radius: 999px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.22); padding: 3px; font-size: 9px; color: #fff; }
+.lb-mock-toggle span { flex: 1; text-align: center; padding: 4px 0; border-radius: 999px; }
+.lb-mock-toggle span:first-child { background: rgba(255,255,255,.22); font-weight: 700; }
+.lb-mock-input { width: 100%; border-radius: 14px; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.22); padding: 8px 10px; font-size: 9px; color: rgba(255,255,255,.75); }
+.lb-mock-btn { width: 64px; height: 26px; border-radius: 999px; display: grid; place-items: center; color: #fff; font-size: 13px; background: linear-gradient(90deg, #d10a6a, #f2468f); }
+
+/* Post details inside the permanent-delete dialog. */
+.del-details { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 12px 0 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-input); font-size: 12.5px; }
+.del-details dt { color: var(--text-faint); }
+.del-details dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+
+/* Edit + Delete side by side in an Actions cell. */
+.row-actions { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.toplayer-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+
+/* ---------- Login: First Admin Setup ---------- */
+.login-title { font-size: 18px; font-weight: 700; color: var(--rose); margin: 0 0 6px; }
+.optional { color: var(--text-faint); font-weight: 400; }
+
+/* ---------- Nav icon (settings gear, admin shield) ---------- */
+.nav-icon { display: inline-block; width: 18px; text-align: center; font-size: 13px; }
+
+/* ---------- Admin Management ---------- */
+.admin-mgmt-sections { display: grid; gap: 20px; }
+.admin-mgmt-sections .panel { padding: 20px; }
+.admin-mgmt-sections h3 { margin: 0 0 14px; font-size: 15px; font-weight: 700; }
+.admin-mgmt-sections h4 { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; color: var(--text-dim); }
+.admin-mgmt-sections .field { margin-bottom: 10px; }
+.admin-mgmt-sections .btn-primary.inline { margin-top: 6px; }

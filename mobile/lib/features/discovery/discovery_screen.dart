@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/api/listeners_api.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/providers.dart';
 import '../../core/routing/app_router.dart';
 import '../../core/theme/moco_colors.dart';
@@ -25,25 +29,86 @@ class DiscoveryScreen extends ConsumerStatefulWidget {
 class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
   final _scrollController = ScrollController();
   final _searchController = TextEditingController();
+  final _searchFocus = FocusNode();
   bool _searchOpen = false;
+  Timer? _topBarIdle;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    // Web: the bottom nav may have opened (Search) or closed (Live) search
+    // before this screen existed, e.g. when arriving from another tab.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !ref.read(platformCapabilitiesProvider).isWeb) return;
+      _setTopBarVisible(true);
+      if (ref.read(discoveryWebSearchOpenProvider)) {
+        _searchController.text = ref
+            .read(discoveryControllerProvider)
+            .searchQuery;
+        _focusSearch();
+      } else {
+        _clearSearch();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _topBarIdle?.cancel();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _searchController.dispose();
+    _searchFocus.dispose();
     super.dispose();
+  }
+
+  void _focusSearch() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocus.requestFocus();
+    });
+  }
+
+  void _clearSearch() {
+    _searchFocus.unfocus();
+    if (_searchController.text.isEmpty &&
+        ref.read(discoveryControllerProvider).searchQuery.isEmpty) {
+      return;
+    }
+    _searchController.clear();
+    ref.read(discoveryControllerProvider.notifier).setSearchQuery('');
+  }
+
+  void _setTopBarVisible(bool visible) {
+    final notifier = ref.read(discoveryWebTopBarVisibleProvider.notifier);
+    if (notifier.state != visible) notifier.state = visible;
+  }
+
+  /// Web: scrolling down through listeners slides the top bar away; it comes
+  /// back on scroll up, near the top, or after scrolling pauses.
+  void _updateTopBar(ScrollPosition position) {
+    _topBarIdle?.cancel();
+    if (position.pixels <= 24) {
+      _setTopBarVisible(true);
+      return;
+    }
+    switch (position.userScrollDirection) {
+      case ScrollDirection.reverse:
+        _setTopBarVisible(false);
+      case ScrollDirection.forward:
+        _setTopBarVisible(true);
+      case ScrollDirection.idle:
+        break;
+    }
+    _topBarIdle = Timer(const Duration(milliseconds: 1600), () {
+      if (mounted) _setTopBarVisible(true);
+    });
   }
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
     final position = _scrollController.position;
+    if (ref.read(platformCapabilitiesProvider).isWeb) _updateTopBar(position);
     // Prefetch before the user hits the bottom so paging feels continuous.
     if (position.pixels >= position.maxScrollExtent - 400) {
       ref.read(discoveryControllerProvider.notifier).loadMore();
@@ -56,6 +121,20 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
     final controller = ref.read(discoveryControllerProvider.notifier);
     final user = ref.watch(authControllerProvider).user;
     final columns = ref.watch(discoveryColumnsProvider);
+    final isWeb = ref.watch(platformCapabilitiesProvider).isWeb;
+    final searchOpen = isWeb
+        ? ref.watch(discoveryWebSearchOpenProvider)
+        : _searchOpen;
+
+    if (isWeb) {
+      ref.listen<int>(
+        discoveryWebSearchFocusProvider,
+        (_, __) => _focusSearch(),
+      );
+      ref.listen<bool>(discoveryWebSearchOpenProvider, (_, open) {
+        if (!open) _clearSearch();
+      });
+    }
 
     return SafeArea(
       bottom: false,
@@ -78,70 +157,78 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        // The leading group is the sole flexible child (an
-                        // Expanded, not a Flexible competing with a Spacer)
-                        // so it claims exactly the width left over after the
-                        // fixed trailing icons — "Discover" only shrinks on
-                        // the very narrowest supported screens, instead of
-                        // splitting the row down the middle with empty space.
-                        Expanded(
-                          child: Row(
-                            children: [
-                              // A one-off serif treatment for this single
-                              // wordmark — the reference's only departure
-                              // from Inter — rather than reusing
-                              // MocoSectionHeader, which every other screen
-                              // also uses and must stay in the app's normal
-                              // typeface.
-                              Flexible(
-                                child: Text(
-                                  'Discover',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontFamily:
-                                        MocoTheme.discoverWordmarkFontFamily,
-                                    color: MocoColors.textPrimary,
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w500,
+                    // Web: the shell's top bar sits here (menu, the
+                    // Call/Live/Video capsule, wallet, bell).
+                    if (isWeb)
+                      const SizedBox(
+                        key: Key('discovery_web_header'),
+                        height: 44,
+                      )
+                    else
+                      Row(
+                        children: [
+                          // The leading group is the sole flexible child (an
+                          // Expanded, not a Flexible competing with a Spacer)
+                          // so it claims exactly the width left over after the
+                          // fixed trailing icons — "Discover" only shrinks on
+                          // the very narrowest supported screens, instead of
+                          // splitting the row down the middle with empty space.
+                          Expanded(
+                            child: Row(
+                              children: [
+                                // A one-off serif treatment for this single
+                                // wordmark — the reference's only departure
+                                // from Inter — rather than reusing
+                                // MocoSectionHeader, which every other screen
+                                // also uses and must stay in the app's normal
+                                // typeface.
+                                Flexible(
+                                  child: Text(
+                                    'Discover',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontFamily:
+                                          MocoTheme.discoverWordmarkFontFamily,
+                                      color: MocoColors.textPrimary,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: MocoSpacing.xs),
-                              _CompactModeToggle(
-                                mode: state.mode,
-                                onChanged: controller.setMode,
-                              ),
-                            ],
+                                const SizedBox(width: MocoSpacing.xs),
+                                _CompactModeToggle(
+                                  mode: state.mode,
+                                  onChanged: controller.setMode,
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        if (user != null) ...[
-                          _CoinBalanceChip(balance: user.coinBalance),
+                          if (user != null) ...[
+                            _CoinBalanceChip(balance: user.coinBalance),
+                            const SizedBox(width: MocoSpacing.xs),
+                          ],
+                          const _NotificationsBell(),
                           const SizedBox(width: MocoSpacing.xs),
+                          MocoIconButton(
+                            key: const Key('discovery_search_toggle'),
+                            icon: _searchOpen
+                                ? Icons.close_rounded
+                                : Icons.search_rounded,
+                            active: _searchOpen,
+                            onPressed: () {
+                              setState(() => _searchOpen = !_searchOpen);
+                              if (!_searchOpen) {
+                                _searchController.clear();
+                                controller.setSearchQuery('');
+                              }
+                            },
+                          ),
                         ],
-                        const _NotificationsBell(),
-                        const SizedBox(width: MocoSpacing.xs),
-                        MocoIconButton(
-                          key: const Key('discovery_search_toggle'),
-                          icon: _searchOpen
-                              ? Icons.close_rounded
-                              : Icons.search_rounded,
-                          active: _searchOpen,
-                          onPressed: () {
-                            setState(() => _searchOpen = !_searchOpen);
-                            if (!_searchOpen) {
-                              _searchController.clear();
-                              controller.setSearchQuery('');
-                            }
-                          },
-                        ),
-                      ],
-                    ),
+                      ),
                     AnimatedCrossFade(
                       duration: MocoDuration.sheet,
-                      crossFadeState: _searchOpen
+                      crossFadeState: searchOpen
                           ? CrossFadeState.showSecond
                           : CrossFadeState.showFirst,
                       firstChild: const SizedBox(width: double.infinity),
@@ -150,6 +237,7 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                         child: TextField(
                           key: const Key('discovery_search_field'),
                           controller: _searchController,
+                          focusNode: _searchFocus,
                           onChanged: controller.setSearchQuery,
                           style: TextStyle(
                             color: MocoColors.textPrimary,

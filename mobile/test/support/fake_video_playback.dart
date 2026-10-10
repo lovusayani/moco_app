@@ -31,6 +31,19 @@ class FakeVideoPlayback extends ChangeNotifier implements FeedVideoPlayback {
 
   bool _initialized = false;
   bool _playing = false;
+  bool _completed = false;
+
+  /// Plays the video to its end, as the platform reports a finished clip.
+  void finish() {
+    _completed = true;
+    _playing = false;
+    notifyListeners();
+  }
+
+  /// Makes play() fail the way a browser refuses unmuted autoplay: the call
+  /// returns, and the player then reports an error.
+  bool blockUnmutedAutoplay = false;
+  String? _error;
 
   void completeInitialize() {
     for (final gate in [..._initializeGate]) {
@@ -56,6 +69,11 @@ class FakeVideoPlayback extends ChangeNotifier implements FeedVideoPlayback {
   @override
   Future<void> play() async {
     playCount += 1;
+    if (blockUnmutedAutoplay && volume > 0) {
+      _error = 'NotAllowedError: play() requires a user gesture';
+      notifyListeners();
+      return;
+    }
     _playing = true;
     notifyListeners();
   }
@@ -87,10 +105,13 @@ class FakeVideoPlayback extends ChangeNotifier implements FeedVideoPlayback {
   bool get isPlaying => _playing;
 
   @override
+  bool get isCompleted => _completed;
+
+  @override
   double? get aspectRatio => _initialized ? 9 / 16 : null;
 
   @override
-  String? get errorDescription => null;
+  String? get errorDescription => _error;
 
   @override
   Widget buildSurface() =>

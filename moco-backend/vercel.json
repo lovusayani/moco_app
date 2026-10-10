@@ -62,6 +62,16 @@
           "retryAfterSeconds": 10
         }
       ]
+    },
+    "api/queues/live.mjs": {
+      "maxDuration": 60,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "moco-live",
+          "retryAfterSeconds": 10
+        }
+      ]
     }
   },
   "crons": [

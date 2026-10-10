@@ -77,9 +77,12 @@ class _EmptyNotificationsApi implements NotificationsApi {
 Future<List<Override>> signedInOverrides({
   required MocoUser user,
   UsersApi? usersApi,
+  bool onboardingComplete = false,
 }) async {
   SharedPreferences.setMockInitialValues({});
   final prefs = await AppPreferences.create();
+  // Only tests that drive the real router need this; screen tests don't care.
+  if (onboardingComplete) await prefs.setOnboardingComplete(true);
   final store = FakeSecureStore('jwt');
 
   final api = usersApi ?? _StubUsersApi(user);
@@ -123,6 +126,9 @@ class _StubUsersApi implements UsersApi {
 
   @override
   Future<void> registerPushToken(String token) async {}
+
+  @override
+  Future<void> unregisterPushToken(String token) async {}
 
   @override
   Future<void> deleteAccount() async {}

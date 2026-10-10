@@ -8,6 +8,7 @@ import 'package:moco/core/auth/auth_controller.dart';
 import 'package:moco/core/providers.dart';
 import 'package:moco/core/storage/secure_store.dart';
 import 'package:moco/core/theme/moco_theme.dart';
+import 'package:moco/shared/models/listener_photos.dart';
 import 'package:moco/shared/models/notification.dart';
 import 'package:moco/shared/models/app_config.dart';
 import 'package:moco/shared/models/user.dart';
@@ -132,6 +133,13 @@ class _StubUsersApi implements UsersApi {
 
   @override
   Future<void> deleteAccount() async {}
+
+  @override
+  Future<ListenerPhotoUploadAuthorization> requestAvatarUploadUrl(String mimeType) =>
+      throw UnimplementedError();
+
+  @override
+  Future<MocoUser> registerAvatar(String path) async => _user;
 }
 
 /// Never called in a signed-in-session test, but AuthController requires one.

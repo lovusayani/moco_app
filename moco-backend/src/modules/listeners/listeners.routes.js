@@ -14,6 +14,7 @@ const { notFound, badRequest, forbidden } = require('../../utils/errors');
 const {
   KYC_STATUS,
   LISTENER_PHOTOS,
+  USER_AVATARS,
   listenerEligibleSql,
 } = require('../../utils/constants');
 
@@ -239,6 +240,31 @@ router.post(
          VALUES ($1, $2, $3, $4) ON CONFLICT (storage_path) DO NOTHING`,
         [req.user.id, path, mimeType, object.sizeBytes],
       );
+
+      // Auto-avatar: if the user has no avatar, use the first listener photo.
+      const { rows: userRow } = await client.query(
+        'SELECT avatar_url FROM users WHERE id = $1',
+        [req.user.id],
+      );
+      if (!userRow[0]?.avatar_url) {
+        const storage = require('../../integrations/storage');
+        const signedUrl = await storage.createViewUrl(LISTENER_PHOTOS.bucket, path, {
+          expiresInSeconds: USER_AVATARS.viewUrlSeconds,
+        });
+        if (signedUrl) {
+          try {
+            await client.query(
+              'UPDATE users SET avatar_url = $2, avatar_storage_path = $3, updated_at = now() WHERE id = $1',
+              [req.user.id, signedUrl, path],
+            );
+          } catch {
+            await client.query(
+              'UPDATE users SET avatar_url = $2, updated_at = now() WHERE id = $1',
+              [req.user.id, signedUrl],
+            );
+          }
+        }
+      }
     });
 
     res.status(201).json(await serializePhotos(req.user.id));

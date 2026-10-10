@@ -1,3 +1,4 @@
+import '../../shared/models/listener_photos.dart';
 import '../../shared/models/user.dart';
 import 'api_client.dart';
 
@@ -35,6 +36,25 @@ class UsersApi {
 
     return _client.request(
       () => _client.dio.patch<dynamic>('/users/me', data: body),
+      (data) => MocoUser.fromJson(Map<String, dynamic>.from(data as Map)),
+    );
+  }
+
+  Future<ListenerPhotoUploadAuthorization> requestAvatarUploadUrl(String mimeType) {
+    return _client.request(
+      () => _client.dio.post<dynamic>(
+        '/users/me/avatar/upload-url',
+        data: {'mimeType': mimeType},
+      ),
+      (data) => ListenerPhotoUploadAuthorization.fromJson(
+        Map<String, dynamic>.from(data as Map),
+      ),
+    );
+  }
+
+  Future<MocoUser> registerAvatar(String path) {
+    return _client.request(
+      () => _client.dio.post<dynamic>('/users/me/avatar', data: {'path': path}),
       (data) => MocoUser.fromJson(Map<String, dynamic>.from(data as Map)),
     );
   }

@@ -4,14 +4,16 @@ const express = require('express');
 const { z } = require('zod');
 const { query, withTransaction } = require('../../config/db');
 const listenerStorage = require('../../integrations/listener.storage');
+const userStorage = require('../../integrations/user.storage');
 const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
 const { authenticate } = require('../../middleware/auth');
-const { notFound } = require('../../utils/errors');
+const { notFound, badRequest } = require('../../utils/errors');
 const {
   USER_ROLE,
   KYC_STATUS,
   LISTENER_PHOTOS,
+  USER_AVATARS,
   listenerBlockers,
 } = require('../../utils/constants');
 
@@ -128,6 +130,83 @@ router.patch(
       [req.user.id],
     );
 
+    res.json(serializeUser(rows[0]));
+  }),
+);
+
+router.post(
+  '/me/avatar/upload-url',
+  validate(z.object({ mimeType: z.enum(USER_AVATARS.allowedMimeTypes) })),
+  asyncHandler(async (req, res) => {
+    if (!userStorage.isConfigured()) {
+      throw badRequest('storage_not_configured', 'Avatar uploads are not available right now');
+    }
+    const { path, uploadUrl, token } = await userStorage.createUploadUrl({
+      userId: req.user.id,
+      mimeType: req.body.mimeType,
+    });
+    res.json({ path, uploadUrl, token, maxBytes: USER_AVATARS.maxBytes });
+  }),
+);
+
+router.post(
+  '/me/avatar',
+  validate(z.object({ path: z.string().min(1).max(400) })),
+  asyncHandler(async (req, res) => {
+    const { path } = req.body;
+    if (!userStorage.pathBelongsToUser(path, req.user.id)) {
+      throw badRequest('forbidden', 'This avatar does not belong to you');
+    }
+    if (!userStorage.isConfigured()) {
+      throw badRequest('storage_not_configured', 'Avatar uploads are not available right now');
+    }
+
+    const object = await userStorage.statObject(path);
+    if (!object) {
+      throw badRequest('media_not_uploaded', 'The upload did not finish. Please try again.');
+    }
+    if (object.sizeBytes !== null && object.sizeBytes > USER_AVATARS.maxBytes) {
+      await userStorage.remove(path);
+      throw badRequest('media_too_large', 'That image is too large');
+    }
+
+    const signedUrl = await userStorage.createViewUrl(path);
+    if (!signedUrl) {
+      throw badRequest('storage_error', 'Could not generate avatar URL');
+    }
+
+    // Best-effort cleanup: read the old path if the column exists.
+    let oldPath = null;
+    try {
+      const { rows: prev } = await query(
+        'SELECT avatar_storage_path FROM users WHERE id = $1',
+        [req.user.id],
+      );
+      oldPath = prev[0]?.avatar_storage_path;
+    } catch { /* column may not exist yet before migration 017 */ }
+
+    // Store both the signed URL and the storage path (for future cleanup).
+    try {
+      await query(
+        `UPDATE users SET avatar_url = $2, avatar_storage_path = $3, updated_at = now() WHERE id = $1`,
+        [req.user.id, signedUrl, path],
+      );
+    } catch {
+      // Fall back if avatar_storage_path column doesn't exist yet.
+      await query(
+        `UPDATE users SET avatar_url = $2, updated_at = now() WHERE id = $1`,
+        [req.user.id, signedUrl],
+      );
+    }
+
+    if (oldPath && userStorage.isAvatarPath(oldPath)) {
+      await userStorage.remove(oldPath);
+    }
+
+    const { rows } = await query(
+      `SELECT ${USER_SELECT} ${USER_JOINS} WHERE u.id = $1`,
+      [req.user.id],
+    );
     res.json(serializeUser(rows[0]));
   }),
 );

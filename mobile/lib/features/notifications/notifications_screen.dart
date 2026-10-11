@@ -34,6 +34,18 @@ class NotificationsScreen extends ConsumerWidget {
         final postId = (notification.data['postId'] as num?)?.toInt();
         if (postId != null) context.go(Routes.feedPostPath(postId));
         break;
+      case 'friend_request':
+        final actorId = (notification.data['actorId'] as num?)?.toInt();
+        if (actorId != null) context.push(Routes.listenerPath(actorId));
+        break;
+      case 'friend_accepted':
+        final actorId = (notification.data['actorId'] as num?)?.toInt();
+        if (actorId != null) context.push(Routes.listenerPath(actorId));
+        break;
+      case 'new_follower':
+        final actorId = (notification.data['actorId'] as num?)?.toInt();
+        if (actorId != null) context.push(Routes.listenerPath(actorId));
+        break;
       default:
         // An unrecognised type has nowhere honest to navigate — the
         // notification still opens (marked read) but stays where it is,

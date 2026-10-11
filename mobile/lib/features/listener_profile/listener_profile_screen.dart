@@ -601,13 +601,11 @@ class _CompactHeader extends StatelessWidget {
   }
 }
 
-/// Favourite / Follow / Chat.
+/// Favourite / Friend Request / Chat.
 ///
-/// Favourite and follow are real, backend-persisted and idempotent. They update
-/// optimistically and roll back on failure — nothing is stored locally, so a
-/// rollback means the action genuinely did not happen.
-///
-/// Chat has real endpoints but no UI until Phase 3, so it stays disabled.
+/// Heart toggles favourite+follow in one action (drives follower count).
+/// Person+ sends a friend request (does NOT change follower count).
+/// Chat is enabled only when friendship is accepted.
 class _ActionRow extends ConsumerWidget {
   const _ActionRow({required this.listener});
 
@@ -628,10 +626,17 @@ class _ActionRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final current = ref.watch(listenerRelationsProvider(listener));
     final controller = ref.read(listenerRelationsProvider(listener).notifier);
+    final user = ref.watch(authControllerProvider).user;
+
+    final isFriends = current.friendshipStatus == 'accepted';
+    final isPending = current.friendshipStatus == 'pending';
+    final isCreator = user?.role == 'listener' || user?.role == 'both';
+    final canChat = isFriends || isCreator;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
+        // Heart: favourite + follow (drives follower count)
         MocoIconButton(
           key: const Key('action_favorite'),
           icon: current.isFavorited
@@ -644,21 +649,39 @@ class _ActionRow extends ConsumerWidget {
           onPressed: () => _run(context, controller.toggleFavorite),
         ),
         const SizedBox(width: MocoSpacing.lg),
+
+        // Friend request button
         MocoIconButton(
-          key: const Key('action_follow'),
-          icon: current.isFollowing
-              ? Icons.person_remove_alt_1_outlined
-              : Icons.person_add_alt_1_outlined,
-          active: current.isFollowing,
-          tooltip: current.isFollowing ? 'Unfollow' : 'Follow',
-          onPressed: () => _run(context, controller.toggleFollow),
+          key: const Key('action_friend'),
+          icon: isFriends
+              ? Icons.people_rounded
+              : isPending
+                  ? Icons.hourglass_top_rounded
+                  : Icons.person_add_alt_1_outlined,
+          active: isFriends,
+          tooltip: isFriends
+              ? 'Friends'
+              : isPending
+                  ? 'Request pending'
+                  : 'Add friend',
+          onPressed: isFriends || isPending
+              ? null
+              : () => _run(context, controller.sendFriendRequest),
         ),
         const SizedBox(width: MocoSpacing.lg),
-        const MocoIconButton(
-          key: Key('action_chat'),
+
+        // Chat: enabled only when friends (or viewer is a creator)
+        MocoIconButton(
+          key: const Key('action_chat'),
           icon: Icons.chat_bubble_outline_rounded,
-          tooltip: 'Chat arrives in Phase 3',
-          onPressed: null,
+          tooltip: canChat
+              ? 'Chat'
+              : isPending
+                  ? 'Friend request pending'
+                  : 'Become friends to chat',
+          onPressed: canChat
+              ? () => context.push(Routes.chatThreadPath(listener.id))
+              : null,
         ),
       ],
     );

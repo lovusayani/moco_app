@@ -332,7 +332,17 @@ router.get(
                        WHERE r.user_id = $3 AND r.listener_id = lp.user_id
                          AND r.kind = 'follow') AS is_following,
               (SELECT count(*)::int FROM listener_relations r
-                WHERE r.listener_id = lp.user_id AND r.kind = 'follow') AS follower_count
+                WHERE r.listener_id = lp.user_id AND r.kind = 'follow') AS follower_count,
+              (SELECT fr.status FROM friend_requests fr
+                WHERE LEAST(fr.requester_id, fr.target_id) = LEAST($3, lp.user_id)
+                  AND GREATEST(fr.requester_id, fr.target_id) = GREATEST($3, lp.user_id)
+                  AND fr.status IN ('pending', 'accepted')
+                ORDER BY fr.created_at DESC LIMIT 1) AS friendship_status,
+              (SELECT fr.requester_id FROM friend_requests fr
+                WHERE LEAST(fr.requester_id, fr.target_id) = LEAST($3, lp.user_id)
+                  AND GREATEST(fr.requester_id, fr.target_id) = GREATEST($3, lp.user_id)
+                  AND fr.status IN ('pending', 'accepted')
+                ORDER BY fr.created_at DESC LIMIT 1) AS friend_requester_id
          FROM listener_profiles lp
          JOIN users u ON u.id = lp.user_id
         WHERE lp.user_id = $1 AND ${ELIGIBLE} AND u.status = 'active'`,
@@ -362,6 +372,8 @@ router.get(
       isFavorited: row.is_favorited,
       isFollowing: row.is_following,
       followerCount: row.follower_count,
+      friendshipStatus: row.friendship_status || 'none',
+      friendRequesterId: row.friend_requester_id ? Number(row.friend_requester_id) : null,
     });
   }),
 );

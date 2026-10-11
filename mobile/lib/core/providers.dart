@@ -5,6 +5,7 @@ import 'api/auth_api.dart';
 import 'api/chat_api.dart';
 import 'api/config_api.dart';
 import 'api/feed_api.dart';
+import 'api/friends_api.dart';
 import 'api/listeners_api.dart';
 import 'api/live_api.dart';
 import 'api/notifications_api.dart';
@@ -47,6 +48,9 @@ final configApiProvider = Provider<ConfigApi>(
 );
 final chatApiProvider = Provider<ChatApi>(
   (ref) => ChatApi(ref.watch(apiClientProvider)),
+);
+final friendsApiProvider = Provider<FriendsApi>(
+  (ref) => FriendsApi(ref.watch(apiClientProvider)),
 );
 final feedApiProvider = Provider<FeedApi>(
   (ref) => FeedApi(ref.watch(apiClientProvider)),

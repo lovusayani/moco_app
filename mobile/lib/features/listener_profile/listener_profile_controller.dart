@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api/friends_api.dart';
 import '../../core/api/listeners_api.dart';
 import '../../core/errors/api_exception.dart';
 import '../../core/providers.dart';
@@ -36,70 +37,69 @@ final similarListenersProvider =
       return page.listeners.where((l) => l.id != listener.id).take(8).toList();
     });
 
-/// Owns the favourite/follow buttons for one listener.
+/// Owns the favourite/follow and friend-request buttons for one listener.
 ///
-/// Updates are optimistic — the button flips immediately — but every failure
-/// rolls the state back to what it was. Nothing is persisted locally: the
-/// server is the only record, so a rollback genuinely means "this did not
-/// happen" rather than leaving the client quietly out of sync.
+/// Heart (favorite) now drives BOTH 'favorite' and 'follow' relations, so it
+/// controls the follower count. The person+ button sends a friend request
+/// instead of toggling follow.
 class ListenerRelationsController extends StateNotifier<ListenerDetail> {
-  ListenerRelationsController(this._api, super.listener);
+  ListenerRelationsController(this._api, this._friendsApi, super.listener);
 
   final ListenersApi _api;
+  final FriendsApi _friendsApi;
 
-  /// In-flight kinds, so a double tap cannot fire two conflicting writes.
   final Set<String> _pending = {};
 
   bool isPending(String kind) => _pending.contains(kind);
 
-  Future<ApiException?> toggleFavorite() => _toggle(
-    kind: 'favorite',
-    current: state.isFavorited,
-    apply: (active) => state.copyWith(isFavorited: active),
-  );
-
-  Future<ApiException?> toggleFollow() => _toggle(
-    kind: 'follow',
-    current: state.isFollowing,
-    apply: (active) => state.copyWith(
-      isFollowing: active,
-      // Keep the visible count honest while the request is in flight.
-      followerCount: active
-          ? state.followerCount + 1
-          : (state.followerCount - 1).clamp(0, 1 << 30),
-    ),
-  );
-
-  /// Returns null on success, or the failure so the screen can surface it.
-  Future<ApiException?> _toggle({
-    required String kind,
-    required bool current,
-    required ListenerDetail Function(bool active) apply,
-  }) async {
-    if (_pending.contains(kind)) return null;
+  /// Heart button: toggles both 'favorite' and 'follow' at once.
+  Future<ApiException?> toggleFavorite() async {
+    if (_pending.contains('favorite')) return null;
 
     final previous = state;
-    final next = !current;
+    final next = !state.isFavorited;
 
-    _pending.add(kind);
-    state = apply(next);
+    _pending.add('favorite');
+    state = state.copyWith(
+      isFavorited: next,
+      isFollowing: next,
+      followerCount: next
+          ? state.followerCount + 1
+          : (state.followerCount - 1).clamp(0, 1 << 30),
+    );
 
     try {
-      final result = await _api.setRelation(
-        listenerId: state.id,
-        kind: kind,
-        active: next,
-      );
-      // Reconcile with the server's count rather than trusting the guess.
-      state = state.copyWith(followerCount: result.followerCount);
+      // Fire both relation writes in parallel
+      final results = await Future.wait([
+        _api.setRelation(listenerId: state.id, kind: 'favorite', active: next),
+        _api.setRelation(listenerId: state.id, kind: 'follow', active: next),
+      ]);
+      state = state.copyWith(followerCount: results[1].followerCount);
       return null;
     } on ApiException catch (e) {
-      // Roll back completely: an optimistic update that silently stuck would
-      // show a follow that does not exist.
       state = previous;
       return e;
     } finally {
-      _pending.remove(kind);
+      _pending.remove('favorite');
+    }
+  }
+
+  /// Person+ button: sends a friend request. Does NOT change follower count.
+  Future<ApiException?> sendFriendRequest() async {
+    if (_pending.contains('friend')) return null;
+
+    final previous = state;
+    _pending.add('friend');
+    state = state.copyWith(friendshipStatus: 'pending');
+
+    try {
+      await _friendsApi.sendRequest(state.id);
+      return null;
+    } on ApiException catch (e) {
+      state = previous;
+      return e;
+    } finally {
+      _pending.remove('friend');
     }
   }
 }
@@ -112,6 +112,7 @@ final listenerRelationsProvider =
     >(
       (ref, listener) => ListenerRelationsController(
         ref.watch(listenersApiProvider),
+        ref.watch(friendsApiProvider),
         listener,
       ),
     );

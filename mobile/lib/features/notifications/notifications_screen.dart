@@ -35,14 +35,9 @@ class NotificationsScreen extends ConsumerWidget {
         if (postId != null) context.go(Routes.feedPostPath(postId));
         break;
       case 'friend_request':
-        final actorId = (notification.data['actorId'] as num?)?.toInt();
-        if (actorId != null) context.push(Routes.listenerPath(actorId));
+        context.push(Routes.friendRequests);
         break;
       case 'friend_accepted':
-        final actorId = (notification.data['actorId'] as num?)?.toInt();
-        if (actorId != null) context.push(Routes.listenerPath(actorId));
-        break;
-      case 'new_follower':
         final actorId = (notification.data['actorId'] as num?)?.toInt();
         if (actorId != null) context.push(Routes.listenerPath(actorId));
         break;

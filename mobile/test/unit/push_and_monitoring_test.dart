@@ -16,6 +16,7 @@ void main() {
     test('open the screen that matches the notification type', () {
       expect(PushService.locationFor('payout_paid'), Routes.earningsLedger);
       expect(PushService.locationFor('payout_approved'), Routes.earningsLedger);
+      expect(PushService.locationFor('friend_request'), Routes.friendRequests);
       expect(PushService.locationFor('test'), Routes.notifications);
       expect(PushService.locationFor('kyc_approved'), Routes.notifications);
       expect(PushService.locationFor(null), Routes.notifications);

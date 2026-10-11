@@ -83,6 +83,10 @@ void main() {
           path: '/profile/ledger/earnings',
           builder: (_, __) => const Scaffold(body: Text('earnings ledger screen')),
         ),
+        GoRoute(
+          path: '/profile/friend-requests',
+          builder: (_, __) => const Scaffold(body: Text('friend requests screen')),
+        ),
       ],
     );
 
@@ -262,5 +266,28 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('earnings ledger screen'), findsOneWidget);
+  });
+
+  testWidgets('a caller has no friend requests row', (tester) async {
+    await pumpReady(tester, _caller);
+
+    expect(find.byKey(const Key('profile_friend_requests_row')), findsNothing);
+  });
+
+  testWidgets('tapping the friend requests row navigates there', (tester) async {
+    await pumpReady(tester, _bothRoleUser);
+    await tester.tap(find.byKey(const Key('profile_role_listener')));
+    await tester.pump();
+    await tester.pump();
+
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('profile_friend_requests_row')),
+      200,
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('profile_friend_requests_row')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('friend requests screen'), findsOneWidget);
   });
 }

@@ -10,7 +10,7 @@ const { asyncHandler } = require('../../middleware/error');
 const { authenticate } = require('../../middleware/auth');
 const { rateLimit } = require('../../middleware/rateLimit');
 const { forbidden, notFound, badRequest } = require('../../utils/errors');
-const { MESSAGE_TYPE, CHAT_MEDIA, USER_ROLE } = require('../../utils/constants');
+const { MESSAGE_TYPE, CHAT_MEDIA, listenerEligibleSql } = require('../../utils/constants');
 
 const router = express.Router();
 router.use(authenticate);
@@ -19,33 +19,36 @@ router.use(authenticate);
 const pairKey = (a, b) => (Number(a) < Number(b) ? [Number(a), Number(b)] : [Number(b), Number(a)]);
 
 /**
+ * A "creator" for chat purposes is an ELIGIBLE listener (approved KYC and
+ * enough photos — the same predicate discovery uses) on an active account.
+ * users.role is not enough: become-listener sets role = 'both' instantly,
+ * before any review.
+ */
+async function isEligibleCreator(userId) {
+  const { rows } = await query(
+    `SELECT 1 FROM listener_profiles lp
+       JOIN users u ON u.id = lp.user_id
+      WHERE lp.user_id = $1 AND ${listenerEligibleSql('lp')} AND u.status = 'active'`,
+    [userId],
+  );
+  return rows.length > 0;
+}
+
+/**
  * Chat permission gate.
  *
- * A normal user (role = 'user') may only initiate a conversation with a
- * creator/listener if they have an accepted friendship. Creators (role =
- * 'listener' or 'both') may chat with anyone. An existing conversation
- * where the creator messaged first is allowed to continue: the normal user
- * may reply in a thread the creator started.
+ * A normal user may only initiate a conversation with an eligible creator if
+ * they have an accepted friendship. Eligible creators may chat with anyone.
+ * An existing conversation where the creator messaged first is allowed to
+ * continue: the normal user may reply in a thread the creator started.
  */
 async function assertChatPermission(senderId, recipientId) {
-  const { rows: senderRow } = await query(
-    `SELECT role FROM users WHERE id = $1`,
-    [senderId],
-  );
-  const senderRole = senderRow[0]?.role;
+  // Eligible creators can message anyone
+  if (await isEligibleCreator(senderId)) return;
 
-  // Creators/listeners can message anyone
-  if (senderRole === USER_ROLE.LISTENER || senderRole === USER_ROLE.BOTH) return;
-
-  // Check if the recipient is a creator/listener
-  const { rows: recipientRow } = await query(
-    `SELECT role FROM users WHERE id = $1`,
-    [recipientId],
-  );
-  const recipientRole = recipientRow[0]?.role;
-
-  // If recipient is a normal user, no friendship required (user-to-user chat)
-  if (recipientRole === USER_ROLE.USER) return;
+  // If the recipient is not an eligible creator, no friendship required
+  // (user-to-user chat)
+  if (!(await isEligibleCreator(recipientId))) return;
 
   // Normal user → creator: check for accepted friendship
   const lo = Math.min(senderId, recipientId);

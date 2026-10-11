@@ -506,6 +506,13 @@ class _ListenerSectionsState extends ConsumerState<_ListenerSections> {
             onTap: () => context.push(Routes.listenerApplication),
           ),
         ],
+        const SizedBox(height: MocoSpacing.sm),
+        _NavRow(
+          key: const Key('profile_friend_requests_row'),
+          icon: Icons.person_add_alt_1_outlined,
+          label: 'Friend requests',
+          onTap: () => context.push(Routes.friendRequests),
+        ),
         const SizedBox(height: MocoSpacing.xl),
         MocoSectionHeader(title: 'Earnings'),
         const SizedBox(height: MocoSpacing.md),

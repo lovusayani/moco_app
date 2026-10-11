@@ -630,7 +630,9 @@ class _ActionRow extends ConsumerWidget {
 
     final isFriends = current.friendshipStatus == 'accepted';
     final isPending = current.friendshipStatus == 'pending';
-    final isCreator = user?.role == 'listener' || user?.role == 'both';
+    // Matches the server's chat gate: only an ELIGIBLE listener (no
+    // remaining blockers) counts as a creator, not merely role 'both'.
+    final isCreator = user?.listener?.isEligible ?? false;
     final canChat = isFriends || isCreator;
 
     return Row(

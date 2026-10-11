@@ -78,12 +78,21 @@ router.post(
       [lo, hi],
     );
 
-    const { rows: inserted } = await query(
-      `INSERT INTO friend_requests (requester_id, target_id, status)
-       VALUES ($1, $2, 'pending')
-       RETURNING id, status, created_at`,
-      [req.user.id, targetId],
-    );
+    let inserted;
+    try {
+      ({ rows: inserted } = await query(
+        `INSERT INTO friend_requests (requester_id, target_id, status)
+         VALUES ($1, $2, 'pending')
+         RETURNING id, status, created_at`,
+        [req.user.id, targetId],
+      ));
+    } catch (err) {
+      // A concurrent request for the same pair hit the unique index.
+      if (err.code === '23505') {
+        throw badRequest('request_pending', 'A friend request is already pending');
+      }
+      throw err;
+    }
 
     // Notify the target
     const senderName = req.user.display_name || 'Someone';
@@ -138,29 +147,60 @@ router.post(
 
     const newStatus = req.body.accept ? 'accepted' : 'rejected';
 
-    await query(
-      `UPDATE friend_requests SET status = $2, responded_at = now() WHERE id = $1`,
-      [request.id, newStatus],
+    // Accepting requires the requester to still be an active user who is not
+    // blocked in either direction.
+    let requesterToken = null;
+    if (req.body.accept) {
+      const { rows: requester } = await query(
+        `SELECT fcm_token FROM users WHERE id = $1 AND status = 'active'`,
+        [request.requester_id],
+      );
+      if (!requester[0]) throw notFound('Friend request');
+
+      const { rows: blocked } = await query(
+        `SELECT 1 FROM blocks
+          WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)`,
+        [req.user.id, request.requester_id],
+      );
+      // Same answer as an inactive requester, so a block is not revealed.
+      if (blocked.length > 0) throw notFound('Friend request');
+
+      requesterToken = requester[0].fcm_token;
+    }
+
+    // Conditional update: only one concurrent response can win.
+    const { rows: updated } = await query(
+      `UPDATE friend_requests SET status = $3, responded_at = now()
+        WHERE id = $1 AND target_id = $2 AND status = 'pending'
+        RETURNING requester_id`,
+      [request.id, req.user.id, newStatus],
     );
+    if (!updated[0]) {
+      const { rows: again } = await query(
+        `SELECT target_id FROM friend_requests WHERE id = $1`,
+        [request.id],
+      );
+      if (!again[0]) throw notFound('Friend request');
+      if (Number(again[0].target_id) !== Number(req.user.id)) {
+        throw forbidden('You can only respond to requests sent to you');
+      }
+      throw badRequest('already_responded', 'This request has already been responded to');
+    }
 
     // Notify the requester
     const responderName = req.user.display_name || 'Someone';
     if (req.body.accept) {
       await notifications.create({
-        userId: Number(request.requester_id),
+        userId: Number(updated[0].requester_id),
         type: 'friend_accepted',
         title: `${responderName} accepted your friend request`,
         data: { actorId: Number(req.user.id) },
       });
 
       // Best-effort push
-      const { rows: requester } = await query(
-        `SELECT fcm_token FROM users WHERE id = $1`,
-        [request.requester_id],
-      );
-      if (requester[0]?.fcm_token) {
+      if (requesterToken) {
         await fcm.send({
-          token: requester[0].fcm_token,
+          token: requesterToken,
           title: 'Friend Request Accepted',
           body: `${responderName} accepted your friend request!`,
           data: { type: 'friend_accepted', actorId: String(req.user.id) },
@@ -222,6 +262,10 @@ router.get(
          FROM friend_requests fr
          JOIN users u ON u.id = fr.requester_id
         WHERE fr.target_id = $1 AND fr.status = 'pending'
+          AND u.status = 'active'
+          AND NOT EXISTS (SELECT 1 FROM blocks b
+            WHERE (b.blocker_id = $1 AND b.blocked_id = fr.requester_id)
+               OR (b.blocker_id = fr.requester_id AND b.blocked_id = $1))
         ORDER BY fr.created_at DESC
         LIMIT 50`,
       [req.user.id],

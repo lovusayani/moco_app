@@ -51,14 +51,20 @@ async function assertChatPermission(senderId, recipientId) {
   const lo = Math.min(senderId, recipientId);
   const hi = Math.max(senderId, recipientId);
 
-  const { rows: friendship } = await query(
-    `SELECT 1 FROM friend_requests
-      WHERE LEAST(requester_id, target_id) = $1
-        AND GREATEST(requester_id, target_id) = $2
-        AND status = 'accepted'
-      LIMIT 1`,
-    [lo, hi],
-  );
+  let friendship = [];
+  try {
+    ({ rows: friendship } = await query(
+      `SELECT 1 FROM friend_requests
+        WHERE LEAST(requester_id, target_id) = $1
+          AND GREATEST(requester_id, target_id) = $2
+          AND status = 'accepted'
+        LIMIT 1`,
+      [lo, hi],
+    ));
+  } catch (err) {
+    // 42P01: migration 018 not applied yet — nobody is friends.
+    if (err.code !== '42P01') throw err;
+  }
 
   if (friendship[0]) return;
 

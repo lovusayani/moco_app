@@ -314,21 +314,15 @@ router.delete(
 
 /** Latest pending/accepted friend request between two users, or null. */
 async function friendshipBetween(a, b) {
-  try {
-    const { rows } = await query(
-      `SELECT status, requester_id FROM friend_requests
-        WHERE LEAST(requester_id, target_id) = LEAST($1::bigint, $2::bigint)
-          AND GREATEST(requester_id, target_id) = GREATEST($1::bigint, $2::bigint)
-          AND status IN ('pending', 'accepted')
-        ORDER BY created_at DESC LIMIT 1`,
-      [a, b],
-    );
-    return rows[0] ?? null;
-  } catch (err) {
-    // 42P01: migration 018 not applied yet — treat as "no friendship".
-    if (err.code === '42P01') return null;
-    throw err;
-  }
+  const { rows } = await query(
+    `SELECT status, requester_id FROM friend_requests
+      WHERE LEAST(requester_id, target_id) = LEAST($1::bigint, $2::bigint)
+        AND GREATEST(requester_id, target_id) = GREATEST($1::bigint, $2::bigint)
+        AND status IN ('pending', 'accepted')
+      ORDER BY created_at DESC LIMIT 1`,
+    [a, b],
+  );
+  return rows[0] ?? null;
 }
 
 router.get(

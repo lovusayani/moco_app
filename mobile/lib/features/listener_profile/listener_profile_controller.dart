@@ -97,6 +97,15 @@ class ListenerRelationsController extends StateNotifier<ListenerDetail> {
       return null;
     } on ApiException catch (e) {
       state = previous;
+      // Cooldown after a rejection, or too many requests: one calm message.
+      if (e.kind == ApiErrorKind.rateLimited) {
+        return ApiException(
+          kind: e.kind,
+          code: e.code,
+          statusCode: e.statusCode,
+          message: 'You can send another request later.',
+        );
+      }
       return e;
     } finally {
       _pending.remove('friend');

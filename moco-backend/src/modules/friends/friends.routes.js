@@ -7,47 +7,61 @@ const { validate } = require('../../middleware/validate');
 const { asyncHandler } = require('../../middleware/error');
 const { authenticate } = require('../../middleware/auth');
 const { rateLimit } = require('../../middleware/rateLimit');
-const { notFound, badRequest, forbidden } = require('../../utils/errors');
+const { AppError, notFound, badRequest, forbidden } = require('../../utils/errors');
+const { listenerEligibleSql } = require('../../utils/constants');
 const notifications = require('../notifications/notifications.service');
 const fcm = require('../../integrations/fcm');
 
 const router = express.Router();
 router.use(authenticate);
 
+/** How long a rejected requester waits before asking the same creator again. */
+const REJECTION_COOLDOWN_HOURS = 24;
+
+/**
+ * One answer for every target that cannot receive a request — nonexistent,
+ * inactive, a normal user, an unapproved creator, yourself or a blocked pair —
+ * so the endpoint cannot be used to probe who exists or who blocked whom.
+ */
+const notAvailable = () =>
+  new AppError(404, 'not_available', 'This request could not be sent');
+
+const cooldown = () =>
+  new AppError(429, 'rate_limited', 'You can send another request later.');
+
 /**
  * Sends a friend request to another user.
  *
  * Rules:
- * - Cannot send to yourself
- * - Cannot send if blocked in either direction
+ * - The target must be an active, ELIGIBLE creator (approved listener); any
+ *   other target — yourself, a blocked pair, a normal user, an unapproved or
+ *   inactive creator, a missing id — gets the same generic 404
  * - Cannot send if there is already a pending request between the pair
  * - Cannot send if already accepted friends
- * - CAN re-request after a rejection (the old rejected row is replaced)
+ * - After a rejection the requester may ask again only once the cooldown has
+ *   passed; rejected rows are kept so the cooldown is enforced server-side
  */
 router.post(
   '/request/:userId',
-  rateLimit({ windowSeconds: 60, max: 30, keyPrefix: 'friend_request' }),
+  rateLimit({ windowSeconds: 60, max: 5, keyPrefix: 'friend_request_min' }),
+  rateLimit({ windowSeconds: 3600, max: 20, keyPrefix: 'friend_request_hour' }),
   validate(z.object({ userId: z.coerce.number().int().positive() }), 'params'),
   asyncHandler(async (req, res) => {
     const targetId = Number(req.params.userId);
-    if (targetId === Number(req.user.id)) {
-      throw badRequest('self_request', 'You cannot send a friend request to yourself');
-    }
+    if (targetId === Number(req.user.id)) throw notAvailable();
 
-    // Block check
-    const { rows: blocked } = await query(
-      `SELECT 1 FROM blocks
-        WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)`,
-      [req.user.id, targetId],
-    );
-    if (blocked.length > 0) throw forbidden('This user is not available');
-
-    // Target must be an active user
+    // Target must be an active, eligible creator that is not blocked either way.
     const { rows: targetUser } = await query(
-      `SELECT id, display_name, fcm_token FROM users WHERE id = $1 AND status = 'active'`,
-      [targetId],
+      `SELECT u.id, u.fcm_token
+         FROM users u
+         JOIN listener_profiles lp ON lp.user_id = u.id
+        WHERE u.id = $1 AND u.status = 'active' AND ${listenerEligibleSql('lp')}
+          AND NOT EXISTS (SELECT 1 FROM blocks b
+            WHERE (b.blocker_id = $2 AND b.blocked_id = u.id)
+               OR (b.blocker_id = u.id AND b.blocked_id = $2))`,
+      [targetId, req.user.id],
     );
-    if (!targetUser[0]) throw notFound('User');
+    if (!targetUser[0]) throw notAvailable();
 
     // Check existing relationship between pair
     const lo = Math.min(req.user.id, targetId);
@@ -69,14 +83,15 @@ router.post(
       throw badRequest('request_pending', 'A friend request is already pending');
     }
 
-    // Remove any old rejected row for this pair, then insert fresh
-    await query(
-      `DELETE FROM friend_requests
-        WHERE LEAST(requester_id, target_id) = $1
-          AND GREATEST(requester_id, target_id) = $2
-          AND status = 'rejected'`,
-      [lo, hi],
+    // Cooldown after a rejection: the rejected row stays as the record.
+    const { rows: recent } = await query(
+      `SELECT 1 FROM friend_requests
+        WHERE requester_id = $1 AND target_id = $2 AND status = 'rejected'
+          AND responded_at > now() - make_interval(hours => $3)
+        LIMIT 1`,
+      [req.user.id, targetId, REJECTION_COOLDOWN_HOURS],
     );
+    if (recent[0]) throw cooldown();
 
     let inserted;
     try {

@@ -14,6 +14,7 @@ import '../../features/chats/chats_screen.dart';
 import '../../features/discovery/discovery_screen.dart';
 import '../../features/feed/feed_screen.dart';
 import '../../features/feed/post_composer_screen.dart';
+import '../../features/friends/friend_requests_screen.dart';
 import '../../features/profile/account_settings_screen.dart';
 import '../../features/settings/app_settings_screen.dart';
 import '../../features/listener_application/listener_application_screen.dart';
@@ -53,6 +54,7 @@ class Routes {
   static const listenerApplication = '/profile/listener-application';
   static const coinLedger = '/profile/ledger/coins';
   static const earningsLedger = '/profile/ledger/earnings';
+  static const friendRequests = '/profile/friend-requests';
   static const notifications = '/notifications';
 
   /// Web only: the top bar's Live item — an empty placeholder for now.
@@ -248,6 +250,11 @@ final routerProvider = Provider<GoRouter>((ref) {
           provider: earningsLedgerControllerProvider,
           currencyPrefix: '₹',
         ),
+      ),
+      GoRoute(
+        path: Routes.friendRequests,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (_, __) => const FriendRequestsScreen(),
       ),
       // One shell for both roles. Listener capability is modelled as user state
       // rather than a second navigation tree (Phase 1 decision).

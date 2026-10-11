@@ -142,6 +142,8 @@ class ListenerDetail {
     this.isFavorited = false,
     this.isFollowing = false,
     this.followerCount = 0,
+    this.friendshipStatus = 'none',
+    this.friendRequesterId,
   });
 
   final int id;
@@ -166,6 +168,12 @@ class ListenerDetail {
   final bool isFollowing;
   final int followerCount;
 
+  /// Friendship status: 'none', 'pending', or 'accepted'.
+  final String friendshipStatus;
+
+  /// Who sent the pending/accepted request, or null.
+  final int? friendRequesterId;
+
   factory ListenerDetail.fromJson(Map<String, dynamic> json) {
     return ListenerDetail(
       id: (json['id'] as num).toInt(),
@@ -187,6 +195,8 @@ class ListenerDetail {
       isFavorited: json['isFavorited'] as bool? ?? false,
       isFollowing: json['isFollowing'] as bool? ?? false,
       followerCount: (json['followerCount'] as num?)?.toInt() ?? 0,
+      friendshipStatus: json['friendshipStatus'] as String? ?? 'none',
+      friendRequesterId: (json['friendRequesterId'] as num?)?.toInt(),
     );
   }
 
@@ -214,6 +224,8 @@ class ListenerDetail {
     bool? isFavorited,
     bool? isFollowing,
     int? followerCount,
+    String? friendshipStatus,
+    int? friendRequesterId,
   }) {
     return ListenerDetail(
       id: id,
@@ -235,6 +247,8 @@ class ListenerDetail {
       isFavorited: isFavorited ?? this.isFavorited,
       isFollowing: isFollowing ?? this.isFollowing,
       followerCount: followerCount ?? this.followerCount,
+      friendshipStatus: friendshipStatus ?? this.friendshipStatus,
+      friendRequesterId: friendRequesterId ?? this.friendRequesterId,
     );
   }
 

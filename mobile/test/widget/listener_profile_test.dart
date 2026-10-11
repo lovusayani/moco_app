@@ -2,16 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:moco/core/api/friends_api.dart';
 import 'package:moco/core/api/listeners_api.dart';
 import 'package:moco/core/widgets/moco_avatar.dart';
 import 'package:moco/core/errors/api_exception.dart';
 import 'package:moco/core/providers.dart';
 import 'package:moco/features/listener_profile/listener_profile_screen.dart';
 import 'package:moco/shared/models/listener.dart';
+import 'package:moco/shared/models/user.dart';
 
 import '../support/harness.dart';
 
 class _MockListenersApi extends Mock implements ListenersApi {}
+
+class _MockFriendsApi extends Mock implements FriendsApi {}
 
 const _detail = ListenerDetail(
   id: 7,
@@ -29,6 +33,7 @@ const _detail = ListenerDetail(
 
 void main() {
   late _MockListenersApi api;
+  late _MockFriendsApi friendsApi;
 
   setUpAll(() => registerFallbackValue(const DiscoveryFilters()));
 
@@ -36,6 +41,7 @@ void main() {
 
   setUp(() async {
     api = _MockListenersApi();
+    friendsApi = _MockFriendsApi();
     base = await baseOverrides();
     when(
       () => api.discover(
@@ -47,7 +53,11 @@ void main() {
 
   Widget subject({int? id = 7}) => wrapWidget(
     ListenerProfileScreen(listenerId: id),
-    overrides: [...base, listenersApiProvider.overrideWithValue(api)],
+    overrides: [
+      ...base,
+      listenersApiProvider.overrideWithValue(api),
+      friendsApiProvider.overrideWithValue(friendsApi),
+    ],
   );
 
   testWidgets('renders the listener from the backend', (tester) async {
@@ -93,7 +103,7 @@ void main() {
         listenerId: 7,
         kind: 'favorite',
         active: true,
-        followerCount: 0,
+        followerCount: 1,
       ),
     );
 
@@ -103,15 +113,16 @@ void main() {
     await tester.tap(find.byKey(const Key('action_favorite')));
     await tester.pumpAndSettle();
 
+    // Heart now fires both 'favorite' and 'follow' relations.
     verify(() => api.setRelation(listenerId: 7, kind: 'favorite', active: true))
+        .called(1);
+    verify(() => api.setRelation(listenerId: 7, kind: 'follow', active: true))
         .called(1);
     // Filled heart means the optimistic update stuck.
     expect(find.byIcon(Icons.favorite_rounded), findsOneWidget);
   });
 
-  testWidgets('following increments the visible follower count', (
-    tester,
-  ) async {
+  testWidgets('heart increments the visible follower count', (tester) async {
     when(() => api.byId(7)).thenAnswer((_) async => _detail);
     when(
       () => api.setRelation(
@@ -132,7 +143,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('0'), findsWidgets);
 
-    await tester.tap(find.byKey(const Key('action_follow')));
+    await tester.tap(find.byKey(const Key('action_favorite')));
     await tester.pumpAndSettle();
 
     expect(find.text('1'), findsWidgets);
@@ -170,7 +181,7 @@ void main() {
     expect(find.textContaining("offline"), findsOneWidget);
   });
 
-  testWidgets('a failed follow rolls the count back too', (tester) async {
+  testWidgets('a failed heart rolls the count back too', (tester) async {
     when(() => api.byId(7)).thenAnswer((_) async => _detail);
     when(
       () => api.setRelation(
@@ -188,7 +199,7 @@ void main() {
     await tester.pumpWidget(subject());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('action_follow')));
+    await tester.tap(find.byKey(const Key('action_favorite')));
     await tester.pumpAndSettle();
 
     expect(find.text('followers'), findsOneWidget);
@@ -207,7 +218,7 @@ void main() {
     expect(find.byIcon(Icons.favorite_rounded), findsOneWidget);
   });
 
-  testWidgets('chat stays disabled until Phase 3', (tester) async {
+  testWidgets('chat is disabled when not friends', (tester) async {
     when(() => api.byId(7)).thenAnswer((_) async => _detail);
 
     await tester.pumpWidget(subject());
@@ -222,6 +233,82 @@ void main() {
           .first,
     );
     expect(chat.onTap, isNull);
+  });
+
+  InkWell chatButton(WidgetTester tester) => tester.widget<InkWell>(
+    find
+        .ancestor(
+          of: find.byIcon(Icons.chat_bubble_outline_rounded),
+          matching: find.byType(InkWell),
+        )
+        .first,
+  );
+
+  Future<void> pumpAsViewer(WidgetTester tester, MocoUser viewer) async {
+    final signedIn = (await tester.runAsync(() => signedInOverrides(user: viewer)))!;
+    await tester.pumpWidget(
+      wrapWidget(
+        const ListenerProfileScreen(listenerId: 7),
+        overrides: [
+          ...signedIn,
+          listenersApiProvider.overrideWithValue(api),
+          friendsApiProvider.overrideWithValue(friendsApi),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('a both-role viewer with pending KYC still cannot chat when not friends', (
+    tester,
+  ) async {
+    when(() => api.byId(7)).thenAnswer((_) async => _detail);
+
+    await pumpAsViewer(
+      tester,
+      const MocoUser(
+        id: 3,
+        phone: '+919800000003',
+        displayName: 'Ananya',
+        role: 'both',
+        listener: ListenerState(kycStatus: 'pending'),
+      ),
+    );
+
+    expect(chatButton(tester).onTap, isNull);
+  });
+
+  testWidgets('an eligible creator viewer can chat without being friends', (tester) async {
+    when(() => api.byId(7)).thenAnswer((_) async => _detail);
+
+    await pumpAsViewer(
+      tester,
+      const MocoUser(
+        id: 2,
+        phone: '+919800000002',
+        displayName: 'Meera',
+        role: 'both',
+        listener: ListenerState(kycStatus: 'approved'),
+      ),
+    );
+
+    expect(chatButton(tester).onTap, isNotNull);
+  });
+
+  testWidgets('friend request button shows pending after tap', (tester) async {
+    when(() => api.byId(7)).thenAnswer((_) async => _detail);
+    when(() => friendsApi.sendRequest(7)).thenAnswer(
+      (_) async => const FriendRequestResult(requestId: 1, status: 'pending'),
+    );
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('action_friend')));
+    await tester.pumpAndSettle();
+
+    verify(() => friendsApi.sendRequest(7)).called(1);
+    expect(find.byIcon(Icons.hourglass_top_rounded), findsOneWidget);
   });
 
   testWidgets('only the call types a listener accepts are offered', (

@@ -41,6 +41,10 @@ void main() {
           path: '/profile/ledger/earnings',
           builder: (_, __) => const Scaffold(body: Text('earnings ledger screen')),
         ),
+        GoRoute(
+          path: '/profile/friend-requests',
+          builder: (_, __) => const Scaffold(body: Text('friend requests screen')),
+        ),
       ],
     );
 
@@ -133,6 +137,21 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('earnings ledger screen'), findsOneWidget);
+  });
+
+  testWidgets('tapping a friend request notification opens friend requests', (tester) async {
+    when(() => api.list()).thenAnswer(
+      (_) async => NotificationPage(notifications: [_n(1, type: 'friend_request')], unreadCount: 1),
+    );
+    when(() => api.markRead(1)).thenAnswer((_) async {});
+
+    await tester.pumpWidget(subject());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('notification_row_1')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('friend requests screen'), findsOneWidget);
   });
 
   testWidgets('swiping deletes the notification', (tester) async {

@@ -214,6 +214,14 @@ const LISTENER_PHOTOS = Object.freeze({
   viewUrlSeconds: 3600,
 });
 
+const USER_AVATARS = Object.freeze({
+  bucket: 'listener-media',
+  pathPrefix: 'avatars',
+  allowedMimeTypes: Object.freeze(['image/jpeg', 'image/png', 'image/webp']),
+  maxBytes: 5 * 1024 * 1024,
+  viewUrlSeconds: 30 * 24 * 3600,
+});
+
 /**
  * The single definition of "an active listener": KYC approved AND at least
  * LISTENER_PHOTOS.minCount photos. Every gate that decides whether someone is
@@ -313,6 +321,7 @@ module.exports = {
   postMediaTypeForMime,
   feedMaxBytesFor,
   LISTENER_PHOTOS,
+  USER_AVATARS,
   listenerEligibleSql,
   listenerBlockers,
   rateFor,

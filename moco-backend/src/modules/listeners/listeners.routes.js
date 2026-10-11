@@ -14,6 +14,7 @@ const { notFound, badRequest, forbidden } = require('../../utils/errors');
 const {
   KYC_STATUS,
   LISTENER_PHOTOS,
+  USER_AVATARS,
   listenerEligibleSql,
 } = require('../../utils/constants');
 
@@ -239,6 +240,31 @@ router.post(
          VALUES ($1, $2, $3, $4) ON CONFLICT (storage_path) DO NOTHING`,
         [req.user.id, path, mimeType, object.sizeBytes],
       );
+
+      // Auto-avatar: if the user has no avatar, use the first listener photo.
+      const { rows: userRow } = await client.query(
+        'SELECT avatar_url FROM users WHERE id = $1',
+        [req.user.id],
+      );
+      if (!userRow[0]?.avatar_url) {
+        const storage = require('../../integrations/storage');
+        const signedUrl = await storage.createViewUrl(LISTENER_PHOTOS.bucket, path, {
+          expiresInSeconds: USER_AVATARS.viewUrlSeconds,
+        });
+        if (signedUrl) {
+          try {
+            await client.query(
+              'UPDATE users SET avatar_url = $2, avatar_storage_path = $3, updated_at = now() WHERE id = $1',
+              [req.user.id, signedUrl, path],
+            );
+          } catch {
+            await client.query(
+              'UPDATE users SET avatar_url = $2, updated_at = now() WHERE id = $1',
+              [req.user.id, signedUrl],
+            );
+          }
+        }
+      }
     });
 
     res.status(201).json(await serializePhotos(req.user.id));
@@ -286,6 +312,19 @@ router.delete(
   }),
 );
 
+/** Latest pending/accepted friend request between two users, or null. */
+async function friendshipBetween(a, b) {
+  const { rows } = await query(
+    `SELECT status, requester_id FROM friend_requests
+      WHERE LEAST(requester_id, target_id) = LEAST($1::bigint, $2::bigint)
+        AND GREATEST(requester_id, target_id) = GREATEST($1::bigint, $2::bigint)
+        AND status IN ('pending', 'accepted')
+      ORDER BY created_at DESC LIMIT 1`,
+    [a, b],
+  );
+  return rows[0] ?? null;
+}
+
 router.get(
   '/:id',
   authenticate,
@@ -316,6 +355,10 @@ router.get(
     const row = rows[0];
     if (!row) throw notFound('Listener');
 
+    const friendship = await friendshipBetween(req.user.id, row.id);
+    row.friendship_status = friendship?.status;
+    row.friend_requester_id = friendship?.requester_id;
+
     res.json({
       id: row.id,
       name: row.display_name,
@@ -336,6 +379,8 @@ router.get(
       isFavorited: row.is_favorited,
       isFollowing: row.is_following,
       followerCount: row.follower_count,
+      friendshipStatus: row.friendship_status || 'none',
+      friendRequesterId: row.friend_requester_id ? Number(row.friend_requester_id) : null,
     });
   }),
 );

@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../theme/moco_colors.dart';
@@ -40,6 +41,19 @@ class MocoAvatar extends StatelessWidget {
         height: size,
         child: (imageUrl == null || imageUrl!.isEmpty)
             ? _Fallback(name: name, size: size)
+            : kIsWeb
+            // CachedNetworkImage does not paint signed Supabase URLs reliably
+            // on Flutter web; the <img> fallback always can (same as Live cards).
+            ? Image.network(
+                imageUrl!,
+                key: ValueKey(imageUrl),
+                fit: BoxFit.cover,
+                webHtmlElementStrategy: WebHtmlElementStrategy.fallback,
+                errorBuilder: (_, __, ___) => _Fallback(name: name, size: size),
+                loadingBuilder: (_, child, progress) => progress == null
+                    ? child
+                    : _Fallback(name: name, size: size),
+              )
             : CachedNetworkImage(
                 imageUrl: imageUrl!,
                 fit: BoxFit.cover,

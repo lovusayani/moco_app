@@ -10,13 +10,81 @@ const { asyncHandler } = require('../../middleware/error');
 const { authenticate } = require('../../middleware/auth');
 const { rateLimit } = require('../../middleware/rateLimit');
 const { forbidden, notFound, badRequest } = require('../../utils/errors');
-const { MESSAGE_TYPE, CHAT_MEDIA } = require('../../utils/constants');
+const { MESSAGE_TYPE, CHAT_MEDIA, listenerEligibleSql } = require('../../utils/constants');
 
 const router = express.Router();
 router.use(authenticate);
 
 /** Conversations store the pair in ascending id order, so callers must normalise. */
 const pairKey = (a, b) => (Number(a) < Number(b) ? [Number(a), Number(b)] : [Number(b), Number(a)]);
+
+/**
+ * A "creator" for chat purposes is an ELIGIBLE listener (approved KYC and
+ * enough photos — the same predicate discovery uses) on an active account.
+ * users.role is not enough: become-listener sets role = 'both' instantly,
+ * before any review.
+ */
+async function isEligibleCreator(userId) {
+  const { rows } = await query(
+    `SELECT 1 FROM listener_profiles lp
+       JOIN users u ON u.id = lp.user_id
+      WHERE lp.user_id = $1 AND ${listenerEligibleSql('lp')} AND u.status = 'active'`,
+    [userId],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Chat permission gate.
+ *
+ * A normal user may only initiate a conversation with an eligible creator if
+ * they have an accepted friendship. Eligible creators may chat with anyone.
+ * An existing conversation where the creator messaged first is allowed to
+ * continue: the normal user may reply in a thread the creator started.
+ */
+async function assertChatPermission(senderId, recipientId) {
+  // Eligible creators can message anyone
+  if (await isEligibleCreator(senderId)) return;
+
+  // If the recipient is not an eligible creator, no friendship required
+  // (user-to-user chat)
+  if (!(await isEligibleCreator(recipientId))) return;
+
+  // Normal user → creator: check for accepted friendship
+  const lo = Math.min(senderId, recipientId);
+  const hi = Math.max(senderId, recipientId);
+
+  // friend_requests comes from migration 018; a missing table is a deploy
+  // error and must surface, not silently read as "not friends".
+  const { rows: friendship } = await query(
+    `SELECT 1 FROM friend_requests
+      WHERE LEAST(requester_id, target_id) = $1
+        AND GREATEST(requester_id, target_id) = $2
+        AND status = 'accepted'
+      LIMIT 1`,
+    [lo, hi],
+  );
+
+  if (friendship[0]) return;
+
+  // Allow reply if there is an existing conversation the creator started
+  const [a, b] = pairKey(senderId, recipientId);
+  const { rows: conv } = await query(
+    `SELECT c.id FROM conversations c
+      WHERE c.user_a = $1 AND c.user_b = $2
+        AND EXISTS (
+          SELECT 1 FROM messages m
+           WHERE m.conversation_id = c.id AND m.sender_id = $3
+           LIMIT 1
+        )
+      LIMIT 1`,
+    [a, b, recipientId],
+  );
+
+  if (conv[0]) return;
+
+  throw forbidden('Become friends to chat with this creator');
+}
 
 async function assertNotBlocked(userId, otherId) {
   const { rows } = await query(
@@ -162,6 +230,7 @@ router.post(
     }
 
     await assertNotBlocked(req.user.id, otherId);
+    await assertChatPermission(Number(req.user.id), Number(otherId));
 
     const { rows: exists } = await query(`SELECT 1 FROM users WHERE id = $1 AND status = 'active'`, [
       otherId,

@@ -77,6 +77,7 @@ class PushService {
     'payout_paid' ||
     'payout_approved' ||
     'payout_rejected' => Routes.earningsLedger,
+    'friend_request' => Routes.friendRequests,
     _ => Routes.notifications,
   };
 

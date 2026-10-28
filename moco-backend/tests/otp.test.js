@@ -384,7 +384,7 @@ test('Resend: the email request carries the code, the sender and a bearer key', 
   await withProduction(async () => {
     env.email.provider = 'resend';
     env.email.resendApiKey = 're_test_key';
-    env.email.from = 'Moco <no-reply@lovcamx.online>';
+    env.email.from = 'Moco <no-reply@hotkolgal.fun>';
     const f = mockFetch(() => new Response('{"id":"x"}', { status: 200 }));
     try {
       const result = await emailIntegration.sendOtp('asha@example.com', '482913', 300);
@@ -392,7 +392,7 @@ test('Resend: the email request carries the code, the sender and a bearer key', 
       const [call] = f.calls;
       assert.equal(call.url, 'https://api.resend.com/emails');
       assert.equal(call.init.headers.Authorization, 'Bearer re_test_key');
-      assert.equal(call.body.from, 'Moco <no-reply@lovcamx.online>');
+      assert.equal(call.body.from, 'Moco <no-reply@hotkolgal.fun>');
       assert.deepEqual(call.body.to, ['asha@example.com']);
       assert.match(call.body.subject, /482913/);
       assert.match(call.body.html, /482913/);
@@ -407,7 +407,7 @@ test('Resend failure: generic 502, code discarded, cooldown lifted', async () =>
   await withProduction(async () => {
     env.email.provider = 'resend';
     env.email.resendApiKey = 're_test_key';
-    env.email.from = 'no-reply@lovcamx.online';
+    env.email.from = 'no-reply@hotkolgal.fun';
     const f = mockFetch(() => new Response('{"message":"domain not verified"}', { status: 403 }));
     try {
       const r = await sendEmail('asha@example.com');

@@ -1,4 +1,4 @@
-// Vercel "Build Command" for the moco-admin project (admin.lovcamx.online).
+// Vercel "Build Command" for the moco-admin project (admin.hotkolgal.fun).
 // Also runnable locally: `node admin-web/build.mjs`.
 //
 // The admin console stays where it is — moco-backend/public/admin, plain
@@ -9,7 +9,7 @@
 // The console source calls the API with a relative base (`const API = '/api'`),
 // which is right when it is served from the API's own origin in local
 // development. In production the API is its own origin,
-// https://api.lovcamx.online (the moco-api project), so the copy in dist/ gets
+// https://api.hotkolgal.fun (the moco-api project), so the copy in dist/ gets
 // that absolute base. The API allows this origin via CORS (CORS_ORIGINS on
 // moco-api), and vercel.json's CSP allows connecting to it.
 //
@@ -26,7 +26,7 @@ const out = join(here, 'dist');
 
 // Public: the production API (Vercel project moco-api). MOCO_API_ORIGIN
 // overrides it for a staging build.
-const API_ORIGIN = (process.env.MOCO_API_ORIGIN || 'https://api.lovcamx.online').replace(/\/$/, '');
+const API_ORIGIN = (process.env.MOCO_API_ORIGIN || 'https://api.hotkolgal.fun').replace(/\/$/, '');
 
 const fail = (msg) => {
   console.error(`\n[admin build] ERROR: ${msg}\n`);

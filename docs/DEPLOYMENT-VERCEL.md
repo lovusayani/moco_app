@@ -7,7 +7,7 @@ plus Agora, FCM, the SMS gateway and the payment providers.
 
 | | `moco-web` | `moco-admin` | `moco-api` |
 |---|---|---|---|
-| Domain | `lovcamx.online` (+ `www` → 308 to apex) | `admin.lovcamx.online` | `api.lovcamx.online` |
+| Domain | `hotkolgal.fun` (+ `www` → 308 to apex) | `admin.hotkolgal.fun` | `api.hotkolgal.fun` |
 | What | Flutter PWA | Admin console (static) | Node API, WebSockets, background jobs |
 | Root Directory | `mobile` | `admin-web` | `moco-backend` |
 | Framework Preset | Other | Other | Other |
@@ -27,11 +27,11 @@ production only. A feature-branch push deploys nothing.
 ## 1. Architecture
 
 ```
- browser ──▶ lovcamx.online        (moco-web, static PWA)  ─┐
- browser ──▶ admin.lovcamx.online  (moco-admin, static)    ─┤ HTTPS /api/* (CORS)
+ browser ──▶ hotkolgal.fun        (moco-web, static PWA)  ─┐
+ browser ──▶ admin.hotkolgal.fun  (moco-admin, static)    ─┤ HTTPS /api/* (CORS)
  Android ───────────────────────────────────────────────────┤ WSS  /socket.io/
                                                             ▼
-                         api.lovcamx.online  (moco-api, Vercel Functions, icn1)
+                         api.hotkolgal.fun  (moco-api, Vercel Functions, icn1)
                            api/index.mjs ── Express + Socket.IO (one http.Server)
                            api/queues/*  ── Vercel Queues consumers
                            api/cron/sweep ─ daily backstop (Vercel Cron)
@@ -65,7 +65,7 @@ second or two. These parts make that safe:
   the Flutter client already used only that transport.
 
 **CORS.** The three sites are separate origins, so the API allows exactly
-`CORS_ORIGINS` (`https://lovcamx.online,https://www.lovcamx.online,https://admin.lovcamx.online`).
+`CORS_ORIGINS` (`https://hotkolgal.fun,https://www.hotkolgal.fun,https://admin.hotkolgal.fun`).
 There is no `*` and no credentials. Auth is a bearer token in `Authorization`,
 never a cookie, so a cross-site request carries no session and CSRF does not
 apply.
@@ -125,8 +125,8 @@ machine and builds with:
 
 ```
 --dart-define=FLAVOR=production
---dart-define=API_BASE_URL=https://api.lovcamx.online/api
---dart-define=SOCKET_URL=https://api.lovcamx.online
+--dart-define=API_BASE_URL=https://api.hotkolgal.fun/api
+--dart-define=SOCKET_URL=https://api.hotkolgal.fun
 ```
 
 It fails if PWA files are missing, if `<base href="/">` is wrong, or if any
@@ -143,9 +143,9 @@ server secret's value is in the output. `vercel.json` behaviour:
 
 The console's source stays in `moco-backend/public/admin` (one copy).
 `build.mjs` copies it to `dist/` and replaces the single `const API = '/api'`
-with `https://api.lovcamx.online/api`. The headers match what helmet sent
+with `https://api.hotkolgal.fun/api`. The headers match what helmet sent
 before:
-- CSP with `connect-src 'self' https://api.lovcamx.online`, and images/media
+- CSP with `connect-src 'self' https://api.hotkolgal.fun`, and images/media
   allowed from `https://*.supabase.co` for signed KYC and post previews.
 - `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`, `no-referrer`
   and `noindex`.
@@ -198,18 +198,30 @@ the page).
 
 ---
 
-## 3. DNS (Cloudflare zone `lovcamx.online`)
+## 3. DNS (Cloudflare zone `hotkolgal.fun`)
 
-Use these exact records, which are Vercel's project-specific recommendations.
+Add all four names to their Vercel projects first (moco-web: `hotkolgal.fun`
+and `www.hotkolgal.fun`; moco-admin: `admin.hotkolgal.fun`; moco-api:
+`api.hotkolgal.fun`), then create the records Vercel shows on each project's
+**Settings → Domains** page.
 
-**As deployed (2026-10-04):** the records are **Proxied** (orange cloud), so
-browsers see Cloudflare's edge certificate. Cloudflare connects to Vercel over
-HTTPS using Vercel's own certificate for all four names (issued with
-`vercel certs issue …` once the proxied records were live; renewal also goes
-through the proxy over HTTP). Before that certificate existed, every HTTPS
-request failed with Cloudflare error **525**. If 525 ever returns, check
-`vercel certs ls` first. Switching the records to DNS only (grey cloud) is the
-simpler setup Vercel recommends.
+**Read the CNAME values fresh from Vercel.** The `*.vercel-dns-017.com`
+targets are issued per project *and* per domain, so values recorded for an
+earlier domain point at the wrong binding.
+
+**TLS:** with **DNS only** (grey cloud) Vercel issues and renews certificates
+itself — the simpler setup Vercel recommends. With **Proxied** (orange cloud)
+browsers see Cloudflare's edge certificate and Cloudflare connects to Vercel
+over HTTPS, so Vercel must already hold a certificate for every name: run
+`vercel certs issue hotkolgal.fun www.hotkolgal.fun admin.hotkolgal.fun
+api.hotkolgal.fun` once the records exist. Without it every HTTPS request fails
+with Cloudflare error **525** (this is what broke the first deploy on the
+previous domain). If 525 appears, check `vercel certs ls` first.
+
+**CORS:** set `CORS_ORIGINS` on moco-api to
+`https://hotkolgal.fun,https://www.hotkolgal.fun,https://admin.hotkolgal.fun`
+before switching traffic — it is the only thing that lets browsers on the new
+origins call the API, and nothing in the repo sets it.
 
 Records:
 
@@ -217,9 +229,12 @@ Records:
 |---|---|---|---|
 | `@` | A | `216.198.79.1` | moco-web |
 | `@` | A | `64.29.17.1` | moco-web |
-| `www` | CNAME | `dc208919096474bc.vercel-dns-017.com` | moco-web (redirects to apex) |
-| `admin` | CNAME | `1149b9429c0403d6.vercel-dns-017.com` | moco-admin |
-| `api` | CNAME | `9f296ff4478d5419.vercel-dns-017.com` | moco-api |
+| `www` | CNAME | *(from moco-web → Domains)* | moco-web (redirects to apex) |
+| `admin` | CNAME | *(from moco-admin → Domains)* | moco-admin |
+| `api` | CNAME | *(from moco-api → Domains)* | moco-api |
+
+The two apex `A` records are Vercel's shared anycast addresses — confirm them
+on the moco-web Domains page too.
 
 If the zone has a CAA record, it must allow `letsencrypt.org`. Vercel serves
 HTTP → HTTPS redirects and HSTS automatically.
@@ -232,7 +247,7 @@ that setting, each web build loads `flutter_bootstrap.js` and `main.dart.js`
 under `?v=<commit>` URLs (served `immutable`), so a deploy always reaches
 returning browsers and the service worker.
 
-**Email (Resend):** `resend._domainkey` (DKIM, signs as `lovcamx.online`),
+**Email (Resend):** `resend._domainkey` (DKIM, signs as `hotkolgal.fun`),
 `send` (bounce domain: SPF and MX) and `_dmarc`. DMARC passes through DKIM
 alignment. Start DMARC at `p=none` with aggregate reports (Cloudflare → Email
 → DMARC Management adds an `rua` address); move to `quarantine` only after
@@ -313,6 +328,6 @@ key): moco-api (Node), moco-web (Flutter; the same DSN in the Android build via
 moco-api reports error-level log lines (unhandled route errors, Redis and
 Postgres errors, failed pushes and OTP emails, realtime errors), failed queue
 jobs and crashes, with only an allow-list of fields — never bodies, headers,
-tokens, codes, emails or phone numbers. Test events: `https://lovcamx.online/?moco_monitoring_test=1`
-and `https://admin.lovcamx.online/?monitoring-test`. Vercel runtime logs keep
+tokens, codes, emails or phone numbers. Test events: `https://hotkolgal.fun/?moco_monitoring_test=1`
+and `https://admin.hotkolgal.fun/?monitoring-test`. Vercel runtime logs keep
 everything as before.

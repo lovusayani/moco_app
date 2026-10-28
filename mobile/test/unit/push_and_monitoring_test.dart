@@ -89,7 +89,7 @@ void main() {
       final crumb = Breadcrumb(
         category: 'http',
         data: {
-          'url': 'https://api.lovcamx.online/api/auth/otp/verify?code=123456',
+          'url': 'https://api.hotkolgal.fun/api/auth/otp/verify?code=123456',
           'method': 'POST',
           'body': '{"code":"123456"}',
         },
@@ -97,7 +97,7 @@ void main() {
       final clean = Monitoring.scrubBreadcrumb(crumb, Hint())!;
       expect(
         clean.data!['url'],
-        'https://api.lovcamx.online/api/auth/otp/verify',
+        'https://api.hotkolgal.fun/api/auth/otp/verify',
       );
       expect(clean.data!.containsKey('body'), isFalse);
       expect(clean.data!['method'], 'POST');
@@ -106,7 +106,7 @@ void main() {
     test('events keep only the method and path of a request', () async {
       final event = SentryEvent(
         request: SentryRequest(
-          url: 'https://lovcamx.online/login?token=abc#x',
+          url: 'https://hotkolgal.fun/login?token=abc#x',
           method: 'GET',
           headers: {'Authorization': 'Bearer secret'},
           cookies: 'session=secret',
@@ -114,7 +114,7 @@ void main() {
         ),
       );
       final clean = (await Monitoring.scrubEvent(event, Hint()))!;
-      expect(clean.request!.url, 'https://lovcamx.online/login');
+      expect(clean.request!.url, 'https://hotkolgal.fun/login');
       expect(clean.request!.method, 'GET');
       expect(clean.request!.headers, isEmpty);
       expect(clean.request!.cookies, isNull);

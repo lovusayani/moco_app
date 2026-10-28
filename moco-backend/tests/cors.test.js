@@ -2,13 +2,13 @@
 
 /**
  * CORS and WebSocket origin policy for the separate-origin production layout
- * (lovcamx.online / admin.lovcamx.online → api.lovcamx.online).
+ * (hotkolgal.fun / admin.hotkolgal.fun → api.hotkolgal.fun).
  *
  * Needs no database: /health and preflights never touch Postgres, and a
  * socket refused by origin is refused before anything reaches Redis.
  */
 
-process.env.CORS_ORIGINS = 'https://lovcamx.online,https://admin.lovcamx.online';
+process.env.CORS_ORIGINS = 'https://hotkolgal.fun,https://admin.hotkolgal.fun';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -37,17 +37,17 @@ test.after(async () => {
 });
 
 test('allowed origins are the configured list; nothing else, never "*"', () => {
-  assert.equal(isAllowedOrigin('https://lovcamx.online'), true);
-  assert.equal(isAllowedOrigin('https://admin.lovcamx.online'), true);
+  assert.equal(isAllowedOrigin('https://hotkolgal.fun'), true);
+  assert.equal(isAllowedOrigin('https://admin.hotkolgal.fun'), true);
   assert.equal(isAllowedOrigin('https://evil.example'), false);
-  assert.equal(isAllowedOrigin('https://lovcamx.online.evil.example'), false);
+  assert.equal(isAllowedOrigin('https://hotkolgal.fun.evil.example'), false);
   assert.equal(isAllowedOrigin(undefined), false);
 });
 
 test('an allowed origin gets CORS headers for that origin only', async () => {
-  const res = await fetch(`${base}/health`, { headers: { Origin: 'https://lovcamx.online' } });
+  const res = await fetch(`${base}/health`, { headers: { Origin: 'https://hotkolgal.fun' } });
   assert.equal(res.status, 200);
-  assert.equal(res.headers.get('access-control-allow-origin'), 'https://lovcamx.online');
+  assert.equal(res.headers.get('access-control-allow-origin'), 'https://hotkolgal.fun');
   assert.equal(res.headers.get('access-control-allow-credentials'), null);
   assert.match(res.headers.get('vary'), /Origin/);
 });
@@ -67,13 +67,13 @@ test('preflight from an allowed origin allows the Authorization header', async (
   const res = await fetch(`${base}/api/users/me`, {
     method: 'OPTIONS',
     headers: {
-      Origin: 'https://admin.lovcamx.online',
+      Origin: 'https://admin.hotkolgal.fun',
       'Access-Control-Request-Method': 'PATCH',
       'Access-Control-Request-Headers': 'authorization, content-type',
     },
   });
   assert.equal(res.status, 204);
-  assert.equal(res.headers.get('access-control-allow-origin'), 'https://admin.lovcamx.online');
+  assert.equal(res.headers.get('access-control-allow-origin'), 'https://admin.hotkolgal.fun');
   assert.match(res.headers.get('access-control-allow-methods'), /PATCH/);
   assert.match(res.headers.get('access-control-allow-headers'), /authorization/i);
 });
@@ -88,7 +88,7 @@ test('preflight from an unknown origin is refused', async () => {
 });
 
 test('responses stay readable cross-origin (CORP is not same-origin)', async () => {
-  const res = await fetch(`${base}/health`, { headers: { Origin: 'https://lovcamx.online' } });
+  const res = await fetch(`${base}/health`, { headers: { Origin: 'https://hotkolgal.fun' } });
   assert.equal(res.headers.get('cross-origin-resource-policy'), 'cross-origin');
 });
 
@@ -106,7 +106,7 @@ function openSocket(headers) {
 }
 
 test('websocket from an allowed browser origin is accepted', async () => {
-  assert.equal(await openSocket({ Origin: 'https://lovcamx.online' }), 'open');
+  assert.equal(await openSocket({ Origin: 'https://hotkolgal.fun' }), 'open');
 });
 
 test('websocket without an Origin (Android app) is accepted', async () => {

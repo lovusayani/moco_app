@@ -117,10 +117,10 @@ test('a failing queue job is reported with its topic and still fails', async () 
 
 test('request data is stripped from events', () => {
   const event = monitoring.scrubEvent({
-    request: { url: 'https://api.lovcamx.online/api/x?token=abc', method: 'POST', data: '{"code":"123456"}', headers: { authorization: 'Bearer x' }, cookies: 'a=b' },
+    request: { url: 'https://api.hotkolgal.fun/api/x?token=abc', method: 'POST', data: '{"code":"123456"}', headers: { authorization: 'Bearer x' }, cookies: 'a=b' },
     user: { ip_address: '1.2.3.4' },
   });
-  assert.deepEqual(event.request, { method: 'POST', url: 'https://api.lovcamx.online/api/x' });
+  assert.deepEqual(event.request, { method: 'POST', url: 'https://api.hotkolgal.fun/api/x' });
   assert.equal(event.user, undefined);
 });
 

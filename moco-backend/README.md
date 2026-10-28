@@ -150,7 +150,7 @@ nothing on its own — every request it makes is re-checked server-side against
 the allow-list, so a non-admin who loads it simply gets refused.
 
 In production the console is its own Vercel project (`moco-admin`,
-https://admin.lovcamx.online, built by `../admin-web/build.mjs` from these same
+https://admin.hotkolgal.fun, built by `../admin-web/build.mjs` from these same
 files) and the API does not serve `/admin` at all.
 
 ### Tests
@@ -249,7 +249,7 @@ Redis pub/sub channel that every API instance forwards to the sockets it holds.
 ## Deploying
 
 Production is the Vercel project `moco-api` (root `moco-backend`,
-https://api.lovcamx.online): `api/index.mjs` serves Express + Socket.IO
+https://api.hotkolgal.fun): `api/index.mjs` serves Express + Socket.IO
 (WebSockets), `api/queues/*.mjs` are the queue consumers, `api/cron/sweep.mjs`
 is a daily backstop, all configured in [`vercel.json`](vercel.json). Postgres is
 Supabase (session pooler), Redis is Upstash. Every push to `main` deploys it.

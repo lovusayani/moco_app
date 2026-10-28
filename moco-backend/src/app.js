@@ -60,7 +60,7 @@ function createApp() {
   /**
    * Local development only: the admin console's static files at /admin, on
    * the API's own origin. In production the console is its own Vercel project
-   * (admin.lovcamx.online, built from these same files by admin-web/build.mjs)
+   * (admin.hotkolgal.fun, built from these same files by admin-web/build.mjs)
    * and calls this API cross-origin, so the API serves no UI there. Every
    * request the console makes is authenticated and re-checked against the
    * admin allow-list server-side either way.

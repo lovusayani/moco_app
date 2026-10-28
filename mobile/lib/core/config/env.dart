@@ -32,7 +32,7 @@ class Env {
   ///
   /// Web default: the page's own origin (local `tool/serve_web.mjs` proxies
   /// `/api` and `/socket.io` to a local backend). The production web build
-  /// passes `API_BASE_URL=https://api.lovcamx.online/api` (see
+  /// passes `API_BASE_URL=https://api.hotkolgal.fun/api` (see
   /// `tool/vercel/build_web.mjs`), and the API allows that origin via CORS.
   /// A `--dart-define` wins on either platform.
   static String get apiBaseUrl => _apiBaseUrlDefine.isNotEmpty
@@ -63,7 +63,7 @@ class Env {
 
   static const String _webAppUrlDefine = String.fromEnvironment(
     'WEB_APP_URL',
-    defaultValue: 'https://lovcamx.online',
+    defaultValue: 'https://hotkolgal.fun',
   );
 
   /// Needed only once calling ships (Phase 2). Empty is valid until then.

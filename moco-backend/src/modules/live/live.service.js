@@ -312,7 +312,7 @@ const UNKNOWN_COUNTRIES = new Set(['', 'xx', 't1', 'a1', 'a2', 'o1']);
 
 /**
  * The viewer's location and languages, from the edge's geolocation headers
- * (Cloudflare first — api.lovcamx.online is proxied — then Vercel) and the
+ * (Cloudflare first — api.hotkolgal.fun is proxied — then Vercel) and the
  * Accept-Language header. Unknown values stay null; list() then fails closed.
  */
 function viewerFromRequest(req) {

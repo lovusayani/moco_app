@@ -9,10 +9,10 @@ const stripcash = require('../../integrations/stripcash');
  * GET /api/live/player-frame — the page that hosts the official Stripchat
  * player, embedded by the web app in an iframe.
  *
- * Why a page on the API's origin (api.lovcamx.online) and not one inside the
+ * Why a page on the API's origin (api.hotkolgal.fun) and not one inside the
  * web app: the provider's script then runs on an origin that holds nothing —
  * it cannot read the web app's storage, session token or cookies
- * (lovcamx.online is a different origin) — while still having a real origin,
+ * (hotkolgal.fun is a different origin) — while still having a real origin,
  * which the player needs to stream (in an opaque-origin sandbox it mounts but
  * never fetches the stream).
  *

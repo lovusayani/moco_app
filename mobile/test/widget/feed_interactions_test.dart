@@ -432,7 +432,7 @@ void main() {
 
       await tester.tap(find.byKey(const Key('feed_share_button')));
       await settle(tester);
-      expect(copied, 'https://lovcamx.online/feed?post=1');
+      expect(copied, 'https://hotkolgal.fun/feed?post=1');
       expect(find.text('Link copied'), findsOneWidget);
       verify(() => api.recordShare(1, method: 'copy')).called(1);
       expect(

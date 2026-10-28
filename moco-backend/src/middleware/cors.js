@@ -5,8 +5,8 @@ const env = require('../config/env');
 /**
  * CORS for the browser clients.
  *
- * Production has three origins: the web app (lovcamx.online, www), the admin
- * console (admin.lovcamx.online) and this API (api.lovcamx.online). Only the
+ * Production has three origins: the web app (hotkolgal.fun, www), the admin
+ * console (admin.hotkolgal.fun) and this API (api.hotkolgal.fun). Only the
  * allow-listed origins (CORS_ORIGINS) get CORS headers; everyone else's
  * browser blocks the response. There is no "*".
  *

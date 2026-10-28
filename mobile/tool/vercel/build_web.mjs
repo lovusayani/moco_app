@@ -1,8 +1,8 @@
-// Vercel "Build Command" for the moco-web project (lovcamx.online).
+// Vercel "Build Command" for the moco-web project (hotkolgal.fun).
 // Also runnable locally: `node tool/vercel/build_web.mjs` (uses `flutter` on
 // PATH).
 //
-// The web app talks to the API on its own origin, https://api.lovcamx.online
+// The web app talks to the API on its own origin, https://api.hotkolgal.fun
 // (the moco-api Vercel project): REST at /api and Socket.IO at the root. Both
 // are public addresses baked into the bundle with --dart-define. The API
 // allows this site's origin via CORS (CORS_ORIGINS on moco-api).
@@ -30,7 +30,7 @@ const outDir = join(appDir, 'build', 'web');
 const onVercel = process.env.VERCEL === '1';
 
 // Public: the production API (Vercel project moco-api).
-const API_ORIGIN = 'https://api.lovcamx.online';
+const API_ORIGIN = 'https://api.hotkolgal.fun';
 
 const fail = (msg) => {
   console.error(`\n[build_web] ERROR: ${msg}\n`);
@@ -48,7 +48,7 @@ function origin(name) {
   } catch {
     fail(`${name}="${raw}" is not a URL.`);
   }
-  if (url.pathname !== '/' || url.search || url.hash) fail(`${name} must be an origin only (no path), e.g. https://api.lovcamx.online`);
+  if (url.pathname !== '/' || url.search || url.hash) fail(`${name} must be an origin only (no path), e.g. https://api.hotkolgal.fun`);
   if (onVercel && url.protocol !== 'https:') fail(`${name} must use https:// in a Vercel build.`);
   return url.origin;
 }

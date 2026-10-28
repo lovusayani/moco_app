@@ -1,5 +1,5 @@
 // Vercel Function: the whole API (Express + Socket.IO) behind
-// https://api.lovcamx.online. vercel.json rewrites every path that is not a
+// https://api.hotkolgal.fun. vercel.json rewrites every path that is not a
 // file or another function here; Express sees the original URL.
 //
 // Exporting the http.Server (not just the Express app) is what lets Vercel

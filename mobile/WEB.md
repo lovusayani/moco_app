@@ -20,7 +20,7 @@ reports. Pass `--no-wasm-dry-run` to silence that warning.
 `API_BASE_URL` / `SOCKET_URL` defines are optional on web: by default the app
 talks to **its own origin** (`https://<host>/api`, Socket.IO on `<host>`), which
 is what `tool/serve_web.mjs` provides locally. The production build sets both to
-`https://api.lovcamx.online` (see below).
+`https://api.hotkolgal.fun` (see below).
 
 ## Run locally
 
@@ -43,12 +43,12 @@ Outside production the API allows any `localhost` origin via CORS.
 
 ## Deploy
 
-**Production (lovcamx.online) is on Vercel.** See
+**Production (hotkolgal.fun) is on Vercel.** See
 [`docs/DEPLOYMENT-VERCEL.md`](../docs/DEPLOYMENT-VERCEL.md) and
 [`vercel.json`](vercel.json). The build runs `tool/vercel/build_web.mjs`.
 The site is static; the app calls the API project on its own origin,
-`https://api.lovcamx.online` (REST at `/api`, Socket.IO WebSocket at the root),
-which allows `https://lovcamx.online` via CORS.
+`https://api.hotkolgal.fun` (REST at `/api`, Socket.IO WebSocket at the root),
+which allows `https://hotkolgal.fun` via CORS.
 
 Requirements:
 
@@ -110,7 +110,7 @@ drag-scroll (snap feed, carousels).
 | Uploads (chat photo, feed media) | Works | Bytes go browser → Supabase signed upload URL directly (Supabase allows cross-origin), exactly as on Android. |
 | `video_player` | Works | HTML `<video>`. Feed videos start muted, which is what browser autoplay policies require. |
 | `cached_network_image` | Works | Browser HTTP cache; no on-disk cache manager. |
-| `socket_io_client` | Works | WebSocket transport to `wss://api.lovcamx.online` (origin allow-listed on the API). |
+| `socket_io_client` | Works | WebSocket transport to `wss://api.hotkolgal.fun` (origin allow-listed on the API). |
 | `google_fonts` | Works | Inter is fetched from Google Fonts at runtime (not available offline on first launch). |
 | `SystemChrome` status/nav bar styling | No-op | Status bar colour comes from `theme_color` in the manifest/`index.html`. |
 | Push notifications | Not implemented | The app has no push client on any platform yet (`UsersApi.registerPushToken` exists but nothing calls it). Web Push would need its own service-worker work. |

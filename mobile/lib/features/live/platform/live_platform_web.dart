@@ -22,7 +22,7 @@ bool openLiveDestination(String url) {
 /// The official Stripchat player for [modelName].
 ///
 /// The player runs in an iframe whose page is served by the API
-/// (`GET /api/live/player-frame`, on api.lovcamx.online in production — a
+/// (`GET /api/live/player-frame`, on api.hotkolgal.fun in production — a
 /// different origin from the web app, so the provider's code cannot reach
 /// Moco's storage or session). That page loads the provider script once and
 /// creates `new StripchatPlayer({...}).mount(...)`; this widget only tells it

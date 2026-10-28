@@ -807,12 +807,12 @@ test('in production only the allow-listed site origins may frame the player', as
   const savedProd = env.isProduction;
   const savedOrigins = env.cors.origins;
   env.isProduction = true;
-  env.cors.origins = ['https://lovcamx.online', 'https://admin.lovcamx.online'];
+  env.cors.origins = ['https://hotkolgal.fun', 'https://admin.hotkolgal.fun'];
   try {
     await withPlayerScript(async () => {
       const res = await realFetch(`${baseUrl}/api/live/player-frame`);
       const csp = res.headers.get('content-security-policy');
-      assert.match(csp, /frame-ancestors https:\/\/lovcamx\.online https:\/\/admin\.lovcamx\.online(;|$)/);
+      assert.match(csp, /frame-ancestors https:\/\/hotkolgal\.fun https:\/\/admin\.hotkolgal\.fun(;|$)/);
       assert.equal(csp.includes('localhost'), false);
       const html = await res.text();
       assert.ok(html.includes('"localhost":false'));
